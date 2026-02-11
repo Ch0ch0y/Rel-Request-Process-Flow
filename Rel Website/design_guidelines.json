@@ -1,0 +1,125 @@
+{
+  "design_identity": {
+    "persona": "E1 - The Anti-AI Designer",
+    "theme": "Tactical Industrial",
+    "core_principles": [
+      "Fusion over Imitation",
+      "Emotion First: Trust & Precision",
+      "Content is King: Data Density",
+      "Contrast: High Utility"
+    ],
+    "anti_patterns": [
+      "Generic purple/teal gradients",
+      "Center-aligned everything",
+      "Low contrast text",
+      "Excessive whitespace in data tables"
+    ]
+  },
+  "typography": {
+    "font_family": {
+      "headings": "Manrope, sans-serif",
+      "body": "Inter, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "scale": {
+      "h1": "text-4xl font-bold tracking-tight text-slate-900",
+      "h2": "text-2xl font-bold tracking-tight text-slate-800",
+      "h3": "text-xl font-semibold text-slate-800",
+      "body": "text-sm text-slate-600 leading-relaxed",
+      "label": "text-xs font-medium uppercase tracking-wider text-slate-500"
+    }
+  },
+  "colors": {
+    "palette": {
+      "background": "#F8FAFC",
+      "surface": "#FFFFFF",
+      "sidebar": "#0F172A",
+      "border": "#E2E8F0",
+      "primary": "#2563EB",
+      "primary_foreground": "#FFFFFF",
+      "success": "#10B981",
+      "warning": "#F59E0B",
+      "error": "#EF4444",
+      "neutral": "#64748B"
+    },
+    "usage": {
+      "sidebar_bg": "bg-slate-950",
+      "sidebar_text": "text-slate-400",
+      "sidebar_active": "bg-blue-600 text-white",
+      "card_bg": "bg-white border border-slate-200 shadow-sm",
+      "status_completed": "bg-emerald-100 text-emerald-700 border-emerald-200",
+      "status_active": "bg-blue-100 text-blue-700 border-blue-200 animate-pulse",
+      "status_pending": "bg-slate-100 text-slate-500 border-slate-200",
+      "status_failed": "bg-red-100 text-red-700 border-red-200"
+    }
+  },
+  "layout_strategies": {
+    "dashboard": {
+      "type": "Bento Grid Mode B (High Density)",
+      "grid_cols": "grid-cols-1 md:grid-cols-4 gap-4",
+      "cards": [
+        "Summary Metrics (col-span-1)",
+        "Main Chart (col-span-2 row-span-2)",
+        "Recent Activity List (col-span-1 row-span-2)"
+      ]
+    },
+    "request_details": {
+      "type": "Master-Detail",
+      "structure": "Sidebar (Process Steps) + Main Content (Step Details)",
+      "mobile_strategy": "Vertical Timeline Accordion"
+    },
+    "spacing": {
+      "container": "p-6 md:p-8 max-w-7xl mx-auto",
+      "card_padding": "p-6",
+      "section_gap": "gap-8"
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-slate-900 hover:bg-slate-800 text-white rounded-md px-4 py-2 font-medium transition-all shadow-sm hover:shadow-md",
+      "secondary": "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 rounded-md px-4 py-2 font-medium transition-all",
+      "ghost": "text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md px-3 py-1.5 transition-all"
+    },
+    "inputs": {
+      "base": "border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 rounded-md bg-slate-50 focus:bg-white transition-all"
+    },
+    "cards": {
+      "style": "bg-white border border-slate-200 rounded-lg shadow-[0_2px_4px_rgba(0,0,0,0.02)] hover:shadow-[0_4px_8px_rgba(0,0,0,0.04)] transition-shadow duration-300"
+    },
+    "badges": {
+      "style": "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border"
+    }
+  },
+  "assets": {
+    "images": {
+      "login_bg": "https://images.unsplash.com/photo-1693932038683-7c35401f5307?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwxfHxtaWNyb2NoaXAlMjBtYW51ZmFjdHVyaW5nJTIwbGFiJTIwZXF1aXBtZW50fGVufDB8fHx8MTc3MDcwNzUwMHww&ixlib=rb-4.1.0&q=85",
+      "dashboard_texture": "https://images.unsplash.com/photo-1766596796538-75b67ff9109c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzl8MHwxfHNlYXJjaHwzfHxlbGVjdHJvbmljJTIwY2lyY3VpdCUyMGJvYXJkJTIwbWFjcm98ZW58MHx8fHwxNzcwNzA3NTAxfDA&ixlib=rb-4.1.0&q=85",
+      "avatars": [
+        "https://images.unsplash.com/photo-1769636929261-e913ed023c83?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTF8MHwxfHNlYXJjaHwyfHxtYW4lMjBwb3J0cmFpdCUyMGNvcnBvcmF0ZSUyMGhlYWRzaG90fGVufDB8fHx8MTc3MDcwNzUwOXww&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1762522926984-e721bff0d6c6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODF8MHwxfHNlYXJjaHwyfHx3b21hbiUyMHBvcnRyYWl0JTIwY29ycG9yYXRlJTIwaGVhZHNob3R8ZW58MHx8fHwxNzcwNzA3NTEwfDA&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1758599543120-4e462429a4d7?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODF8MHwxfHNlYXJjaHwxfHx3b21hbiUyMHBvcnRyYWl0JTIwY29ycG9yYXRlJTIwaGVhZHNob3R8ZW58MHx8fHwxNzcwNzA3NTEwfDA&ixlib=rb-4.1.0&q=85"
+      ]
+    },
+    "icons": {
+      "library": "lucide-react",
+      "required": ["Activity", "Box", "CheckCircle", "AlertTriangle", "Clock", "Settings", "Users", "FileText", "Search", "Filter", "LogOut", "ChevronRight", "Menu", "X"]
+    }
+  },
+  "motion_guidelines": {
+    "transitions": "transition-all duration-200 ease-in-out",
+    "hover_effects": "hover:translate-y-[-1px] hover:shadow-md",
+    "loading": "animate-pulse bg-slate-200",
+    "page_enter": "animate-in fade-in slide-in-from-bottom-4 duration-500"
+  },
+  "specific_instructions": [
+    "Use 'Manrope' from Google Fonts for all headings. Import it in index.css.",
+    "Implement a 'Sidebar' component that is fixed on the left for desktop, and drawer for mobile.",
+    "Create a 'ProcessTimeline' component that visualizes the 14 steps linearly. Use horizontal scroll for desktop if needed, or a vertical list for mobile.",
+    "For the 'Request Details' page, use a split view: Step List (Left) -> Step Details Form (Right).",
+    "Ensure the 'Bake' and 'Reflow' steps visually stand out as 'Processing' steps (maybe an animated icon).",
+    "Use 'sonner' for all toast notifications (Success, Error, Updates).",
+    "All interactive elements MUST have data-testid attributes.",
+    "Do NOT use gradients for the main background. Keep it clean 'slate-50'.",
+    "Dashboard charts should use 'recharts' with the custom color palette provided."
+  ]
+}
