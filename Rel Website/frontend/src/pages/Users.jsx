@@ -714,8 +714,13 @@ export default function Users() {
           ) : (
             <div className="overflow-x-auto">
             <table className="w-full">
+              <thead>
+                <tr>
+                  <th className="text-left px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Technician</th>
+                  <th className="text-left px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Employee ID</th>
+                  <th className="text-left px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Position</th>
                   <th className="text-left px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Session Started</th>
-                  <th className="text-left px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Last Seen</th>
+                  <th className="text-left px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
