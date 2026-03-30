@@ -4,19 +4,21 @@
 
 set -o errexit  # Exit on error
 
-# Limit Node.js memory to avoid OOM on Render free tier (512 MB)
-export NODE_OPTIONS="--max-old-space-size=400"
-
 echo "=== Installing backend dependencies ==="
 pip install --upgrade pip
 pip install -r backend/requirements.txt
 
 echo "=== Installing frontend dependencies ==="
 cd frontend
-npm install --production=false
+
+# Remove any cached Windows-specific esbuild binaries
+rm -rf node_modules/.cache
+rm -rf node_modules/@esbuild
+
+npm install --force
 
 echo "=== Building frontend ==="
-npm run build
+NODE_OPTIONS="--max-old-space-size=450" npx vite build
 cd ..
 
 echo "=== Build complete ==="
