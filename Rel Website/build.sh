@@ -4,13 +4,16 @@
 
 set -o errexit  # Exit on error
 
+# Limit Node.js memory to avoid OOM on Render free tier (512 MB)
+export NODE_OPTIONS="--max-old-space-size=400"
+
 echo "=== Installing backend dependencies ==="
 pip install --upgrade pip
 pip install -r backend/requirements.txt
 
 echo "=== Installing frontend dependencies ==="
 cd frontend
-npm install
+npm install --production=false
 
 echo "=== Building frontend ==="
 npm run build
