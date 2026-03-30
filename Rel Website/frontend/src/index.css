@@ -298,6 +298,57 @@ code, pre, .font-mono {
   to   { opacity: 1; transform: scale(1); }
 }
 
+/* ─── Mobile Responsive Utilities ─────────────────── */
+
+/* Responsive typography */
+@media (max-width: 640px) {
+  html {
+    font-size: 15px;
+  }
+
+  /* Larger touch targets */
+  button, a, [role="button"] {
+    min-height: 36px;
+  }
+
+  /* Prevent horizontal overflow on mobile */
+  .p-6 {
+    padding: 1rem !important;
+  }
+  .px-6 {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+  }
+
+  /* Make tables scrollable on mobile */
+  table {
+    font-size: 0.8125rem;
+  }
+
+  /* Ensure modals don't overflow viewport */
+  [class*="max-w-2xl"],
+  [class*="max-w-3xl"],
+  [class*="max-w-4xl"] {
+    max-width: calc(100vw - 1rem) !important;
+  }
+}
+
+/* Make stat card values smaller on very small screens */
+@media (max-width: 380px) {
+  html {
+    font-size: 14px;
+  }
+}
+
+/* Improve touch scrolling */
+@layer utilities {
+  .scrollable-x {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+}
+
 /* ─── Scroll Reveal Utility ──────────────────────── */
 .scroll-reveal {
   opacity: 0;

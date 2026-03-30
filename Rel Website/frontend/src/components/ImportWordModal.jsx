@@ -178,7 +178,7 @@ export default function ImportWordModal({ open, onClose, onImported }) {
           {step === STEPS.RESULTS && result && (
             <div className="space-y-4">
               {/* Summary bar */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="text-center p-3 bg-slate-50 rounded-lg border border-slate-100">
                   <p className="text-2xl font-bold text-slate-900">{result.total_files}</p>
                   <p className="text-xs text-slate-500 mt-0.5">Total Files</p>

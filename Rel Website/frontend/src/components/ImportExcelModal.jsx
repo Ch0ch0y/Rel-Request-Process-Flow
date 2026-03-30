@@ -211,7 +211,7 @@ export default function ImportExcelModal({ open, onClose, onImported }) {
           {step === STEPS.RESULTS && result && (
             <div className="space-y-4">
               {/* Summary */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="bg-slate-50 rounded-lg p-3 text-center">
                   <p className="text-2xl font-bold text-slate-800">{result.total_files}</p>
                   <p className="text-xs text-slate-500">Files</p>

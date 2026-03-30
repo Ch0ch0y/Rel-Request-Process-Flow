@@ -247,7 +247,7 @@ function CreateRequestModal({ open, onClose, onCreated }) {
               <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wider mb-1.5 flex items-center gap-1">
                 <LayoutList className="w-3 h-3" /> Select Process
               </p>
-              <div className="grid grid-cols-4 gap-1.5">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                 {presets.map(preset => {
                   const active = selectedPresetId === preset.id;
                   return (

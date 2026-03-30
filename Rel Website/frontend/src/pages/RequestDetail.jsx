@@ -1598,7 +1598,7 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
                   <div className="bg-slate-50 px-3 py-1.5 border-b border-slate-200">
                     <span className="text-xs font-bold text-slate-600">Samples {rangeLabel}</span>
                   </div>
-                  <div className="grid grid-cols-4 divide-x divide-slate-200">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-slate-200">
                     {SAT_CATEGORIES.slice(groupStart, groupStart + 3).map(({ key, label, optional }) => {
                       const catImgs = satImages[key] || [];
                       const isUploading = imageUploading === key;
@@ -1715,7 +1715,7 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
                     <div className="bg-slate-50 px-3 py-1.5 border-b border-slate-200">
                       <span className="text-xs font-bold text-slate-600">Samples {rangeLabel}</span>
                     </div>
-                    <div className="grid grid-cols-4 divide-x divide-slate-200">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-slate-200">
                       {group.map(({ key, label, optional }) => {
                         const catImgs = satImages[key] || [];
                         return (
@@ -3521,6 +3521,7 @@ export default function RequestDetail() {
                       </span>
                     </div>
 
+                    <div className="overflow-x-auto">
                     <table className="min-w-full text-xs">
                       <thead>
                         <tr className="bg-slate-50 border-b border-slate-200">
@@ -3756,6 +3757,7 @@ export default function RequestDetail() {
                         )}
                       </tbody>
                     </table>
+                    </div>
                   </div>
                 );
               })}

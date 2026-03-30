@@ -248,7 +248,7 @@ export default function LoadingUnloading() {
 
             {/* Notification dropdown */}
             {showNotifPanel && (
-              <div className="absolute right-0 top-full mt-2 w-96 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 z-50 overflow-hidden">
+              <div className="absolute right-0 top-full mt-2 w-[calc(100vw-2rem)] sm:w-96 max-w-sm bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 z-50 overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
                   <p className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
                     <BellRing className="w-4 h-4 text-amber-500" />
@@ -416,7 +416,7 @@ export default function LoadingUnloading() {
                   onChange={e => setMachineSearch(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && loadHistory()}
                   placeholder="Search by machine…"
-                  className="pl-7 pr-7 py-1.5 border border-slate-200 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-xs text-slate-700 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-blue-500 w-52"
+                  className="pl-7 pr-7 py-1.5 border border-slate-200 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-xs text-slate-700 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-blue-500 w-full sm:w-52"
                 />
                 {machineSearch && (
                   <button onClick={() => { setMachineSearch(''); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
@@ -441,6 +441,7 @@ export default function LoadingUnloading() {
                 <p className="text-sm font-medium">No history records found</p>
               </div>
             ) : (
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
@@ -491,6 +492,7 @@ export default function LoadingUnloading() {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
           {!historyLoading && historyRows.length > 0 && (
@@ -542,7 +544,7 @@ export default function LoadingUnloading() {
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Search request, device…"
-                className="pl-7 pr-7 py-1.5 border border-slate-200 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-xs text-slate-700 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-blue-500 w-52"
+                className="pl-7 pr-7 py-1.5 border border-slate-200 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-700 text-xs text-slate-700 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-blue-500 w-full sm:w-52"
               />
               {search && (
                 <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
@@ -576,6 +578,7 @@ export default function LoadingUnloading() {
               )}
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
@@ -673,6 +676,7 @@ export default function LoadingUnloading() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
 

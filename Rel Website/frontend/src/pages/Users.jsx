@@ -712,12 +712,8 @@ export default function Users() {
           {activeTechnicians.length === 0 ? (
             <p className="text-center py-10 text-slate-400">No technicians are currently active.</p>
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full">
-              <thead>
-                <tr className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
-                  <th className="text-left px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Employee</th>
-                  <th className="text-left px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">ID</th>
-                  <th className="text-left px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Position</th>
                   <th className="text-left px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Session Started</th>
                   <th className="text-left px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Last Seen</th>
                 </tr>
@@ -752,6 +748,7 @@ export default function Users() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}

@@ -213,7 +213,7 @@ function SystemHealthCard() {
           </ResponsiveContainer>
         )}
 
-        <div className="grid grid-cols-3 gap-4 mt-5 pt-4 border-t border-slate-800">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-5 pt-4 border-t border-slate-800">
           <div className="text-center">
             <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-1">Avg Response</p>
             <p className="text-2xl font-bold text-cyan-400 font-mono">{health?.avg_response_ms ?? '—'}ms</p>

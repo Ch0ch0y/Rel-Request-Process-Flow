@@ -195,6 +195,7 @@ export default function PerformanceMonitor() {
               <p className="text-sm font-medium">No performance data for this period</p>
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
@@ -247,6 +248,7 @@ export default function PerformanceMonitor() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
         {!loading && data.length > 0 && (

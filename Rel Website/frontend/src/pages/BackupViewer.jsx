@@ -115,7 +115,7 @@ function StepPanel({ step }) {
                 <div className="bg-slate-50 px-3 py-1.5 border-b border-slate-200">
                   <span className="text-xs font-bold text-slate-600">Samples {rangeLabel}</span>
                 </div>
-                <div className="grid grid-cols-3 divide-x divide-slate-200">
+                <div className="grid grid-cols-1 sm:grid-cols-3 divide-x divide-slate-200">
                   {group.map(({ key, label, optional }) => {
                     const imgs = satImages[key] || [];
                     return (

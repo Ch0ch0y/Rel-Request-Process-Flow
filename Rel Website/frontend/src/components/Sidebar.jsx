@@ -44,6 +44,8 @@ export default function Sidebar({ onClose }) {
   const location = useLocation();
   const [viewingAvatar, setViewingAvatar] = useState(null);
   const [hoveredGroup, setHoveredGroup] = useState(null);
+  const [tappedGroup, setTappedGroup] = useState(null);
+  const isTouchDevice = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
 
   const filterItem = (item) => {
     if (user?.isGuest && !item.guestAllowed) return false;
@@ -108,7 +110,7 @@ export default function Sidebar({ onClose }) {
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {navItems.map(item => {
           if (item.subItems && item.subItems.length > 0) {
-            const isGroupHovered = hoveredGroup === item.to;
+            const isGroupHovered = hoveredGroup === item.to || tappedGroup === item.to;
             const isSubActive = item.subItems.some(s => location.pathname === s.to);
             const headerCls = `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium nav-link-transition w-full text-left ${
               isSubActive
@@ -118,11 +120,11 @@ export default function Sidebar({ onClose }) {
             return (
               <div
                 key={item.to}
-                onMouseEnter={() => setHoveredGroup(item.to)}
-                onMouseLeave={() => setHoveredGroup(null)}
+                onMouseEnter={() => !isTouchDevice && setHoveredGroup(item.to)}
+                onMouseLeave={() => !isTouchDevice && setHoveredGroup(null)}
               >
                 {item.noNav ? (
-                  <button className={headerCls}>
+                  <button className={headerCls} onClick={() => setTappedGroup(tappedGroup === item.to ? null : item.to)}>
                     <item.icon className="w-4.5 h-4.5 flex-shrink-0" />
                     <span className="flex-1">{item.label}</span>
                     <ChevronRight className={`w-3.5 h-3.5 flex-shrink-0 transition-transform duration-200 ${isGroupHovered ? 'rotate-90' : ''}`} />
@@ -131,7 +133,16 @@ export default function Sidebar({ onClose }) {
                   <NavLink
                     to={item.to}
                     end={item.end}
-                    onClick={item.to === '/settings' ? handleSettingsClick : onClose}
+                    onClick={(e) => {
+                      if (isTouchDevice && !isGroupHovered) {
+                        e.preventDefault();
+                        setTappedGroup(item.to);
+                        return;
+                      }
+                      setTappedGroup(null);
+                      if (item.to === '/settings') handleSettingsClick(e);
+                      else onClose?.();
+                    }}
                     className={({ isActive }) =>
                       `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium nav-link-transition ${
                         isActive || isSubActive
@@ -145,7 +156,7 @@ export default function Sidebar({ onClose }) {
                     <ChevronRight className={`w-3.5 h-3.5 flex-shrink-0 transition-transform duration-200 ${isGroupHovered ? 'rotate-90' : ''}`} />
                   </NavLink>
                 )}
-                {/* Sub-items revealed on hover */}
+                {/* Sub-items revealed on hover or tap */}
                 <div className={`overflow-hidden transition-all duration-200 ${isGroupHovered ? 'max-h-56 opacity-100 mt-0.5' : 'max-h-0 opacity-0'}`}>
                   <div className="ml-3 pl-3 border-l border-slate-700 space-y-0.5 py-0.5">
                     {item.subItems.map(sub => (

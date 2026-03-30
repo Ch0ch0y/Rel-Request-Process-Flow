@@ -108,7 +108,7 @@ function WorkflowPipeline({ stats, onNavigate }) {
   return (
     <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-6 py-5 shadow-sm">
       <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">RELDMS · Process Flow</p>
-      <div className="flex items-center justify-between gap-1">
+      <div className="flex items-center justify-between gap-1 overflow-x-auto sm:overflow-visible">
         {WORKFLOW_STAGES.map((stage, i) => {
           const IconComponent = stage.icon;
           return (
@@ -196,7 +196,7 @@ export default function Dashboard() {
       <div className="space-y-6 stagger-children">
       {/* Header — flat, with PHT clock */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-6 py-5 shadow-sm">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
               isTechnician ? 'bg-orange-100 dark:bg-orange-900/30' : 'bg-blue-100 dark:bg-blue-900/30'
@@ -334,16 +334,20 @@ export default function Dashboard() {
       {/* ── TECHNICIAN LAYOUT ─────────────────────────────── */}
       {isTechnician ? (
         <>
-          {/* Row: Step Progress (full-width) — collapsed by default, expands on hover */}
+          {/* Row: Step Progress (full-width) — tap or hover to expand */}
           <div
             className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm transition-all duration-300"
             onMouseEnter={e => { e.currentTarget.querySelector('[data-step-body]').style.display = ''; }}
             onMouseLeave={e => { e.currentTarget.querySelector('[data-step-body]').style.display = 'none'; }}
+            onClick={e => {
+              const body = e.currentTarget.querySelector('[data-step-body]');
+              if (body) body.style.display = body.style.display === 'none' ? '' : 'none';
+            }}
           >
             <div className="px-6 py-4 flex items-center gap-2 cursor-pointer select-none border-b border-slate-100 dark:border-slate-700">
               <ListChecks className="w-4 h-4 text-orange-500" />
               <h3 className="font-heading font-semibold text-slate-800 dark:text-slate-100">Process Step Progress</h3>
-              <span className="ml-auto text-xs text-slate-400 dark:text-slate-500">Active requests only — hover to expand</span>
+              <span className="ml-auto text-xs text-slate-400 dark:text-slate-500">Active requests only — tap or hover to expand</span>
             </div>
             <div data-step-body style={{ display: 'none' }}>
             <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -745,13 +749,14 @@ export default function Dashboard() {
                     )}
                   </h3>
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-amber-400 italic group-hover:opacity-0 transition-opacity duration-200 select-none">hover to expand</span>
+                    <span className="text-[10px] text-amber-400 italic group-hover:opacity-0 transition-opacity duration-200 select-none hidden sm:inline">hover to expand</span>
                     <Link to="/requests" className="text-xs text-amber-700 hover:text-amber-900 font-medium flex items-center gap-1">
                       View All <ArrowRight className="w-3 h-3" />
                     </Link>
                   </div>
                 </div>
-                <div className="divide-y divide-amber-100 max-h-[88px] group-hover:max-h-[480px] overflow-y-auto transition-[max-height] duration-300 ease-in-out">
+                <div className="divide-y divide-amber-100 max-h-[88px] group-hover:max-h-[480px] focus-within:max-h-[480px] overflow-y-auto transition-[max-height] duration-300 ease-in-out"
+                  tabIndex={0} role="region" aria-label="Notices list">
                   {!stats.noticed_requests_list || stats.noticed_requests_list.length === 0 ? (
                     <p className="px-4 py-4 text-sm text-amber-400">No active notices</p>
                   ) : (
