@@ -1,0 +1,234 @@
+{% extends "layout.html" %}
+
+{% block title %}Task Manager - REL Request{% endblock %}
+{% block page_title %}Task Manager{% endblock %}
+
+{% block page_content %}
+
+<!-- Header -->
+<div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+    <div>
+        <h2 class="text-xl font-bold flex items-center gap-2">
+            <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+            Task Manager
+        </h2>
+        <p class="text-sm text-slate-500 dark:text-slate-400">System monitoring &amp; recent activity</p>
+    </div>
+    <div class="flex items-center gap-2">
+        <span class="text-xs text-slate-400" id="lastUpdated"></span>
+        <button onclick="toggleAutoRefresh()" id="btnAutoRefresh" class="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">Auto: On</button>
+        <button onclick="loadStats()" id="btnRefresh" class="p-2 rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-500">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        </button>
+    </div>
+</div>
+
+<!-- Stat Cards -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-4">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+                <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5.636 18.364a9 9 0 010-12.728m12.728 0a9 9 0 010 12.728m-9.9-2.829a5 5 0 010-7.07m7.072 0a5 5 0 010 7.07M13 12a1 1 0 11-2 0 1 1 0 012 0z"/></svg>
+            </div>
+            <div>
+                <p class="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Users Online</p>
+                <p class="text-2xl font-bold text-emerald-600" id="statOnline">—</p>
+            </div>
+        </div>
+    </div>
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-4">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            </div>
+            <div>
+                <p class="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Total Users</p>
+                <p class="text-2xl font-bold text-blue-600" id="statUsers">—</p>
+            </div>
+        </div>
+    </div>
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-4">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
+                <svg class="w-5 h-5 text-violet-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+            </div>
+            <div>
+                <p class="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Total Requests</p>
+                <p class="text-2xl font-bold text-violet-600" id="statRequests">—</p>
+            </div>
+        </div>
+    </div>
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-4">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center">
+                <svg class="w-5 h-5 text-slate-600 dark:text-slate-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </div>
+            <div>
+                <p class="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Server Time</p>
+                <p class="text-lg font-bold text-slate-700 dark:text-slate-200" id="statTime">—</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Status Breakdown -->
+<div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-4 mb-6">
+    <p class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-3">Request Status Breakdown</p>
+    <div id="statusBreakdown" class="flex flex-wrap gap-2">
+        <span class="text-xs text-slate-400">Loading…</span>
+    </div>
+</div>
+
+<!-- Two-column: Recent Requests + Recent Step Edits -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+    <!-- Recent Requests -->
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700">
+        <div class="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
+            <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+            <span class="text-sm font-semibold">Recently Added Requests</span>
+        </div>
+        <div id="recentRequests" class="divide-y divide-slate-100 dark:divide-slate-700 max-h-80 overflow-y-auto">
+            <div class="p-4 text-center text-sm text-slate-400">Loading…</div>
+        </div>
+    </div>
+
+    <!-- Recent Step Edits -->
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700">
+        <div class="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
+            <svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+            <span class="text-sm font-semibold">Recently Edited Steps</span>
+        </div>
+        <div id="recentSteps" class="divide-y divide-slate-100 dark:divide-slate-700 max-h-80 overflow-y-auto">
+            <div class="p-4 text-center text-sm text-slate-400">Loading…</div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Logins -->
+<div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700">
+    <div class="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
+        <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/></svg>
+        <span class="text-sm font-semibold">Recent Logins</span>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead class="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-700">
+                <tr>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">User</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Role</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Time</th>
+                </tr>
+            </thead>
+            <tbody id="recentLogins" class="divide-y divide-slate-100 dark:divide-slate-700">
+                <tr><td colspan="3" class="px-4 py-4 text-center text-sm text-slate-400">Loading…</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+function getToken() { const m = document.cookie.match(/access_token=([^;]+)/); return m ? m[1] : null; }
+async function apiFetch(url, opts) {
+    const token = getToken();
+    const h = { ...(opts?.headers || {}) };
+    if (token) h['Authorization'] = 'Bearer ' + token;
+    const r = await fetch(url, { ...opts, headers: h, credentials: 'same-origin' });
+    if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.detail || 'API error ' + r.status); }
+    return r.json();
+}
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+const statusColors = {
+    incoming: 'bg-slate-100 text-slate-700', pending: 'bg-amber-100 text-amber-700',
+    review: 'bg-sky-100 text-sky-700', approval: 'bg-purple-100 text-purple-700',
+    in_progress: 'bg-blue-100 text-blue-700', testing: 'bg-blue-100 text-blue-700',
+    analysis: 'bg-teal-100 text-teal-700', completed: 'bg-emerald-100 text-emerald-700',
+    hold: 'bg-amber-100 text-amber-700', discontinued: 'bg-red-100 text-red-700'
+};
+
+let autoRefresh = true;
+let refreshTimer = null;
+
+function toggleAutoRefresh() {
+    autoRefresh = !autoRefresh;
+    const btn = document.getElementById('btnAutoRefresh');
+    btn.textContent = 'Auto: ' + (autoRefresh ? 'On' : 'Off');
+    btn.className = btn.className.replace(/bg-emerald-100 text-emerald-700 dark:bg-emerald-900\/30 dark:text-emerald-300|bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400/g, '');
+    btn.classList.add(...(autoRefresh ? ['bg-emerald-100','text-emerald-700','dark:bg-emerald-900/30','dark:text-emerald-300'] : ['bg-slate-100','text-slate-500','dark:bg-slate-700','dark:text-slate-400']));
+    if (autoRefresh) startAutoRefresh(); else clearInterval(refreshTimer);
+}
+
+function startAutoRefresh() {
+    if (refreshTimer) clearInterval(refreshTimer);
+    refreshTimer = setInterval(loadStats, 30000);
+}
+
+async function loadStats() {
+    const btn = document.getElementById('btnRefresh');
+    btn.querySelector('svg').classList.add('animate-spin');
+    try {
+        const d = await apiFetch('/api/task-manager/stats');
+
+        // Stat cards
+        document.getElementById('statOnline').textContent = d.users_online || 0;
+        document.getElementById('statUsers').textContent = d.total_users || 0;
+        document.getElementById('statRequests').textContent = d.total_requests || 0;
+        document.getElementById('statTime').textContent = d.server_time ? new Date(d.server_time).toLocaleTimeString('en-PH') : '—';
+        document.getElementById('lastUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString('en-PH');
+
+        // Status breakdown
+        const sc = d.status_counts || {};
+        const sbEl = document.getElementById('statusBreakdown');
+        sbEl.innerHTML = Object.entries(sc).map(([s, c]) => {
+            const cls = statusColors[s] || 'bg-slate-100 text-slate-700';
+            return `<span class="px-3 py-1.5 ${cls} rounded-full text-xs font-semibold">${esc(s)}: ${c}</span>`;
+        }).join('') || '<span class="text-xs text-slate-400">No data</span>';
+
+        // Recent Requests
+        const rr = d.recent_requests || [];
+        document.getElementById('recentRequests').innerHTML = rr.length ? rr.map(r => `
+            <div class="px-5 py-3 flex items-center justify-between">
+                <div>
+                    <span class="font-semibold text-sm text-blue-600">${esc(r.request_number)}</span>
+                    <span class="text-xs text-slate-400 ml-2">${esc(r.created_by || '')}</span>
+                    <div class="text-xs text-slate-400 mt-0.5">${r.created_at ? new Date(r.created_at).toLocaleDateString('en-PH') : ''}</div>
+                </div>
+                <span class="px-2 py-0.5 rounded-full text-xs font-semibold ${statusColors[r.status] || 'bg-slate-100 text-slate-700'}">${esc(r.status || '')}</span>
+            </div>`).join('') : '<div class="p-4 text-center text-sm text-slate-400">No recent requests</div>';
+
+        // Recent Step Edits
+        const rs = d.recent_step_edits || [];
+        document.getElementById('recentSteps').innerHTML = rs.length ? rs.map(r => `
+            <div class="px-5 py-3 flex items-center justify-between">
+                <div>
+                    <span class="font-medium text-sm">${esc(r.step_name)}</span>
+                    <span class="text-xs text-slate-400 ml-2">${esc(r.request_number)}</span>
+                    <div class="text-xs text-slate-400 mt-0.5">${r.updated_at ? new Date(r.updated_at).toLocaleDateString('en-PH') : ''} · ${esc(r.by || '')}</div>
+                </div>
+                <span class="px-2 py-0.5 rounded-full text-xs font-semibold ${statusColors[r.status] || 'bg-slate-100 text-slate-700'}">${esc(r.status || '')}</span>
+            </div>`).join('') : '<div class="p-4 text-center text-sm text-slate-400">No recent edits</div>';
+
+        // Recent Logins
+        const rl = d.recent_logins || [];
+        document.getElementById('recentLogins').innerHTML = rl.length ? rl.map(r => `
+            <tr class="hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                <td class="px-4 py-3 flex items-center gap-2">
+                    <div class="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-xs font-bold text-blue-600">${esc((r.username || '?')[0].toUpperCase())}</div>
+                    <span class="text-sm font-medium">${esc(r.username || '—')}</span>
+                </td>
+                <td class="px-4 py-3 text-xs text-slate-500">${esc(r.role || '—')}</td>
+                <td class="px-4 py-3 text-xs text-slate-500">${r.login_at ? new Date(r.login_at).toLocaleString('en-PH') : '—'}</td>
+            </tr>`).join('') : '<tr><td colspan="3" class="px-4 py-4 text-center text-sm text-slate-400">No login records</td></tr>';
+
+    } catch (e) {
+        console.error('Task manager load error:', e);
+    } finally {
+        btn.querySelector('svg').classList.remove('animate-spin');
+    }
+}
+
+// Init
+loadStats();
+startAutoRefresh();
+</script>
+{% endblock %}

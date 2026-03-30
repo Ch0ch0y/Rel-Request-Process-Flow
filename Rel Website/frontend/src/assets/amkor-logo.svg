@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 80" fill="none">
+  <!-- Amkor "A" shield/swoosh mark -->
+  <g fill="#004B8D">
+    <!-- Stylized "A" with swoosh -->
+    <path d="M6.5 64.5L30 8h12l23.5 56.5h-12.2L49 52H23l-4.3 12.5H6.5zM26.2 42.5h19.6L36 16.5 26.2 42.5z"/>
+    <!-- Swoosh underneath -->
+    <path d="M2 58c0 0 15 14 35 14s33-8 33-8" stroke="#004B8D" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  </g>
+  <!-- "mkor" text -->
+  <g fill="#004B8D">
+    <text x="72" y="54" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="700" letter-spacing="-0.5">mkor</text>
+  </g>
+  <!-- "Technology" text with registered mark -->
+  <g fill="#004B8D">
+    <text x="72" y="73" font-family="Arial, Helvetica, sans-serif" font-size="19.5" font-weight="400" letter-spacing="4.5">Technology</text>
+    <text x="268" y="62" font-family="Arial, Helvetica, sans-serif" font-size="11">&#xAE;</text>
+  </g>
+</svg>

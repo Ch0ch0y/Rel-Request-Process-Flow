@@ -1,0 +1,594 @@
+{% extends "base.html" %}
+
+{% block title %}Login - RELDMS{% endblock %}
+
+{% block extra_css %}
+<style>
+    @keyframes loginEnter { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .login-enter { animation: loginEnter 0.5s ease-out; }
+    .stagger-children > * { animation: loginEnter 0.4s ease-out both; }
+    .stagger-children > *:nth-child(1) { animation-delay: 0.05s; }
+    .stagger-children > *:nth-child(2) { animation-delay: 0.1s; }
+    .stagger-children > *:nth-child(3) { animation-delay: 0.15s; }
+    .stagger-children > *:nth-child(4) { animation-delay: 0.2s; }
+    .stagger-children > *:nth-child(5) { animation-delay: 0.25s; }
+    .stagger-children > *:nth-child(6) { animation-delay: 0.3s; }
+    .stagger-children > *:nth-child(7) { animation-delay: 0.35s; }
+    .stagger-children > *:nth-child(8) { animation-delay: 0.4s; }
+    .stagger-children > *:nth-child(9) { animation-delay: 0.45s; }
+    .stagger-children > *:nth-child(10) { animation-delay: 0.5s; }
+    .stagger-children > *:nth-child(11) { animation-delay: 0.55s; }
+    .digit-input::-webkit-inner-spin-button,
+    .digit-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    .digit-input { -moz-appearance: textfield; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex login-enter">
+    <!-- Left - Visual Panel (hidden on small screens) -->
+    <div class="hidden lg:flex lg:w-1/2 relative items-center justify-center overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-blue-950">
+        <div class="absolute inset-0 opacity-15 pointer-events-none">
+            <div class="absolute top-16 left-16 w-72 h-72 border border-blue-400 rounded-full"></div>
+            <div class="absolute bottom-24 right-12 w-52 h-52 border border-cyan-400 rounded-full"></div>
+            <div class="absolute top-36 right-28 w-36 h-36 border border-blue-300 rounded-lg rotate-45"></div>
+            <div class="absolute bottom-16 left-36 w-28 h-28 border-2 border-blue-500 rounded-lg rotate-12"></div>
+            <div class="absolute top-56 left-56 w-18 h-18 rounded-full bg-blue-600/40"></div>
+            <div class="absolute bottom-56 right-36 w-24 h-24 rounded-lg rotate-45 bg-cyan-500/20"></div>
+        </div>
+        <div class="absolute inset-0 bg-gradient-to-t from-slate-900/60 via-transparent to-transparent"></div>
+        <div class="relative text-center px-12 max-w-md">
+            <div class="mb-8">
+                <svg class="h-14 mx-auto opacity-90" viewBox="0 0 200 50" fill="white">
+                    <text x="10" y="38" font-family="Georgia, serif" font-size="38" font-weight="bold" fill="white">
+                        <tspan font-size="48" dy="-4">A</tspan>mkor
+                    </text>
+                    <text x="10" y="48" font-family="Arial, sans-serif" font-size="10" fill="rgba(255,255,255,0.7)" letter-spacing="1.5">Technology</text>
+                </svg>
+            </div>
+            <div class="w-16 h-0.5 mx-auto mb-6 rounded-full bg-blue-500"></div>
+            <p class="text-xs font-medium uppercase tracking-[0.25em] mb-3 text-blue-400">Reliability Data Management</p>
+            <h1 class="text-6xl font-black text-white mb-3 tracking-tight leading-none">RELDMS</h1>
+            <h2 class="text-sm font-medium mb-6 tracking-[0.2em] uppercase text-blue-300/70">Data Management System</h2>
+            <p class="text-slate-400 text-sm leading-relaxed max-w-xs mx-auto">
+                Track reliability testing requests through customizable process steps with precision and efficiency.
+            </p>
+            <div class="mt-10 flex items-center justify-center gap-3">
+                <div class="flex -space-x-2">
+                    <div class="w-8 h-8 rounded-full bg-slate-700 border-2 border-slate-800 flex items-center justify-center text-xs font-bold text-slate-300">RE</div>
+                    <div class="w-8 h-8 rounded-full bg-slate-700 border-2 border-slate-800 flex items-center justify-center text-xs font-bold text-slate-300">FA</div>
+                    <div class="w-8 h-8 rounded-full bg-slate-700 border-2 border-slate-800 flex items-center justify-center text-xs font-bold text-slate-300">PL</div>
+                    <div class="w-8 h-8 rounded-full bg-slate-700 border-2 border-slate-800 flex items-center justify-center text-xs font-bold text-slate-300">TK</div>
+                </div>
+                <span id="user-count-text" class="text-sm text-slate-400">Loading...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right - Form Panel -->
+    <div class="flex-1 flex items-center justify-center px-6 py-12 bg-white dark:bg-slate-900 relative">
+        <button onclick="toggleTheme()" class="absolute top-4 right-4 p-2 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors" title="Toggle theme">
+            <svg class="w-4 h-4 dark:hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+            <svg class="w-4 h-4 hidden dark:block" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        </button>
+
+        <div class="w-full max-w-md stagger-children">
+            <div class="lg:hidden flex items-center gap-3 mb-10">
+                <svg class="h-10" viewBox="0 0 200 50">
+                    <text x="10" y="38" font-family="Georgia, serif" font-size="38" font-weight="bold" class="fill-slate-900 dark:fill-white">
+                        <tspan font-size="48" dy="-4">A</tspan>mkor
+                    </text>
+                    <text x="10" y="48" font-family="Arial, sans-serif" font-size="10" class="fill-slate-500 dark:fill-slate-400" letter-spacing="1.5">Technology</text>
+                </svg>
+            </div>
+
+            <!-- App Mode Toggle -->
+            <div class="flex items-center justify-center mb-8">
+                <div class="inline-flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 gap-1">
+                    <button type="button" class="px-4 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wide bg-blue-600 text-white shadow-md shadow-blue-600/30">RELDMS</button>
+                    <a href="javascript:void(0)" onclick="window.open(location.protocol+'//'+location.hostname+':3001','_blank')" class="px-4 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 transition-all">CADMS &#8599;</a>
+                    <a href="javascript:void(0)" onclick="window.open('https://synapse-it.amkor.com/fadms/index.php/auth/login','_blank')" class="px-4 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-all">FADMS &#8599;</a>
+                </div>
+            </div>
+
+            <h2 id="form-title" class="text-3xl font-bold text-slate-900 dark:text-white mb-1">Welcome Back</h2>
+            <p id="form-subtitle" class="text-slate-500 dark:text-slate-400 mb-8 text-sm">Sign in to your Amkor RELDMS account.</p>
+
+            {% if error %}
+            <div class="mb-4 p-3 bg-red-50 dark:bg-red-900/40 border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 rounded-lg text-sm">{{ error }}</div>
+            {% endif %}
+            {% if success %}
+            <div class="mb-4 p-3 bg-emerald-50 dark:bg-emerald-900/40 border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 rounded-lg text-sm">{{ success }}</div>
+            {% endif %}
+
+            <div id="error-msg" class="mb-4 p-3 bg-red-50 dark:bg-red-900/40 border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 rounded-lg text-sm hidden"></div>
+            <div id="success-msg" class="mb-4 p-3 bg-emerald-50 dark:bg-emerald-900/40 border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 rounded-lg text-sm hidden"></div>
+
+            <!-- LOGIN FORM -->
+            <div id="login-section">
+                <form id="login-form" class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Corporate Email</label>
+                        <input type="email" id="login-email" required placeholder="you@amkor.com"
+                            class="w-full border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-2.5 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all text-sm">
+                    </div>
+                    <div>
+                        <div class="flex items-center justify-between mb-1.5">
+                            <label class="block text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Password</label>
+                            <button type="button" onclick="toggleForgotPassword()" class="text-xs text-blue-400 hover:text-blue-300 transition-colors">Forgot password?</button>
+                        </div>
+                        <div class="relative">
+                            <input type="password" id="login-password" required placeholder="&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;"
+                                class="w-full border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-2.5 pr-10 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all text-sm">
+                            <button type="button" onclick="togglePasswordVisibility('login-password', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300">
+                                <svg class="w-4 h-4 eye-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                <svg class="w-4 h-4 eye-off-icon hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <button type="submit" id="login-btn" class="w-full bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2.5 font-medium transition-all shadow-sm hover:shadow-blue-500/25 hover:shadow-lg text-sm flex items-center justify-center gap-2">
+                        <span>Sign In</span><span aria-hidden="true">&rarr;</span>
+                    </button>
+                </form>
+
+                <!-- Forgot Password Panel -->
+                <div id="forgot-panel" class="mt-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 hidden">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
+                            <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                            Reset Password
+                        </span>
+                        <button type="button" onclick="toggleForgotPassword()" class="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        </button>
+                    </div>
+                    <div id="forgot-form-container">
+                        <form id="forgot-form" class="space-y-3">
+                            <div>
+                                <label class="block text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Email</label>
+                                <input type="email" id="forgot-email" required placeholder="your-email@amkor.com"
+                                    class="w-full border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-sm">
+                            </div>
+                            <div class="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5">
+                                <div class="flex items-center justify-between mb-1.5">
+                                    <p class="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">Verify you're human</p>
+                                    <button type="button" onclick="refreshMathChallenge()" class="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300" title="New question">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+                                    </button>
+                                </div>
+                                <p id="math-question" class="text-sm font-bold text-slate-900 dark:text-white mb-2"></p>
+                                <input type="number" id="math-answer" required placeholder="Your answer"
+                                    class="digit-input w-full border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-sm">
+                            </div>
+                            <div class="relative">
+                                <input type="password" id="forgot-new-pw" required placeholder="New password (min. 6 characters)"
+                                    class="w-full border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 pr-9 bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-sm">
+                                <button type="button" onclick="togglePasswordVisibility('forgot-new-pw', this)" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300">
+                                    <svg class="w-4 h-4 eye-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    <svg class="w-4 h-4 eye-off-icon hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                                </button>
+                            </div>
+                            <input type="password" id="forgot-confirm-pw" required placeholder="Confirm new password"
+                                class="w-full border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-sm">
+                            <p id="forgot-error" class="text-xs text-red-500 dark:text-red-400 hidden"></p>
+                            <button type="submit" id="forgot-btn" class="w-full bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-50">Reset Password</button>
+                        </form>
+                    </div>
+                    <div id="forgot-done" class="space-y-3 text-center hidden">
+                        <div class="mx-auto w-12 h-12 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center">
+                            <svg class="w-6 h-6 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                        </div>
+                        <p class="text-sm font-semibold text-slate-900 dark:text-white">Password Reset!</p>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">You can now log in with your new password.</p>
+                        <button type="button" onclick="toggleForgotPassword()" class="w-full bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-3 py-2 text-sm font-medium">Back to Login</button>
+                    </div>
+                </div>
+
+                <!-- Divider & Technician -->
+                <div class="mt-5">
+                    <div class="relative flex items-center">
+                        <div class="flex-1 border-t border-slate-200 dark:border-slate-700"></div>
+                        <span class="mx-3 text-xs text-slate-400 dark:text-slate-500 uppercase tracking-wider">or</span>
+                        <div class="flex-1 border-t border-slate-200 dark:border-slate-700"></div>
+                    </div>
+                    <div id="tech-login-btn-container">
+                        <button type="button" onclick="showTechCodePanel()" class="mt-4 w-full bg-amber-500 hover:bg-amber-400 text-white rounded-lg px-4 py-2.5 font-medium transition-all shadow-sm hover:shadow-amber-500/20 hover:shadow-lg text-sm flex items-center justify-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                            Login as Technician
+                        </button>
+                    </div>
+                    <div id="tech-code-panel" class="mt-4 bg-slate-50 dark:bg-slate-800 border border-amber-400/40 dark:border-amber-500/30 rounded-xl p-5 hidden">
+                        <div class="flex items-center justify-between mb-3">
+                            <div class="flex items-center gap-2">
+                                <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+                                <span class="text-sm font-semibold text-slate-900 dark:text-white">Technician Authentication</span>
+                            </div>
+                            <button type="button" onclick="hideTechCodePanel()" class="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                            </button>
+                        </div>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">Enter the 6-digit authentication code to continue.</p>
+                        <div class="flex gap-2 justify-center mb-3" id="digit-container">
+                            <input type="text" inputmode="numeric" maxlength="1" class="digit-input w-10 h-12 text-center text-lg font-bold rounded-lg border-2 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none transition-all focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20" data-idx="0">
+                            <input type="text" inputmode="numeric" maxlength="1" class="digit-input w-10 h-12 text-center text-lg font-bold rounded-lg border-2 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none transition-all focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20" data-idx="1">
+                            <input type="text" inputmode="numeric" maxlength="1" class="digit-input w-10 h-12 text-center text-lg font-bold rounded-lg border-2 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none transition-all focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20" data-idx="2">
+                            <input type="text" inputmode="numeric" maxlength="1" class="digit-input w-10 h-12 text-center text-lg font-bold rounded-lg border-2 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none transition-all focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20" data-idx="3">
+                            <input type="text" inputmode="numeric" maxlength="1" class="digit-input w-10 h-12 text-center text-lg font-bold rounded-lg border-2 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none transition-all focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20" data-idx="4">
+                            <input type="text" inputmode="numeric" maxlength="1" class="digit-input w-10 h-12 text-center text-lg font-bold rounded-lg border-2 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none transition-all focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20" data-idx="5">
+                        </div>
+                        <p id="tech-code-error" class="text-xs text-red-500 dark:text-red-400 text-center mb-3 hidden"></p>
+                        <button type="button" onclick="submitTechCode()" class="w-full bg-amber-500 hover:bg-amber-400 text-white rounded-lg px-4 py-2.5 font-medium transition-all text-sm">Confirm &amp; Login</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- REGISTER FORM -->
+            <div id="register-section" class="hidden">
+                <form id="register-form" class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Corporate Email</label>
+                        <input type="email" id="reg-email" required placeholder="you@amkor.com"
+                            class="w-full border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-2.5 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Username</label>
+                        <input type="text" id="reg-username" required placeholder="John Doe"
+                            class="w-full border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-2.5 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Role</label>
+                        <select id="reg-role" class="w-full border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-2.5 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all text-sm">
+                            <option value="Admin">Admin</option>
+                            <option value="Reliability Engineer">Reliability Engineer</option>
+                            <option value="Failure Analysis">Failure Analysis</option>
+                            <option value="Technician">Technician</option>
+                            <option value="Planner">Planner</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Password</label>
+                        <div class="relative">
+                            <input type="password" id="reg-password" required placeholder="&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;"
+                                class="w-full border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-2.5 pr-10 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all text-sm">
+                            <button type="button" onclick="togglePasswordVisibility('reg-password', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300">
+                                <svg class="w-4 h-4 eye-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                <svg class="w-4 h-4 eye-off-icon hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <button type="submit" id="register-btn" class="w-full bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2.5 font-medium transition-all shadow-sm hover:shadow-blue-500/25 hover:shadow-lg text-sm">Create Account</button>
+                </form>
+            </div>
+
+            <!-- Toggle login/register -->
+            <p class="mt-6 text-center text-xs text-slate-400 dark:text-slate-500">
+                <span id="toggle-text">Don't have an account?</span>
+                <button type="button" onclick="toggleLoginRegister()" class="ml-1.5 text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 font-medium" id="toggle-btn">Create one</button>
+            </p>
+
+            <!-- Footer -->
+            <div class="mt-6 pt-5 border-t border-slate-200 dark:border-slate-800 flex items-center justify-center gap-4 text-xs text-slate-400 dark:text-slate-600">
+                <span>Need assistance? Contact System Admin</span>
+            </div>
+            <div class="mt-2 flex items-center justify-center gap-4 text-xs text-slate-400 dark:text-slate-700">
+                <a href="#" class="hover:text-slate-600 dark:hover:text-slate-500 transition-colors">Security Policy</a>
+                <span>&middot;</span>
+                <a href="#" class="hover:text-slate-600 dark:hover:text-slate-500 transition-colors">Internal Wiki</a>
+                <span>&middot;</span>
+                <span>v4.2.0-stable</span>
+            </div>
+
+            <!-- Developer Credit -->
+            <div class="mt-4 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 border border-slate-700 rounded-xl shadow-lg overflow-hidden cursor-pointer transition-all duration-500 hover:shadow-[0_0_40px_rgba(139,92,246,0.25)] hover:border-violet-500/50 group"
+                 onclick="document.getElementById('dev-speech-modal').classList.remove('hidden')" title="Click to read a message from the developer">
+                <div class="px-4 py-2.5 border-b border-slate-700/60 flex items-center justify-between">
+                    <h3 class="text-[10px] font-semibold uppercase tracking-wider text-slate-400 group-hover:text-violet-400 transition-colors duration-300">About the Developer</h3>
+                    <span class="text-[9px] text-slate-600 group-hover:text-violet-500 transition-colors duration-300 italic">click to read message &#10022;</span>
+                </div>
+                <div class="px-4 py-3 flex items-center gap-4">
+                    <div class="relative shrink-0">
+                        <div class="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 via-violet-500 to-indigo-600 flex items-center justify-center shadow-md ring-2 ring-white/10">
+                            <span class="text-base font-bold text-white select-none">FV</span>
+                        </div>
+                        <span class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-slate-900" title="Creator"></span>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm font-bold text-white tracking-tight leading-tight">Francis Ni&ntilde;o R. Villanueva</p>
+                        <p class="text-xs text-slate-400 mt-0.5">Developer &amp; Designer</p>
+                    </div>
+                    <div class="shrink-0">
+                        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-violet-500/10 border border-violet-500/20 text-[10px] font-semibold text-violet-400">
+                            <span class="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse inline-block"></span> v1.0
+                        </span>
+                    </div>
+                </div>
+                <div class="px-4 pb-2.5">
+                    <p class="text-[10px] text-slate-600 text-center">&copy; 2026 Amkor Technology &mdash; All rights reserved.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Technician Select Modal -->
+<div id="tech-select-modal" class="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="relative bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl max-w-lg w-full max-h-[85vh] flex flex-col overflow-hidden" onclick="event.stopPropagation()">
+        <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+            <div class="flex items-center justify-between">
+                <h3 class="text-lg font-bold text-slate-900 dark:text-white">Select Your Name</h3>
+                <button type="button" onclick="closeTechSelectModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="mt-3 relative">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" id="tech-search" placeholder="Search by name, ID, or position..."
+                    class="w-full border border-slate-300 dark:border-slate-700 rounded-lg pl-10 pr-4 py-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" oninput="filterEmployees()">
+            </div>
+        </div>
+        <div id="employee-list" class="flex-1 overflow-y-auto px-4 py-2 space-y-1" style="max-height:400px"></div>
+        <div class="px-6 py-4 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between">
+            <p id="tech-selected-name" class="text-sm text-slate-500 dark:text-slate-400">No one selected</p>
+            <div class="flex gap-2">
+                <button type="button" onclick="closeTechSelectModal()" class="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Cancel</button>
+                <button type="button" id="tech-confirm-btn" onclick="confirmTechLogin()" disabled class="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed">Confirm</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Developer Speech Modal -->
+<div id="dev-speech-modal" class="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 hidden" onclick="this.classList.add('hidden')">
+    <div class="relative bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 border border-violet-500/30 rounded-2xl shadow-2xl max-w-xl w-full p-8 overflow-y-auto max-h-[90vh]" onclick="event.stopPropagation()">
+        <button onclick="document.getElementById('dev-speech-modal').classList.add('hidden')" class="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+        <div class="flex items-center gap-4 mb-6">
+            <div class="relative shrink-0">
+                <div class="w-14 h-14 rounded-full bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center">
+                    <span class="text-lg font-bold text-white">FV</span>
+                </div>
+                <span class="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-emerald-500 rounded-full border-2 border-slate-900"></span>
+            </div>
+            <div>
+                <p class="text-white font-bold text-base leading-tight">Francis Ni&ntilde;o R. Villanueva</p>
+                <p class="text-violet-400 text-xs mt-0.5">Developer &amp; Designer &middot; Amkor Technology</p>
+            </div>
+        </div>
+        <div class="h-px bg-gradient-to-r from-transparent via-violet-500/40 to-transparent mb-6"></div>
+        <div class="space-y-4 text-slate-300 text-sm leading-relaxed">
+            <p>Hello! I'm <span class="text-white font-semibold">Francis Ni&ntilde;o</span>, the developer behind the RELDMS &mdash; the Reliability Data Management System. What you're looking at is something I built entirely from the ground up &mdash; every line of code, every UI detail, and every workflow decision was crafted with one goal in mind: to make the lives of the Reliability Engineering team at Amkor Technology a little easier.</p>
+            <p>Before this system existed, tracking reliability requests meant navigating spreadsheets, emails, and manual follow-ups. I saw that gap and wanted to fill it with something that actually works &mdash; something fast, clean, and built specifically for the way this team operates.</p>
+            <p>This system was built with <span class="text-violet-400 font-medium">Python</span>, <span class="text-violet-400 font-medium">FastAPI</span>, and <span class="text-violet-400 font-medium">Tailwind CSS</span> &mdash; running fully offline, no cloud dependency, no complicated setup. Just open it and it works.</p>
+            <p>I hope this tool serves you well. Whether you're an engineer submitting a request, a planner managing the queue, or a manager reviewing progress &mdash; this was built for you.</p>
+            <p class="text-slate-400 italic">Thank you for trusting this work. Keep pushing forward.</p>
+        </div>
+        <div class="h-px bg-gradient-to-r from-transparent via-violet-500/20 to-transparent mt-6 mb-4"></div>
+        <div class="flex items-center justify-between">
+            <p class="text-xs text-slate-600">&copy; 2026 Amkor Technology</p>
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-violet-500/10 border border-violet-500/20 text-[10px] font-semibold text-violet-400">
+                <span class="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse inline-block"></span> v1.0
+            </span>
+        </div>
+    </div>
+</div>
+
+<script>
+const EMPLOYEES = [
+    { id: '250296', name: 'Allyza Nicole Humirang', position: 'Rel Engr' },
+    { id: '145084', name: 'Arcega, Johnrey', position: 'REL ES' },
+    { id: '252523', name: 'Balcita, Jeriel', position: 'REL ES' },
+    { id: '175089', name: 'Barrera, Marissa', position: 'REL ES' },
+    { id: '105294', name: 'Bermiso, Ricky', position: 'FA ES P3' },
+    { id: '947241', name: 'Celia Corpuz', position: 'Manager' },
+    { id: '240168', name: 'Clarence Joshua Ramirez', position: 'FA Engr' },
+    { id: '105445', name: 'Conrado Hidalgo', position: 'Sr. FA Engr' },
+    { id: '175074', name: 'Cruz, Jasthine Mae', position: 'REL ES' },
+    { id: '155252', name: 'De Mesa, Rosemarie', position: 'REL ES' },
+    { id: '175198', name: 'Del Rosario, Wowie', position: 'FA ES P3' },
+    { id: '250125', name: 'Dela Rosa, Rowell', position: 'FA ES P3' },
+    { id: '175075', name: 'Delos Santos, Charito', position: 'FA ES P3' },
+    { id: '155253', name: 'Delos Santos, Chlarissa', position: 'REL ES' },
+    { id: '180966', name: 'Eduardo Visca', position: 'REL ES' },
+    { id: '982308', name: 'Esmeria, Erwin', position: 'FA ES P3' },
+    { id: '175082', name: 'Foronda, Georjan', position: 'FA ES P3' },
+    { id: '631090', name: 'Francis Ni\u00f1o R. Villanueva', position: 'Apprentice Engineer' },
+    { id: '175081', name: 'Hatulan, Irving', position: 'FA ES P3' },
+    { id: '993404', name: 'Lea Dalanon', position: 'FA Operation Engr' },
+    { id: '960853', name: 'Loreta Veran', position: 'Sr. Rel Engr' },
+    { id: '240427', name: 'Monterosa, Shaira', position: 'FA ES P3' },
+    { id: '175087', name: 'Ortiz, Van Joven', position: 'FA ES P3' },
+    { id: '240097', name: 'Pamela Satur', position: 'Rel Engr' },
+    { id: '981931', name: 'Reggie Quito', position: 'REL ES' },
+    { id: '155420', name: 'Reig, Leonito', position: 'REL ES' },
+    { id: '250158', name: 'Remigio, Alcen', position: 'FA ES P3' },
+    { id: '230076', name: 'Rizano, Jan Mark', position: 'REL ES' },
+    { id: '155389', name: 'Roy Tiquis', position: 'REL ES' },
+    { id: '202544', name: 'Salazar, Jeronel', position: 'FA ES P3' },
+    { id: '145087', name: 'Santiago, Kimberly Rose', position: 'REL ES' },
+    { id: '250136', name: 'Semillano, Adrian', position: 'REL ES' },
+    { id: '240167', name: 'Shelah Mae Perez', position: 'Rel Engr' },
+    { id: '175083', name: 'Supapo, Bryane', position: 'FA ES P3' },
+    { id: '250135', name: 'Trinidad, Maricel', position: 'REL ES' },
+    { id: '175088', name: 'Velitario, Madelyn', position: 'REL ES' },
+];
+
+let selectedEmployee = null;
+let isRegisterMode = false;
+let mathChallenge = { question: '', answer: 0 };
+
+document.addEventListener('DOMContentLoaded', () => {
+    fetch('/api/public/stats')
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+            const el = document.getElementById('user-count-text');
+            if (d && d.approved_users != null) el.textContent = d.approved_users + ' Engineer' + (d.approved_users !== 1 ? 's' : '') + ' Registered';
+            else el.textContent = 'Engineers Active';
+        }).catch(() => { document.getElementById('user-count-text').textContent = 'Engineers Active'; });
+
+    document.getElementById('login-form').addEventListener('submit', handleLogin);
+    document.getElementById('register-form').addEventListener('submit', handleRegister);
+    document.getElementById('forgot-form').addEventListener('submit', handleForgotPassword);
+    setupDigitInputs();
+    refreshMathChallenge();
+});
+
+// LOGIN
+async function handleLogin(e) {
+    e.preventDefault();
+    const email = document.getElementById('login-email').value.trim();
+    const password = document.getElementById('login-password').value;
+    const btn = document.getElementById('login-btn');
+    hideMessages();
+    btn.disabled = true;
+    btn.innerHTML = 'Please wait...';
+    try {
+        const res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if (!res.ok) { showError(data.detail || 'Invalid email or password'); btn.disabled = false; btn.innerHTML = '<span>Sign In</span><span aria-hidden="true">\u2192</span>'; return; }
+        document.cookie = 'access_token=' + data.access_token + ';path=/;max-age=86400;SameSite=Lax';
+        window.location.href = '/';
+    } catch { showError('Connection error. Please try again.'); btn.disabled = false; btn.innerHTML = '<span>Sign In</span><span aria-hidden="true">\u2192</span>'; }
+}
+
+// REGISTER
+async function handleRegister(e) {
+    e.preventDefault();
+    const email = document.getElementById('reg-email').value.trim();
+    const username = document.getElementById('reg-username').value.trim();
+    const role = document.getElementById('reg-role').value;
+    const password = document.getElementById('reg-password').value;
+    const btn = document.getElementById('register-btn');
+    hideMessages();
+    btn.disabled = true; btn.textContent = 'Please wait...';
+    try {
+        const res = await fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, username, password, role }) });
+        const data = await res.json();
+        if (!res.ok) { showError(data.detail || 'Registration failed'); btn.disabled = false; btn.textContent = 'Create Account'; return; }
+        showSuccess('Account created! Please wait for admin approval before logging in.');
+        toggleLoginRegister();
+        document.getElementById('reg-password').value = '';
+    } catch { showError('Connection error. Please try again.'); }
+    btn.disabled = false; btn.textContent = 'Create Account';
+}
+
+// FORGOT PASSWORD
+function generateMath() {
+    const ops = [{ sym: '+', fn: (a, b) => a + b }, { sym: '\u2212', fn: (a, b) => a - b }, { sym: '\u00d7', fn: (a, b) => a * b }];
+    const op = ops[Math.floor(Math.random() * ops.length)];
+    let a, b;
+    if (op.sym === '\u00d7') { a = Math.floor(Math.random() * 9) + 2; b = Math.floor(Math.random() * 9) + 2; }
+    else if (op.sym === '\u2212') { a = Math.floor(Math.random() * 41) + 10; b = Math.floor(Math.random() * a); }
+    else { a = Math.floor(Math.random() * 50) + 1; b = Math.floor(Math.random() * 50) + 1; }
+    return { question: 'What is ' + a + ' ' + op.sym + ' ' + b + '?', answer: op.fn(a, b) };
+}
+function refreshMathChallenge() {
+    mathChallenge = generateMath();
+    const q = document.getElementById('math-question'); if (q) q.textContent = mathChallenge.question;
+    const a = document.getElementById('math-answer'); if (a) a.value = '';
+}
+function toggleForgotPassword() {
+    const p = document.getElementById('forgot-panel');
+    if (p.classList.contains('hidden')) { p.classList.remove('hidden'); document.getElementById('forgot-form-container').classList.remove('hidden'); document.getElementById('forgot-done').classList.add('hidden'); refreshMathChallenge(); }
+    else p.classList.add('hidden');
+}
+async function handleForgotPassword(e) {
+    e.preventDefault();
+    const errEl = document.getElementById('forgot-error'); errEl.classList.add('hidden');
+    if (parseInt(document.getElementById('math-answer').value, 10) !== mathChallenge.answer) { errEl.textContent = 'Incorrect answer. Try again.'; errEl.classList.remove('hidden'); refreshMathChallenge(); return; }
+    const np = document.getElementById('forgot-new-pw').value, cp = document.getElementById('forgot-confirm-pw').value;
+    if (np !== cp) { errEl.textContent = 'Passwords do not match.'; errEl.classList.remove('hidden'); return; }
+    if (np.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; errEl.classList.remove('hidden'); return; }
+    const btn = document.getElementById('forgot-btn'); btn.disabled = true; btn.textContent = 'Resetting...';
+    try {
+        const res = await fetch('/api/auth/forgot-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: document.getElementById('forgot-email').value.trim(), new_password: np }) });
+        if (!res.ok) { const d = await res.json(); errEl.textContent = d.detail || 'Failed.'; errEl.classList.remove('hidden'); refreshMathChallenge(); }
+        else { document.getElementById('forgot-form-container').classList.add('hidden'); document.getElementById('forgot-done').classList.remove('hidden'); }
+    } catch { errEl.textContent = 'Connection error.'; errEl.classList.remove('hidden'); refreshMathChallenge(); }
+    btn.disabled = false; btn.textContent = 'Reset Password';
+}
+
+// TECHNICIAN AUTH
+function setupDigitInputs() {
+    const inputs = document.querySelectorAll('#digit-container input');
+    inputs.forEach((inp, i) => {
+        inp.addEventListener('input', e => { const v = e.target.value.replace(/\D/g, '').slice(-1); e.target.value = v; document.getElementById('tech-code-error').classList.add('hidden'); if (v && i < 5) inputs[i + 1].focus(); });
+        inp.addEventListener('keydown', e => { if (e.key === 'Backspace' && !inp.value && i > 0) inputs[i - 1].focus(); if (e.key === 'Enter') submitTechCode(); });
+        if (i === 0) inp.addEventListener('paste', e => { const t = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6); if (!t) return; e.preventDefault(); for (let j = 0; j < 6; j++) inputs[j].value = t[j] || ''; inputs[Math.min(t.length, 5)].focus(); });
+    });
+}
+function showTechCodePanel() { document.getElementById('tech-login-btn-container').classList.add('hidden'); document.getElementById('tech-code-panel').classList.remove('hidden'); document.querySelectorAll('#digit-container input').forEach(i => i.value = ''); document.getElementById('tech-code-error').classList.add('hidden'); document.querySelectorAll('#digit-container input')[0].focus(); }
+function hideTechCodePanel() { document.getElementById('tech-code-panel').classList.add('hidden'); document.getElementById('tech-login-btn-container').classList.remove('hidden'); }
+
+async function submitTechCode() {
+    const inputs = document.querySelectorAll('#digit-container input');
+    const code = Array.from(inputs).map(i => i.value).join('');
+    const errEl = document.getElementById('tech-code-error');
+    if (code.length < 6) { errEl.textContent = 'Please enter all 6 digits.'; errEl.classList.remove('hidden'); return; }
+    try {
+        const res = await fetch('/api/verify-tech-code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
+        const data = await res.json();
+        if (!data.valid) { errEl.textContent = 'Invalid code. Please try again.'; errEl.classList.remove('hidden'); inputs.forEach(i => i.value = ''); inputs[0].focus(); return; }
+    } catch { errEl.textContent = 'Verification failed.'; errEl.classList.remove('hidden'); return; }
+    hideTechCodePanel(); openTechSelectModal();
+}
+
+// EMPLOYEE SELECT
+function openTechSelectModal() { selectedEmployee = null; document.getElementById('tech-search').value = ''; document.getElementById('tech-selected-name').textContent = 'No one selected'; document.getElementById('tech-confirm-btn').disabled = true; renderEmployees(EMPLOYEES); document.getElementById('tech-select-modal').classList.remove('hidden'); document.getElementById('tech-search').focus(); }
+function closeTechSelectModal() { document.getElementById('tech-select-modal').classList.add('hidden'); }
+function filterEmployees() {
+    const q = document.getElementById('tech-search').value.toLowerCase();
+    renderEmployees(EMPLOYEES.filter(e => e.id.includes(q) || e.name.toLowerCase().includes(q) || e.position.toLowerCase().includes(q)));
+}
+function renderEmployees(list) {
+    const c = document.getElementById('employee-list');
+    if (!list.length) { c.innerHTML = '<p class="text-center text-sm text-slate-400 py-8">No employees found</p>'; return; }
+    c.innerHTML = list.map(e => {
+        const sel = selectedEmployee && selectedEmployee.id === e.id;
+        const initials = e.name.split(/[\s,]+/).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+        return '<button type="button" onclick="selectEmployee(\'' + e.id + '\')" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-left ' + (sel ? 'bg-amber-50 dark:bg-amber-900/20 ring-1 ring-amber-400' : '') + '">'
+            + '<div class="w-9 h-9 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-600 dark:text-slate-300 shrink-0">' + initials + '</div>'
+            + '<div class="flex-1 min-w-0"><p class="text-sm font-medium text-slate-900 dark:text-white truncate">' + e.name + '</p><p class="text-xs text-slate-500 dark:text-slate-400">' + e.id + ' &middot; ' + e.position + '</p></div>'
+            + (sel ? '<svg class="w-5 h-5 text-amber-500 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>' : '')
+            + '</button>';
+    }).join('');
+}
+function selectEmployee(id) { selectedEmployee = EMPLOYEES.find(e => e.id === id); document.getElementById('tech-selected-name').textContent = selectedEmployee ? selectedEmployee.name : 'No one selected'; document.getElementById('tech-confirm-btn').disabled = !selectedEmployee; filterEmployees(); }
+
+async function confirmTechLogin() {
+    if (!selectedEmployee) return;
+    try {
+        const res = await fetch('/api/auth/guest-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ employee_id: selectedEmployee.id, employee_name: selectedEmployee.name, employee_position: selectedEmployee.position }) });
+        const data = await res.json();
+        if (!res.ok) { showError('Unable to login as Technician.'); closeTechSelectModal(); return; }
+        document.cookie = 'access_token=' + data.access_token + ';path=/;max-age=86400;SameSite=Lax';
+        window.location.href = '/';
+    } catch { showError('Connection error.'); closeTechSelectModal(); }
+}
+
+// UI HELPERS
+function toggleLoginRegister() {
+    isRegisterMode = !isRegisterMode; hideMessages();
+    document.getElementById('login-section').classList.toggle('hidden', isRegisterMode);
+    document.getElementById('register-section').classList.toggle('hidden', !isRegisterMode);
+    document.getElementById('form-title').textContent = isRegisterMode ? 'Create Account' : 'Welcome Back';
+    document.getElementById('form-subtitle').textContent = isRegisterMode ? 'Fill in the details to create your account.' : 'Sign in to your Amkor RELDMS account.';
+    document.getElementById('toggle-text').textContent = isRegisterMode ? 'Already have an account?' : "Don't have an account?";
+    document.getElementById('toggle-btn').textContent = isRegisterMode ? 'Sign in' : 'Create one';
+}
+function togglePasswordVisibility(id, btn) {
+    const inp = document.getElementById(id);
+    const show = inp.type === 'password';
+    inp.type = show ? 'text' : 'password';
+    btn.querySelector('.eye-icon').classList.toggle('hidden', show);
+    btn.querySelector('.eye-off-icon').classList.toggle('hidden', !show);
+}
+function showError(msg) { const el = document.getElementById('error-msg'); el.textContent = msg; el.classList.remove('hidden'); }
+function showSuccess(msg) { const el = document.getElementById('success-msg'); el.textContent = msg; el.classList.remove('hidden'); }
+function hideMessages() { document.getElementById('error-msg').classList.add('hidden'); document.getElementById('success-msg').classList.add('hidden'); }
+</script>
+{% endblock %}

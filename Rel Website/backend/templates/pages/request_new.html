@@ -1,0 +1,186 @@
+{% extends "layout.html" %}
+
+{% block title %}Create Request - REL Request Process Flow{% endblock %}
+{% block page_title %}Create New Request{% endblock %}
+
+{% block page_content %}
+<div class="max-w-4xl mx-auto">
+    <div class="bg-white dark:bg-slate-800 rounded-lg shadow border border-slate-200 dark:border-slate-700 p-6">
+        <form method="POST" class="space-y-6">
+            <!-- Request Type Selector -->
+            <div class="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-4 border border-slate-200 dark:border-slate-600">
+                <label class="block text-sm font-semibold mb-3">Request Type *</label>
+                <input type="hidden" name="request_type" id="request_type_input" value="REL">
+                <div class="flex gap-3">
+                    <button type="button" id="btn-rel"
+                        onclick="selectType('REL')"
+                        class="flex-1 py-3 px-4 rounded-lg border-2 border-primary-500 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 font-semibold transition-all">
+                        REL Request
+                        <p class="text-xs font-normal text-primary-500 mt-0.5">Standard reliability evaluation</p>
+                    </button>
+                    <button type="button" id="btn-rms"
+                        onclick="selectType('RMS')"
+                        class="flex-1 py-3 px-4 rounded-lg border-2 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 font-semibold transition-all">
+                        RELMON Request (RMS)
+                        <p class="text-xs font-normal text-slate-400 mt-0.5">Reliability monitoring</p>
+                    </button>
+                </div>
+                <!-- RMS number preview -->
+                <div id="rms-number-preview" class="hidden mt-3 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg flex items-center gap-2">
+                    <span class="text-sm text-slate-500">Auto-assigned RMS number:</span>
+                    <span id="rms-number-display" class="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">Loading...</span>
+                </div>
+            </div>
+
+            <!-- Section 1: Basic Information -->
+            <div>
+                <h3 class="text-lg font-semibold mb-4">Basic Information</h3>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Classification *</label>
+                        <input type="text" name="classification" required
+                            class="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Plant *</label>
+                        <input type="text" name="plant" required
+                            class="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg">
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Device Name *</label>
+                        <input type="text" name="device_name" required
+                            class="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Lot #</label>
+                        <input type="text" name="lot_no"
+                            class="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg">
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Section 2: Package Information -->
+            <div class="border-t border-slate-200 dark:border-slate-700 pt-6">
+                <h3 class="text-lg font-semibold mb-4">Package Information</h3>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Body Size X (mm)</label>
+                        <input type="number" step="0.01" name="body_size_x"
+                            class="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Body Size Y (mm)</label>
+                        <input type="number" step="0.01" name="body_size_y"
+                            class="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg">
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Ball Pitch (mm)</label>
+                        <input type="number" step="0.01" name="ball_pitch"
+                            class="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Ball Count</label>
+                        <input type="number" name="ball_count"
+                            class="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg">
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Section 3: Purpose & Instructions -->
+            <div class="border-t border-slate-200 dark:border-slate-700 pt-6">
+                <h3 class="text-lg font-semibold mb-4">Purpose & Instructions</h3>
+                
+                <div>
+                    <label class="block text-sm font-medium mb-2">Purpose *</label>
+                    <input type="text" name="purpose" required
+                        class="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg">
+                </div>
+                
+                <div class="mt-4">
+                    <label class="block text-sm font-medium mb-2">Customer</label>
+                    <input type="text" name="customer"
+                        class="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg">
+                </div>
+                
+                <div class="mt-4">
+                    <label class="block text-sm font-medium mb-2">Engineer Special Instructions</label>
+                    <textarea name="engineer_special_instruction"
+                        class="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg" rows="4"></textarea>
+                </div>
+            </div>
+            
+            <!-- Section 4: Deadline -->
+            <div class="border-t border-slate-200 dark:border-slate-700 pt-6">
+                <h3 class="text-lg font-semibold mb-4">Timeline</h3>
+                
+                <div>
+                    <label class="block text-sm font-medium mb-2">Deadline</label>
+                    <input type="date" name="deadline"
+                        class="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg">
+                </div>
+            </div>
+            
+            <!-- Form Actions -->
+            <div class="border-t border-slate-200 dark:border-slate-700 pt-6 flex gap-2">
+                <button type="submit" id="submit-btn" class="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700">
+                    Create REL Request
+                </button>
+                <a href="/requests" class="px-6 py-2 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700">
+                    Cancel
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+let currentType = 'REL';
+
+function selectType(type) {
+    currentType = type;
+    document.getElementById('request_type_input').value = type;
+
+    const btnRel = document.getElementById('btn-rel');
+    const btnRms = document.getElementById('btn-rms');
+    const preview = document.getElementById('rms-number-preview');
+    const submitBtn = document.getElementById('submit-btn');
+
+    if (type === 'REL') {
+        btnRel.className = 'flex-1 py-3 px-4 rounded-lg border-2 border-primary-500 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 font-semibold transition-all';
+        btnRms.className = 'flex-1 py-3 px-4 rounded-lg border-2 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 font-semibold transition-all';
+        preview.classList.add('hidden');
+        submitBtn.textContent = 'Create REL Request';
+    } else {
+        btnRms.className = 'flex-1 py-3 px-4 rounded-lg border-2 border-emerald-500 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 font-semibold transition-all';
+        btnRel.className = 'flex-1 py-3 px-4 rounded-lg border-2 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 font-semibold transition-all';
+        preview.classList.remove('hidden');
+        submitBtn.textContent = 'Create RELMON Request';
+        fetchNextRmsNumber();
+    }
+}
+
+async function fetchNextRmsNumber() {
+    try {
+        const resp = await fetch('/api/requests/next-number?request_type=RMS');
+        if (resp.ok) {
+            const data = await resp.json();
+            document.getElementById('rms-number-display').textContent = data.next_number;
+        }
+    } catch (e) {
+        document.getElementById('rms-number-display').textContent = 'Error fetching number';
+    }
+}
+</script>
+{% endblock %}

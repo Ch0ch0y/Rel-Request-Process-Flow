@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+
+{% block extra_css %}
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+    .nav-group:hover .nav-sub { max-height: 14rem; opacity: 1; margin-top: 2px; }
+    .nav-sub { max-height: 0; opacity: 0; overflow: hidden; transition: all 0.2s ease; }
+    .nav-group:hover .nav-chevron { transform: rotate(90deg); }
+    .nav-chevron { transition: transform 0.2s ease; }
+    .sidebar-scroll::-webkit-scrollbar { width: 4px; }
+    .sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
+    .sidebar-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="flex h-screen bg-slate-50 dark:bg-slate-950">
+
+    <!-- Desktop Sidebar -->
+    <aside id="sidebar" class="hidden lg:flex flex-col w-64 flex-shrink-0 bg-slate-950 text-slate-400">
+        <!-- Logo -->
+        <div class="flex items-center justify-between h-14 px-5 border-b border-slate-800">
+            <div class="flex items-center gap-2.5">
+                <div class="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center">
+                    <span class="text-white text-xs font-bold">A</span>
+                </div>
+                <span class="text-white text-sm font-semibold tracking-wide">Amkor Technology</span>
+            </div>
+        </div>
+
+        <!-- Theme toggle -->
+        <div class="px-5 py-2 border-b border-slate-800 flex items-center justify-end">
+            <button onclick="window.toggleTheme()" class="p-1.5 rounded-md hover:bg-slate-800 hover:text-white transition-colors" title="Toggle theme">
+                <i data-lucide="sun" class="w-4 h-4 hidden dark:block"></i>
+                <i data-lucide="moon" class="w-4 h-4 block dark:hidden"></i>
+            </button>
+        </div>
+
+        <!-- CA Shortcut -->
+        <div class="px-3 py-2 border-b border-slate-800">
+            <a href="/login" target="_blank" rel="noopener noreferrer"
+               class="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-violet-600/15 text-violet-400 hover:bg-violet-600 hover:text-white text-sm font-medium transition-all border border-violet-600/25 hover:border-violet-600 hover:shadow-lg hover:shadow-violet-600/20">
+                <i data-lucide="microscope" class="w-4 h-4 flex-shrink-0"></i>
+                <span class="flex-1 leading-tight">Construction Analysis</span>
+                <i data-lucide="external-link" class="w-3 h-3 flex-shrink-0 opacity-60"></i>
+            </a>
+        </div>
+
+        <!-- Navigation -->
+        <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto sidebar-scroll">
+            {% set current_path = request.url.path %}
+
+            {# --- Home --- #}
+            <a href="/" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 {{ 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' if current_path == '/' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                <i data-lucide="layout-dashboard" class="w-[18px] h-[18px] flex-shrink-0"></i>
+                <span>Home</span>
+            </a>
+
+            {# --- All Requests (with sub-items) --- #}
+            <div class="nav-group">
+                <a href="/requests" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 {{ 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' if current_path in ['/requests', '/my-requests', '/completed'] else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                    <i data-lucide="clipboard-list" class="w-[18px] h-[18px] flex-shrink-0"></i>
+                    <span class="flex-1">All Requests</span>
+                    <i data-lucide="chevron-right" class="w-3.5 h-3.5 flex-shrink-0 nav-chevron"></i>
+                </a>
+                <div class="nav-sub">
+                    <div class="ml-3 pl-3 border-l border-slate-700 space-y-0.5 py-0.5">
+                        {% if not (user and user.is_guest) %}
+                        <a href="/my-requests" class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 {{ 'bg-blue-600/80 text-white shadow-md shadow-blue-600/20' if current_path == '/my-requests' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                            <i data-lucide="file-text" class="w-4 h-4 flex-shrink-0"></i>
+                            My Requests
+                        </a>
+                        {% endif %}
+                        <a href="/completed" class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 {{ 'bg-blue-600/80 text-white shadow-md shadow-blue-600/20' if current_path == '/completed' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                            <i data-lucide="check-circle-2" class="w-4 h-4 flex-shrink-0"></i>
+                            All Requests Completed
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            {# --- Approval Queue --- #}
+            {% if user and user.role in ['Admin', 'Planner'] %}
+            <a href="/approval" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 {{ 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' if current_path == '/approval' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                <i data-lucide="shield-check" class="w-[18px] h-[18px] flex-shrink-0"></i>
+                <span>Approval Queue</span>
+            </a>
+            {% endif %}
+
+            {# --- Loading / Unloading --- #}
+            {% if user and user.role in ['Technician', 'Admin', 'Reliability Engineer', 'Planner'] %}
+            <a href="/loading-unloading" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 {{ 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' if current_path == '/loading-unloading' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                <i data-lucide="package-open" class="w-[18px] h-[18px] flex-shrink-0"></i>
+                <span>Loading / Unloading</span>
+            </a>
+            {% endif %}
+
+            {# --- Record Monitor (group, no nav itself) --- #}
+            {% if user and not user.is_guest %}
+            {% set show_record_monitor = (user.role in ['Admin', 'Reliability Engineer']) %}
+            {% if show_record_monitor or true %}
+            <div class="nav-group">
+                <button class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 w-full text-left {{ 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' if current_path in ['/request-filter', '/backup-viewer', '/retention-monitor'] else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                    <i data-lucide="layers" class="w-[18px] h-[18px] flex-shrink-0"></i>
+                    <span class="flex-1">Record Monitor</span>
+                    <i data-lucide="chevron-right" class="w-3.5 h-3.5 flex-shrink-0 nav-chevron"></i>
+                </button>
+                <div class="nav-sub">
+                    <div class="ml-3 pl-3 border-l border-slate-700 space-y-0.5 py-0.5">
+                        {% if user.role in ['Admin', 'Reliability Engineer'] %}
+                        <a href="/request-filter" class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 {{ 'bg-blue-600/80 text-white shadow-md shadow-blue-600/20' if current_path == '/request-filter' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                            <i data-lucide="list-filter" class="w-4 h-4 flex-shrink-0"></i>
+                            Request Filter
+                        </a>
+                        {% endif %}
+                        <a href="/backup-viewer" class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 {{ 'bg-blue-600/80 text-white shadow-md shadow-blue-600/20' if current_path == '/backup-viewer' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                            <i data-lucide="archive" class="w-4 h-4 flex-shrink-0"></i>
+                            Backup Viewer
+                        </a>
+                        {% if user.role in ['Admin', 'Reliability Engineer'] %}
+                        <a href="/retention-monitor" class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 {{ 'bg-blue-600/80 text-white shadow-md shadow-blue-600/20' if current_path == '/retention-monitor' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                            <i data-lucide="archive" class="w-4 h-4 flex-shrink-0"></i>
+                            Retention Monitor
+                        </a>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            {% endif %}
+
+            {# --- Settings (with sub-items) --- #}
+            {% if user and not user.is_guest %}
+            <div class="nav-group">
+                <a href="/settings" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 {{ 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' if current_path in ['/settings', '/users', '/task-manager'] else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                    <i data-lucide="settings" class="w-[18px] h-[18px] flex-shrink-0"></i>
+                    <span class="flex-1">Settings</span>
+                    <i data-lucide="chevron-right" class="w-3.5 h-3.5 flex-shrink-0 nav-chevron"></i>
+                </a>
+                <div class="nav-sub">
+                    <div class="ml-3 pl-3 border-l border-slate-700 space-y-0.5 py-0.5">
+                        <a href="/users" class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 {{ 'bg-blue-600/80 text-white shadow-md shadow-blue-600/20' if current_path == '/users' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                            <i data-lucide="users" class="w-4 h-4 flex-shrink-0"></i>
+                            Users
+                        </a>
+                        {% if user.role == 'Admin' %}
+                        <a href="/task-manager" class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 {{ 'bg-blue-600/80 text-white shadow-md shadow-blue-600/20' if current_path == '/task-manager' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                            <i data-lucide="monitor-dot" class="w-4 h-4 flex-shrink-0"></i>
+                            Task Manager
+                        </a>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </nav>
+
+        <!-- User section -->
+        <div class="px-3 py-4 border-t border-slate-800">
+            {% if user %}
+            <div class="flex items-center gap-3 px-3 py-2">
+                <div class="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold text-white uppercase {{ 'bg-amber-600' if user.is_guest else 'bg-slate-700' }}">
+                    {{ user.username[0] if user.username else '?' }}
+                </div>
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-white truncate">{{ user.username }}</p>
+                    <div class="flex items-center gap-1.5">
+                        <p class="text-xs text-slate-500 truncate">{{ user.role }}</p>
+                        {% if user.is_guest %}
+                        <span class="text-xs bg-amber-600/20 text-amber-400 px-1.5 py-0.5 rounded font-medium">Guest</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <a href="/logout" class="p-1.5 rounded-md hover:bg-slate-800 hover:text-white transition-colors" title="Logout">
+                    <i data-lucide="log-out" class="w-4 h-4"></i>
+                </a>
+            </div>
+            {% else %}
+            <a href="/login" class="block px-4 py-2 bg-blue-600 text-white rounded-lg text-center hover:bg-blue-700 transition-colors text-sm font-medium">
+                Login
+            </a>
+            {% endif %}
+        </div>
+    </aside>
+
+    <!-- Mobile sidebar overlay -->
+    <div id="mobile-overlay" class="hidden fixed inset-0 bg-black/50 z-40 lg:hidden" onclick="closeMobileMenu()"></div>
+
+    <!-- Mobile sidebar -->
+    <aside id="mobile-sidebar" class="fixed inset-y-0 left-0 w-64 bg-slate-950 text-slate-400 z-50 transform -translate-x-full transition-transform duration-200 lg:hidden flex flex-col">
+        <!-- Logo + close -->
+        <div class="flex items-center justify-between h-14 px-5 border-b border-slate-800">
+            <div class="flex items-center gap-2.5">
+                <div class="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center">
+                    <span class="text-white text-xs font-bold">A</span>
+                </div>
+                <span class="text-white text-sm font-semibold">Amkor Technology</span>
+            </div>
+            <button onclick="closeMobileMenu()" class="p-1 hover:text-white">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+
+        <!-- Mobile nav (same structure) -->
+        <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto sidebar-scroll">
+            {% set current_path = request.url.path %}
+            <a href="/" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {{ 'bg-blue-600 text-white' if current_path == '/' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                <i data-lucide="layout-dashboard" class="w-[18px] h-[18px]"></i><span>Home</span>
+            </a>
+            <a href="/requests" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {{ 'bg-blue-600 text-white' if current_path == '/requests' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                <i data-lucide="clipboard-list" class="w-[18px] h-[18px]"></i><span>All Requests</span>
+            </a>
+            {% if not (user and user.is_guest) %}
+            <a href="/my-requests" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {{ 'bg-blue-600 text-white' if current_path == '/my-requests' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                <i data-lucide="file-text" class="w-[18px] h-[18px]"></i><span>My Requests</span>
+            </a>
+            {% endif %}
+            <a href="/completed" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {{ 'bg-blue-600 text-white' if current_path == '/completed' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                <i data-lucide="check-circle-2" class="w-[18px] h-[18px]"></i><span>Completed</span>
+            </a>
+            {% if user and user.role in ['Admin', 'Planner'] %}
+            <a href="/approval" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {{ 'bg-blue-600 text-white' if current_path == '/approval' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                <i data-lucide="shield-check" class="w-[18px] h-[18px]"></i><span>Approval Queue</span>
+            </a>
+            {% endif %}
+            {% if user and user.role in ['Technician', 'Admin', 'Reliability Engineer', 'Planner'] %}
+            <a href="/loading-unloading" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {{ 'bg-blue-600 text-white' if current_path == '/loading-unloading' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                <i data-lucide="package-open" class="w-[18px] h-[18px]"></i><span>Loading / Unloading</span>
+            </a>
+            {% endif %}
+            {% if user and user.role in ['Admin', 'Reliability Engineer'] %}
+            <a href="/request-filter" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {{ 'bg-blue-600 text-white' if current_path == '/request-filter' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                <i data-lucide="list-filter" class="w-[18px] h-[18px]"></i><span>Request Filter</span>
+            </a>
+            {% endif %}
+            {% if user and not user.is_guest %}
+            <a href="/backup-viewer" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {{ 'bg-blue-600 text-white' if current_path == '/backup-viewer' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                <i data-lucide="archive" class="w-[18px] h-[18px]"></i><span>Backup Viewer</span>
+            </a>
+            {% endif %}
+            {% if user and user.role in ['Admin', 'Reliability Engineer'] %}
+            <a href="/retention-monitor" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {{ 'bg-blue-600 text-white' if current_path == '/retention-monitor' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                <i data-lucide="archive" class="w-[18px] h-[18px]"></i><span>Retention Monitor</span>
+            </a>
+            {% endif %}
+            {% if user and not user.is_guest %}
+            <a href="/settings" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {{ 'bg-blue-600 text-white' if current_path == '/settings' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                <i data-lucide="settings" class="w-[18px] h-[18px]"></i><span>Settings</span>
+            </a>
+            <a href="/users" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {{ 'bg-blue-600 text-white' if current_path == '/users' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                <i data-lucide="users" class="w-[18px] h-[18px]"></i><span>Users</span>
+            </a>
+            {% endif %}
+            {% if user and user.role == 'Admin' %}
+            <a href="/task-manager" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all {{ 'bg-blue-600 text-white' if current_path == '/task-manager' else 'text-slate-400 hover:text-white hover:bg-slate-800' }}">
+                <i data-lucide="monitor-dot" class="w-[18px] h-[18px]"></i><span>Task Manager</span>
+            </a>
+            {% endif %}
+        </nav>
+
+        <!-- Mobile user section -->
+        <div class="px-3 py-4 border-t border-slate-800">
+            {% if user %}
+            <div class="flex items-center gap-3 px-3 py-2">
+                <div class="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold text-white uppercase {{ 'bg-amber-600' if user.is_guest else 'bg-slate-700' }}">
+                    {{ user.username[0] if user.username else '?' }}
+                </div>
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-white truncate">{{ user.username }}</p>
+                    <p class="text-xs text-slate-500 truncate">{{ user.role }}</p>
+                </div>
+                <a href="/logout" class="p-1.5 rounded-md hover:bg-slate-800 hover:text-white transition-colors">
+                    <i data-lucide="log-out" class="w-4 h-4"></i>
+                </a>
+            </div>
+            {% endif %}
+        </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="flex-1 flex flex-col overflow-hidden min-w-0">
+        <!-- Mobile header (hidden on desktop, matching React Layout) -->
+        <div class="lg:hidden flex items-center h-14 px-4 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+            <button onclick="openMobileMenu()" class="p-2 rounded-md text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800">
+                <i data-lucide="menu" class="w-5 h-5"></i>
+            </button>
+            <h1 class="ml-3 text-lg font-bold text-slate-900 dark:text-white">RELDMS</h1>
+        </div>
+
+        <!-- Page content -->
+        <main class="flex-1 overflow-y-auto" style="scrollbar-gutter: stable">
+            <div class="p-6 md:p-8 max-w-7xl mx-auto">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                    <div class="mb-6">
+                        {% for category, message in messages %}
+                        <div class="px-4 py-3 rounded-lg mb-3 {% if category == 'error' %}bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300{% elif category == 'success' %}bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300{% else %}bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300{% endif %}">
+                            {{ message }}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                {% endwith %}
+
+                {% block page_content %}{% endblock %}
+            </div>
+        </main>
+    </main>
+</div>
+
+<script>
+    // Initialize Lucide icons
+    lucide.createIcons();
+
+    function openMobileMenu() {
+        document.getElementById('mobile-overlay').classList.remove('hidden');
+        document.getElementById('mobile-sidebar').classList.remove('-translate-x-full');
+    }
+    function closeMobileMenu() {
+        document.getElementById('mobile-overlay').classList.add('hidden');
+        document.getElementById('mobile-sidebar').classList.add('-translate-x-full');
+    }
+</script>
+
+{% block extra_js %}{% endblock %}
+{% endblock %}

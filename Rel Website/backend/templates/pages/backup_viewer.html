@@ -1,0 +1,471 @@
+{% extends "layout.html" %}
+
+{% block title %}Backup Viewer - REL Request Process Flow{% endblock %}
+{% block page_title %}Backup Viewer{% endblock %}
+
+{% block page_content %}
+<div class="flex h-[calc(100vh-8rem)] gap-0 -mt-2">
+    <!-- ─── Left Panel: Backup List ─── -->
+    <div id="leftPanel" class="w-72 flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col overflow-hidden rounded-l-lg">
+        <!-- Header -->
+        <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+            <h3 class="font-semibold text-sm">Backups</h3>
+            <div class="flex items-center gap-1">
+                <button onclick="createBackup()" id="btnCreate" title="Create Backup" class="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-700 text-primary-600">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                </button>
+                <button onclick="importFile()" title="Import File" class="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                </button>
+                <input type="file" id="fileInput" accept=".zip,.xlsx" class="hidden" onchange="handleFileImport(event)">
+            </div>
+        </div>
+
+        <!-- Backup List -->
+        <div id="backupList" class="flex-1 overflow-y-auto">
+            <!-- Loading -->
+            <div id="listLoading" class="flex items-center justify-center py-8">
+                <svg class="animate-spin h-5 w-5 text-primary-600" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+            </div>
+            <!-- Empty -->
+            <div id="listEmpty" class="hidden text-center py-8 px-4 text-slate-500 dark:text-slate-400 text-sm">
+                No backups found
+            </div>
+            <!-- Imported Files Section -->
+            <div id="importedSection" class="hidden">
+                <div class="px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-slate-200 dark:border-slate-700">
+                    <span class="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wider">Local Files</span>
+                </div>
+                <div id="importedList"></div>
+                <div class="border-b border-slate-200 dark:border-slate-700"></div>
+            </div>
+            <!-- Server Backups -->
+            <div id="serverBackups"></div>
+        </div>
+    </div>
+
+    <!-- ─── Center Panel: Backup Content Viewer ─── -->
+    <div id="centerPanel" class="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900 rounded-r-lg">
+        <!-- Empty State -->
+        <div id="emptyState" class="flex-1 flex items-center justify-center">
+            <div class="text-center">
+                <svg class="w-16 h-16 mx-auto text-slate-300 dark:text-slate-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>
+                <p class="text-slate-500 dark:text-slate-400 font-medium">Select a backup to view</p>
+                <p class="text-sm text-slate-400 dark:text-slate-500 mt-1">Choose from the list or import a file</p>
+            </div>
+        </div>
+
+        <!-- Loading State -->
+        <div id="contentLoading" class="hidden flex-1 flex items-center justify-center">
+            <div class="text-center">
+                <svg class="animate-spin h-8 w-8 mx-auto text-primary-600 mb-3" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                <p class="text-slate-500 dark:text-slate-400">Loading backup data...</p>
+            </div>
+        </div>
+
+        <!-- Error State -->
+        <div id="contentError" class="hidden flex-1 flex items-center justify-center px-8">
+            <div class="bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 px-6 py-4 rounded-lg max-w-md text-center">
+                <svg class="w-8 h-8 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+                <p id="errorMsg" class="font-medium">Failed to load backup</p>
+            </div>
+        </div>
+
+        <!-- Request List View -->
+        <div id="requestListView" class="hidden flex-1 flex flex-col overflow-hidden">
+            <!-- Toolbar -->
+            <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex items-center gap-3">
+                <div class="relative flex-1">
+                    <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                    <input type="text" id="reqSearch" oninput="filterRequests()" placeholder="Search requests..." class="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+                </div>
+                <span id="reqCount" class="text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap"></span>
+                <button onclick="downloadSelectedBackup()" title="Download this backup" class="p-2 rounded hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                </button>
+                <button onclick="deleteSelectedBackup()" title="Delete this backup" class="p-2 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                </button>
+            </div>
+            <!-- Request Cards -->
+            <div id="requestCards" class="flex-1 overflow-y-auto p-4 space-y-3"></div>
+            <!-- No results -->
+            <div id="noResults" class="hidden flex-1 flex items-center justify-center text-slate-500 dark:text-slate-400 text-sm">
+                No requests match your search
+            </div>
+        </div>
+
+        <!-- Request Detail View -->
+        <div id="requestDetailView" class="hidden flex-1 flex flex-col overflow-hidden">
+            <!-- Sticky Header -->
+            <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex items-center gap-3">
+                <button onclick="backToList()" class="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-700">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                </button>
+                <h3 id="detailTitle" class="font-semibold text-lg"></h3>
+            </div>
+            <!-- Detail Content -->
+            <div id="detailContent" class="flex-1 overflow-y-auto p-4 space-y-6"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ─── State ───
+let backups = [];
+let importedFiles = [];
+let selectedBackup = null;
+let allRequests = [];
+let filteredRequests = [];
+let selectedRequest = null;
+
+function getToken() { const m = document.cookie.match(/access_token=([^;]+)/); return m ? m[1] : null; }
+async function apiFetch(url, opts) {
+    const token = getToken();
+    const headers = { ...(opts?.headers || {}) };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const res = await fetch(url, { ...opts, headers, credentials: 'same-origin' });
+    if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || 'API error ' + res.status); }
+    return res.json();
+}
+function toast(msg, type) { if (window.showToast) window.showToast(msg, type); else alert(msg); }
+function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// ─── Init ───
+document.addEventListener('DOMContentLoaded', loadBackups);
+
+async function loadBackups() {
+    try {
+        document.getElementById('listLoading').classList.remove('hidden');
+        document.getElementById('listEmpty').classList.add('hidden');
+        backups = await apiFetch('/api/backups');
+        renderBackupList();
+    } catch(e) {
+        console.error('Failed to load backups:', e);
+        document.getElementById('listLoading').classList.add('hidden');
+        document.getElementById('listEmpty').classList.remove('hidden');
+        document.getElementById('listEmpty').textContent = 'Failed to load backups';
+    }
+}
+
+function renderBackupList() {
+    document.getElementById('listLoading').classList.add('hidden');
+    const container = document.getElementById('serverBackups');
+    
+    if (!backups.length && !importedFiles.length) {
+        document.getElementById('listEmpty').classList.remove('hidden');
+        container.innerHTML = '';
+        return;
+    }
+    document.getElementById('listEmpty').classList.add('hidden');
+    
+    // Render imported files
+    renderImportedList();
+    
+    // Render server backups
+    container.innerHTML = backups.map((b, i) => {
+        const isActive = selectedBackup && !selectedBackup._imported && selectedBackup.filename === b.filename;
+        const typeColor = b.type === 'Manual' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' 
+                         : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300';
+        const date = b.created_at ? new Date(b.created_at).toLocaleDateString() : '';
+        return `<div onclick="selectBackup(${i}, false)" class="px-3 py-2.5 cursor-pointer border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition ${isActive ? 'bg-primary-50 dark:bg-primary-900/20 border-l-2 border-l-primary-500' : ''}">
+            <div class="flex items-center justify-between mb-1">
+                <span class="text-sm font-medium truncate max-w-[160px]">${esc(b.filename)}</span>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold ${typeColor}">${esc(b.type || 'ZIP')}</span>
+            </div>
+            <div class="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <span>${date}</span>
+                ${b.size_mb ? `<span>· ${b.size_mb} MB</span>` : ''}
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function renderImportedList() {
+    const section = document.getElementById('importedSection');
+    const container = document.getElementById('importedList');
+    if (!importedFiles.length) {
+        section.classList.add('hidden');
+        return;
+    }
+    section.classList.remove('hidden');
+    container.innerHTML = importedFiles.map((f, i) => {
+        const isActive = selectedBackup && selectedBackup._imported && selectedBackup._importIndex === i;
+        return `<div class="px-3 py-2.5 cursor-pointer border-b border-slate-100 dark:border-slate-700/50 hover:bg-amber-50/50 dark:hover:bg-amber-900/10 transition flex items-center justify-between ${isActive ? 'bg-amber-50 dark:bg-amber-900/20 border-l-2 border-l-amber-500' : ''}">
+            <div onclick="selectBackup(${i}, true)" class="flex-1 min-w-0">
+                <div class="text-sm font-medium truncate">${esc(f.filename)}</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">${f.count} requests</div>
+            </div>
+            <button onclick="event.stopPropagation(); removeImported(${i})" class="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-400 hover:text-red-600 ml-1">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>`;
+    }).join('');
+}
+
+// ─── Select Backup ───
+async function selectBackup(index, isImported) {
+    showView('contentLoading');
+    
+    try {
+        if (isImported) {
+            const f = importedFiles[index];
+            selectedBackup = { _imported: true, _importIndex: index, filename: f.filename, requests: f.requests };
+        } else {
+            const b = backups[index];
+            selectedBackup = { _imported: false, filename: b.filename };
+            const data = await apiFetch('/api/backups/' + encodeURIComponent(b.filename) + '/preview');
+            selectedBackup.requests = data.requests || [];
+        }
+        allRequests = selectedBackup.requests || [];
+        filterRequests();
+        renderBackupList();
+        showView('requestListView');
+    } catch(e) {
+        console.error('Failed to load backup:', e);
+        document.getElementById('errorMsg').textContent = e.message || 'Failed to load backup';
+        showView('contentError');
+    }
+}
+
+function showView(id) {
+    ['emptyState','contentLoading','contentError','requestListView','requestDetailView'].forEach(v => {
+        document.getElementById(v).classList.toggle('hidden', v !== id);
+    });
+}
+
+// ─── Filter & Render Requests ───
+function filterRequests() {
+    const q = (document.getElementById('reqSearch').value || '').toLowerCase();
+    filteredRequests = allRequests.filter(r => {
+        if (!q) return true;
+        const fields = [r.request_number, r.device_name, r.customer, r.lot_number, r.originator, r.status].map(v => (v||'').toLowerCase());
+        return fields.some(f => f.includes(q));
+    });
+    
+    document.getElementById('reqCount').textContent = filteredRequests.length + ' of ' + allRequests.length + ' requests';
+    
+    const container = document.getElementById('requestCards');
+    const noResults = document.getElementById('noResults');
+    
+    if (!filteredRequests.length) {
+        container.innerHTML = '';
+        container.classList.add('hidden');
+        noResults.classList.remove('hidden');
+        return;
+    }
+    noResults.classList.add('hidden');
+    container.classList.remove('hidden');
+    
+    container.innerHTML = filteredRequests.map((r, i) => {
+        const statusColors = {
+            'incoming': 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+            'review': 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300',
+            'approval': 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
+            'testing': 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
+            'analysis': 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300',
+            'completed': 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
+            'discontinued': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+        };
+        const sc = statusColors[(r.status||'').toLowerCase()] || 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300';
+        
+        // Process steps mini timeline
+        let stepsHtml = '';
+        if (r.process_steps && r.process_steps.length) {
+            const total = r.process_steps.length;
+            const done = r.process_steps.filter(s => s.status === 'completed').length;
+            const pct = total > 0 ? Math.round(done/total*100) : 0;
+            stepsHtml = `<div class="mt-2">
+                <div class="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 mb-1">
+                    <span>${done}/${total} steps</span><span>${pct}%</span>
+                </div>
+                <div class="h-1.5 bg-slate-200 dark:bg-slate-600 rounded-full overflow-hidden">
+                    <div class="h-full bg-primary-500 rounded-full transition-all" style="width:${pct}%"></div>
+                </div>
+            </div>`;
+        }
+        
+        const deadline = r.deadline || r.target_completion;
+        const isOverdue = deadline && new Date(deadline) < new Date() && (r.status||'').toLowerCase() !== 'completed';
+        
+        return `<div onclick="viewRequest(${i})" class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4 cursor-pointer hover:shadow-md hover:border-primary-300 dark:hover:border-primary-600 transition">
+            <div class="flex items-start justify-between mb-2">
+                <div>
+                    <span class="text-sm font-bold text-primary-600 dark:text-primary-400">${esc(r.request_number)}</span>
+                    ${r.device_name ? `<span class="text-sm text-slate-600 dark:text-slate-400 ml-2">${esc(r.device_name)}</span>` : ''}
+                </div>
+                <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold ${sc}">${esc(r.status)}</span>
+            </div>
+            <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-600 dark:text-slate-400">
+                ${r.customer ? `<div><span class="text-slate-400">Customer:</span> ${esc(r.customer)}</div>` : ''}
+                ${r.lot_number ? `<div><span class="text-slate-400">Lot:</span> ${esc(r.lot_number)}</div>` : ''}
+                ${r.originator ? `<div><span class="text-slate-400">Created by:</span> ${esc(r.originator)}</div>` : ''}
+                ${deadline ? `<div><span class="text-slate-400">Deadline:</span> <span class="${isOverdue ? 'text-red-500 font-semibold' : ''}">${esc(deadline)}</span></div>` : ''}
+            </div>
+            ${stepsHtml}
+        </div>`;
+    }).join('');
+}
+
+// ─── View Request Detail ───
+function viewRequest(index) {
+    selectedRequest = filteredRequests[index];
+    if (!selectedRequest) return;
+    
+    document.getElementById('detailTitle').textContent = selectedRequest.request_number || 'Request Detail';
+    
+    const r = selectedRequest;
+    let html = '';
+    
+    // General Info
+    const fields = [
+        ['Request Number', r.request_number], ['Status', r.status], ['Device Name', r.device_name],
+        ['Customer', r.customer], ['Lot Number', r.lot_number], ['Classification', r.classification],
+        ['Originator', r.originator], ['Created At', r.created_at], ['Priority', r.priority],
+        ['Package Type', r.package_type], ['Operation', r.operation], ['Platform', r.platform],
+        ['Quantity', r.quantity], ['REL Team', r.rel_team], ['Purpose', r.purpose]
+    ].filter(([,v]) => v);
+    
+    html += `<div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-5">
+        <h4 class="font-semibold text-sm text-slate-800 dark:text-slate-200 mb-4">General Information</h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            ${fields.map(([label, val]) => `<div>
+                <span class="text-xs text-slate-500 dark:text-slate-400 block">${esc(label)}</span>
+                <span class="text-sm font-medium">${esc(String(val))}</span>
+            </div>`).join('')}
+        </div>
+    </div>`;
+    
+    // Purpose / Instructions
+    if (r.purpose || r.test_instructions) {
+        html += `<div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-5">
+            <h4 class="font-semibold text-sm text-slate-800 dark:text-slate-200 mb-3">Purpose & Instructions</h4>
+            ${r.purpose ? `<div class="mb-3"><span class="text-xs text-slate-500 dark:text-slate-400 block mb-1">Purpose</span><p class="text-sm">${esc(r.purpose)}</p></div>` : ''}
+            ${r.test_instructions ? `<div><span class="text-xs text-slate-500 dark:text-slate-400 block mb-1">Test Instructions</span><p class="text-sm whitespace-pre-wrap">${esc(r.test_instructions)}</p></div>` : ''}
+        </div>`;
+    }
+    
+    // Process Steps
+    if (r.process_steps && r.process_steps.length) {
+        html += `<div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-5">
+            <h4 class="font-semibold text-sm text-slate-800 dark:text-slate-200 mb-4">Process Steps (${r.process_steps.length})</h4>
+            <div class="space-y-3">
+                ${r.process_steps.map((s, si) => {
+                    const isDone = s.status === 'completed';
+                    const stepColor = isDone ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-900/10' : 'border-slate-200 dark:border-slate-700';
+                    const stepFields = [
+                        ['Machine #', s.machine_no], ['Operator', s.operator], ['Tray Count', s.tray_count],
+                        ['Qty In', s.quantity_in], ['Qty Out', s.quantity_out], ['Test Condition', s.test_condition],
+                        ['Start Time', s.start_time], ['End Time', s.end_time], ['Rack #', s.rack_no],
+                        ['Notes', s.notes]
+                    ].filter(([,v]) => v);
+                    return `<div class="border ${stepColor} rounded-lg p-3">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="w-6 h-6 rounded-full flex items-center justify-center text-xs ${isDone ? 'bg-emerald-500 text-white' : 'bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300'}">${si+1}</span>
+                            <span class="font-medium text-sm">${esc(s.step_name || s.name || 'Step ' + (si+1))}</span>
+                            ${isDone ? '<span class="text-emerald-600 dark:text-emerald-400 text-xs ml-auto">✓ Completed</span>' : ''}
+                        </div>
+                        ${stepFields.length ? `<div class="grid grid-cols-2 md:grid-cols-3 gap-2 ml-8 text-xs">
+                            ${stepFields.map(([l,v]) => `<div><span class="text-slate-500 dark:text-slate-400">${esc(l)}:</span> <span class="font-medium">${esc(String(v))}</span></div>`).join('')}
+                        </div>` : ''}
+                    </div>`;
+                }).join('')}
+            </div>
+        </div>`;
+    }
+    
+    document.getElementById('detailContent').innerHTML = html;
+    showView('requestDetailView');
+}
+
+function backToList() {
+    selectedRequest = null;
+    showView('requestListView');
+}
+
+// ─── Actions ───
+async function createBackup() {
+    if (!confirm('Create a backup now?\nNote: This will archive completed requests and remove them from the database.')) return;
+    const btn = document.getElementById('btnCreate');
+    btn.disabled = true;
+    btn.classList.add('opacity-50');
+    try {
+        const result = await apiFetch('/api/backups', { method: 'POST' });
+        toast(result.message || 'Backup created successfully', 'success');
+        await loadBackups();
+    } catch(e) {
+        toast('Failed to create backup: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.classList.remove('opacity-50');
+    }
+}
+
+function importFile() {
+    document.getElementById('fileInput').click();
+}
+
+async function handleFileImport(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    event.target.value = '';
+    
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const token = getToken();
+        const hdrs = {};
+        if (token) hdrs['Authorization'] = 'Bearer ' + token;
+        const res = await fetch('/api/backups/upload-preview', {
+            method: 'POST',
+            headers: hdrs,
+            credentials: 'same-origin',
+            body: formData
+        });
+        if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || 'Upload failed'); }
+        const data = await res.json();
+        
+        importedFiles.push({
+            filename: data.filename || file.name,
+            requests: data.requests || [],
+            count: data.count || (data.requests || []).length
+        });
+        renderBackupList();
+        toast('File imported: ' + (data.count || 0) + ' requests loaded', 'success');
+    } catch(e) {
+        toast('Import failed: ' + e.message, 'error');
+    }
+}
+
+function removeImported(index) {
+    const wasSelected = selectedBackup && selectedBackup._imported && selectedBackup._importIndex === index;
+    importedFiles.splice(index, 1);
+    if (wasSelected) {
+        selectedBackup = null;
+        allRequests = [];
+        showView('emptyState');
+    }
+    renderBackupList();
+}
+
+function downloadSelectedBackup() {
+    if (!selectedBackup || selectedBackup._imported) return;
+    window.location.href = '/api/backups/' + encodeURIComponent(selectedBackup.filename);
+}
+
+async function deleteSelectedBackup() {
+    if (!selectedBackup || selectedBackup._imported) return;
+    if (!confirm('Delete backup "' + selectedBackup.filename + '"?')) return;
+    try {
+        await apiFetch('/api/backups/' + encodeURIComponent(selectedBackup.filename), { method: 'DELETE' });
+        toast('Backup deleted', 'success');
+        selectedBackup = null;
+        allRequests = [];
+        showView('emptyState');
+        await loadBackups();
+    } catch(e) {
+        toast('Delete failed: ' + e.message, 'error');
+    }
+}
+</script>
+{% endblock %}

@@ -64,6 +64,16 @@ chainlit.md
 # Data and databases
 agenthub/agents/youtube/db
 
+# Backup files - Keep folder structure but ignore backup data
+Rel_Request_Backups/**/*.xlsx
+Rel_Request_Backups/**/*.xls
+Rel_Request_Backups/**/*.db
+Rel_Request_Backups/**/*.sqlite
+!Rel_Request_Backups/BACKUP_INFO.txt
+!Rel_Request_Backups/.gitignore
+backend/backups/**/*.db
+backend/backups/**/*.xlsx
+
 # Archive files and large assets
 **/*.zip
 **/*.tar.gz

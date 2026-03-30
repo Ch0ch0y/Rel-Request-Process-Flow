@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}REL Request Process Flow{% endblock %}</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: {
+                            50: '#eff6ff',
+                            100: '#dbeafe',
+                            200: '#bfdbfe',
+                            300: '#93c5fd',
+                            400: '#60a5fa',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                            800: '#1e40af',
+                            900: '#1e3a8a',
+                        }
+                    },
+                    fontSize: {
+                        xs: ['0.75rem', { lineHeight: '1rem' }],
+                        sm: ['0.875rem', { lineHeight: '1.25rem' }],
+                        base: ['1rem', { lineHeight: '1.5rem' }],
+                        lg: ['1.125rem', { lineHeight: '1.75rem' }],
+                        xl: ['1.25rem', { lineHeight: '1.75rem' }],
+                        '2xl': ['1.5rem', { lineHeight: '2rem' }],
+                    },
+                    animation: {
+                        'slide-in-right': 'slideInRight 0.3s ease-out',
+                    },
+                    keyframes: {
+                        slideInRight: {
+                            'from': { transform: 'translateX(100%)', opacity: '0' },
+                            'to': { transform: 'translateX(0)', opacity: '1' },
+                        },
+                    }
+                }
+            },
+            plugins: []
+        }
+    </script>
+    
+    <!-- Custom styles -->
+    <style>
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: #cbd5e1 #f1f5f9;
+        }
+        
+        *::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        
+        *::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        
+        *::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+        
+        *::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        
+        .dark *::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        
+        .dark *::-webkit-scrollbar-thumb {
+            background: #475569;
+        }
+        
+        .dark *::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+        
+        /* Force stable scrollbar gutter */
+        html {
+            overflow-y: scroll;
+            scrollbar-gutter: stable;
+        }
+        
+        /* Dark mode input styles */
+        .dark input,
+        .dark select,
+        .dark textarea {
+            background-color: #1e293b;
+            border-color: #334155;
+            color: #f1f5f9;
+        }
+        
+        .dark input:focus,
+        .dark select:focus,
+        .dark textarea:focus {
+            border-color: #3b82f6;
+            outline: none;
+        }
+        
+        .dark input::placeholder,
+        .dark textarea::placeholder {
+            color: #94a3b8;
+        }
+        
+        /* Modal styles */
+        body.modal-open {
+            overflow: hidden;
+        }
+        
+        .modal-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 40;
+        }
+        
+        /* Toast styles */
+        .toast {
+            animation: slideInRight 0.3s ease-out;
+        }
+        
+        /* Loading spinner */
+        .spinner {
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
+    
+    {% block extra_css %}{% endblock %}
+</head>
+<body class="bg-white text-slate-900 transition-colors duration-200 dark:bg-slate-950 dark:text-slate-100">
+    {% block content %}{% endblock %}
+    
+    <!-- Toast container -->
+    <div id="toast-container" class="fixed bottom-4 right-4 z-50 space-y-2"></div>
+    
+    <!-- Modal container -->
+    <div id="modal-container"></div>
+    
+    <!-- Theme persistence -->
+    <script>
+        // Load theme from localStorage
+        const theme = localStorage.getItem('theme') || 'light';
+        if (theme === 'dark') {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+        
+        // Theme toggle function
+        window.toggleTheme = function() {
+            const html = document.documentElement;
+            const isDark = html.classList.contains('dark');
+            
+            if (isDark) {
+                html.classList.remove('dark');
+                localStorage.setItem('theme', 'light');
+            } else {
+                html.classList.add('dark');
+                localStorage.setItem('theme', 'dark');
+            }
+        }
+        
+        // Toast notification function
+        window.showToast = function(message, type = 'info', duration = 5000) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            const bgColor = {
+                'info': 'bg-blue-500',
+                'success': 'bg-emerald-500',
+                'warning': 'bg-amber-500',
+                'error': 'bg-red-500'
+            }[type] || 'bg-blue-500';
+            
+            toast.className = `toast ${bgColor} text-white px-4 py-3 rounded-lg shadow-lg flex items-center justify-between`;
+            toast.innerHTML = `
+                <span>${message}</span>
+                <button onclick="this.parentElement.remove()" class="ml-2 text-white/75 hover:text-white">✕</button>
+            `;
+            
+            container.appendChild(toast);
+            
+            if (duration > 0) {
+                setTimeout(() => toast.remove(), duration);
+            }
+        }
+    </script>
+    
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

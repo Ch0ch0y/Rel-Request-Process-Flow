@@ -1,0 +1,28 @@
+# render.yaml — Render.com Infrastructure-as-Code Blueprint
+# Deploy with: https://render.com/deploy
+# Or connect your GitHub repo at https://dashboard.render.com
+
+services:
+  - type: web
+    name: rel-request
+    runtime: python
+    region: singapore  # Closest to Amkor Philippines/Asia — change if needed
+    plan: free         # Free tier (spins down after 15 min idle, wakes on request)
+    buildCommand: |
+      pip install --upgrade pip &&
+      pip install -r backend/requirements.txt &&
+      cd frontend && npm install && npm run build
+    startCommand: cd backend && uvicorn server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true     # Render auto-generates a secure random value
+      - key: DB_PATH
+        value: /opt/render/project/src/backend/rel_database.db
+      - key: CORS_ORIGINS
+        value: "*"              # Restrict to your Render URL after first deploy
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+    disk:
+      name: rel-data
+      mountPath: /opt/render/project/src/backend
+      sizeGB: 1                 # 1 GB persistent disk for SQLite + uploads

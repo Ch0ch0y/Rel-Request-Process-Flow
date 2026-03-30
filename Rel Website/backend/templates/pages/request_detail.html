@@ -1,0 +1,898 @@
+{% extends "layout.html" %}
+
+{% block title %}Request #{{ request_data['request_number'] }} - REL Request{% endblock %}
+{% block page_title %}Request #{{ request_data['request_number'] }}{% endblock %}
+
+{% block page_content %}
+{# ── Precompute step stats ────────────────────────────────────────────── #}
+{% set total_steps = steps | length %}
+{% set completed_steps = steps | selectattr('status', 'equalto', 'completed') | list | length %}
+{% set pct = ((completed_steps / total_steps * 100) | round | int) if total_steps > 0 else 0 %}
+{% set legs = steps | map(attribute='leg') | unique | list %}
+{% set STATUS = request_data['status'] or 'incoming' %}
+{% set ROLE = user.role %}
+{% set CAN_EDIT = (user.id == request_data['created_by']) or ROLE in ['Admin','Technician','ADMIN','TECHNICIAN'] %}
+{% set IS_ADMIN_PLANNER = ROLE in ['Admin','Planner','ADMIN','PLANNER'] %}
+
+<div class="space-y-6">
+
+    <!-- ═══════════════ 1. HEADER BAR ═══════════════ -->
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 px-6 py-4">
+        <div class="flex flex-wrap items-center gap-3">
+            <a href="/requests" class="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500" title="Back to Requests">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+            </a>
+            <h1 class="text-xl font-bold font-mono text-blue-700 dark:text-blue-400">{{ request_data['request_number'] }}</h1>
+            {% if request_data['original_rr_number'] %}
+            <span class="px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 rounded-full">Orig: {{ request_data['original_rr_number'] }}</span>
+            {% endif %}
+            <!-- Status Badge -->
+            <span id="header-status" class="px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase
+                {%- if STATUS == 'completed' %} bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300
+                {%- elif STATUS == 'discontinued' %} bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300
+                {%- elif STATUS == 'approval' %} bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300
+                {%- elif STATUS == 'review' %} bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300
+                {%- elif STATUS in ['testing','in_progress'] %} bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300
+                {%- elif STATUS == 'analysis' %} bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300
+                {%- else %} bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300{%- endif %}">
+                {{ STATUS | replace('_', ' ') }}
+            </span>
+            {% if request_data['automotive'] %}
+            <span class="px-2 py-0.5 text-xs font-medium bg-sky-100 text-sky-800 rounded-full">Automotive</span>
+            {% endif %}
+            <span class="px-2 py-0.5 text-xs bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded">{{ request_data['request_type'] or 'REL' }}</span>
+            <div class="flex-1"></div>
+            <!-- Download Report -->
+            <a href="/api/requests/{{ request_data['id'] }}/report" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                Download .xlsx
+            </a>
+        </div>
+        <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">
+            Created by <strong>{{ request_data['created_by_username'] or '—' }}</strong>
+            &bull; {{ (request_data['created_at'] or '')[:10] }}
+            {% if request_data['deadline'] %}&bull; Due: <strong>{{ request_data['deadline'] }}</strong>{% endif %}
+        </p>
+    </div>
+
+    <!-- ═══════════════ 2. PROGRESS BAR ═══════════════ -->
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 px-6 py-4">
+        <div class="flex items-center justify-between mb-2">
+            <span class="text-sm font-medium text-slate-700 dark:text-slate-300">Progress</span>
+            <span class="text-sm text-slate-500">{{ completed_steps }} / {{ total_steps }} steps ({{ pct }}%)</span>
+        </div>
+        <div class="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2.5">
+            <div class="bg-blue-600 h-2.5 rounded-full transition-all" style="width:{{ pct }}%"></div>
+        </div>
+    </div>
+
+    <!-- ═══════════════ 3. PLANNER ESTIMATION ═══════════════ -->
+    {% if IS_ADMIN_PLANNER or request_data['planner_est_start'] or request_data['planner_est_end'] or request_data['planner_note'] %}
+    <div id="planner-section" class="bg-white dark:bg-slate-800 rounded-xl shadow border-2 border-amber-200 dark:border-amber-800 px-6 py-4">
+        <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+                <svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                <h3 class="font-semibold text-amber-800 dark:text-amber-300">Planner Estimation</h3>
+            </div>
+            {% if IS_ADMIN_PLANNER %}
+            <button onclick="togglePlannerEdit()" id="planner-edit-btn" class="text-xs px-2 py-1 border border-amber-300 rounded hover:bg-amber-50 dark:hover:bg-amber-900/30 text-amber-700 dark:text-amber-300">✏️ Edit</button>
+            {% endif %}
+        </div>
+        <!-- Read mode -->
+        <div id="planner-read" class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+            <div><span class="text-slate-500 text-xs uppercase tracking-wide block mb-0.5">Est. Start</span><span class="font-medium">{{ request_data['planner_est_start'] or '—' }}</span></div>
+            <div><span class="text-slate-500 text-xs uppercase tracking-wide block mb-0.5">Est. End</span><span class="font-medium">{{ request_data['planner_est_end'] or '—' }}</span></div>
+            <div><span class="text-slate-500 text-xs uppercase tracking-wide block mb-0.5">Note</span><span class="font-medium">{{ request_data['planner_note'] or '—' }}</span></div>
+        </div>
+        <!-- Edit mode -->
+        <div id="planner-edit" class="hidden space-y-3">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div><label class="block text-xs font-medium mb-1">Est. Start</label><input type="datetime-local" id="pe-start" value="{{ request_data['planner_est_start'] or '' }}" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm"></div>
+                <div><label class="block text-xs font-medium mb-1">Est. End</label><input type="datetime-local" id="pe-end" value="{{ request_data['planner_est_end'] or '' }}" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm"></div>
+            </div>
+            <div><label class="block text-xs font-medium mb-1">Planner Note</label><textarea id="pe-note" rows="2" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">{{ request_data['planner_note'] or '' }}</textarea></div>
+            <div class="flex gap-2">
+                <button onclick="savePlannerEstimation()" class="px-4 py-1.5 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700">Save</button>
+                <button onclick="togglePlannerEdit()" class="px-4 py-1.5 border border-slate-300 rounded-lg text-sm hover:bg-slate-50 dark:hover:bg-slate-700">Cancel</button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ═══════════════ 4. WORKFLOW ACTION BUTTONS ═══════════════ -->
+    {% if STATUS not in ['completed', 'discontinued'] %}
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 px-6 py-4">
+        <h3 class="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">Workflow Actions</h3>
+        <div class="flex flex-wrap gap-2" id="wf-btns">
+            {% if STATUS in ['incoming', 'pending', 'in_progress'] %}
+            <button onclick="workflowAction('submit-review')" class="wf-btn inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+                Submit for Review
+            </button>
+            {% endif %}
+            {% if STATUS == 'review' %}
+            <button onclick="workflowAction('submit-approval')" class="wf-btn inline-flex items-center gap-1.5 px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                Submit for Approval
+            </button>
+            {% endif %}
+            {% if STATUS == 'approval' and IS_ADMIN_PLANNER %}
+            <button onclick="workflowAction('approve')" class="wf-btn inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5"/></svg>
+                Approve
+            </button>
+            <button onclick="workflowAction('reject')" class="wf-btn inline-flex items-center gap-1.5 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5"/></svg>
+                Reject
+            </button>
+            {% endif %}
+            {% if STATUS in ['analysis', 'testing', 'in_progress'] %}
+            <button onclick="completeReport()" id="complete-btn" class="wf-btn inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+                {% if completed_steps < total_steps %}disabled title="All steps must be completed first"{% endif %}>
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                Complete Report
+            </button>
+            {% endif %}
+            {% if IS_ADMIN_PLANNER %}
+            <button onclick="discontinueRequest()" class="wf-btn inline-flex items-center gap-1.5 px-4 py-2 bg-rose-100 text-rose-700 text-sm font-medium rounded-lg hover:bg-rose-200 border border-rose-200 ml-auto">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+                Discontinue
+            </button>
+            {% endif %}
+        </div>
+        <p id="wf-msg" class="hidden mt-2 text-sm font-medium"></p>
+    </div>
+    {% endif %}
+
+    <!-- ═══════════════ 5a. DISCONTINUED INFO ═══════════════ -->
+    {% if STATUS == 'discontinued' %}
+    <div class="bg-rose-50 dark:bg-rose-900/20 rounded-xl border-2 border-rose-200 dark:border-rose-800 px-6 py-4">
+        <h3 class="font-semibold text-rose-800 dark:text-rose-300 mb-3">Discontinued</h3>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+            <div><span class="text-rose-500 text-xs uppercase block mb-0.5">Date</span><span class="font-medium">{{ (request_data['discontinued_at'] or '—')[:16] | replace('T', ' ') }}</span></div>
+            <div><span class="text-rose-500 text-xs uppercase block mb-0.5">By</span><span class="font-medium">{{ request_data['discontinued_by'] or '—' }}</span></div>
+            <div><span class="text-rose-500 text-xs uppercase block mb-0.5">Reason</span><span class="font-medium">{{ request_data['discontinued_reason'] or '—' }}</span></div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ═══════════════ 5b. ANALYSIS NOTES (for analysis status) ═══════════════ -->
+    {% if STATUS == 'analysis' %}
+    <div class="bg-teal-50 dark:bg-teal-900/20 rounded-xl border-2 border-teal-200 dark:border-teal-800 px-6 py-4">
+        <h3 class="font-semibold text-teal-800 dark:text-teal-300 mb-3">Analysis</h3>
+        <textarea id="analysis-notes" rows="4" class="w-full px-3 py-2 border border-teal-300 dark:border-teal-600 rounded-lg bg-white dark:bg-slate-700 text-sm" placeholder="Enter analysis notes…">{{ request_data['analysis_notes'] or '' }}</textarea>
+        <div class="flex gap-2 mt-3">
+            <button onclick="saveAnalysisNotes()" class="px-4 py-1.5 bg-teal-600 text-white text-sm rounded-lg hover:bg-teal-700">Save Notes</button>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ═══════════════ 5c. PUBLIC NOTE ═══════════════ -->
+    <div id="note-section" class="rounded-xl shadow border px-6 py-4
+        {% if request_data['note'] %}bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-700{% else %}bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700{% endif %}">
+        <div class="flex items-center justify-between mb-2">
+            <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                <svg class="w-4 h-4 inline -mt-0.5 mr-1 text-amber-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
+                Public Notice
+            </h3>
+            {% if CAN_EDIT %}
+            <div class="flex gap-1">
+                <button onclick="toggleNoteEdit()" id="note-edit-btn" class="text-slate-400 hover:text-blue-600 p-1" title="Edit note">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                </button>
+                {% if request_data['note'] %}
+                <button onclick="deleteNote()" class="text-slate-400 hover:text-red-600 p-1" title="Delete note">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                </button>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+        <div id="note-read">
+            {% if request_data['note'] %}
+            <p class="text-sm whitespace-pre-wrap text-amber-900 dark:text-amber-200">{{ request_data['note'] }}</p>
+            {% else %}
+            <p class="text-sm text-slate-400 italic">No public notice set.</p>
+            {% endif %}
+        </div>
+        <div id="note-edit" class="hidden space-y-2">
+            <textarea id="note-text" rows="3" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">{{ request_data['note'] or '' }}</textarea>
+            <div class="flex gap-2">
+                <button onclick="saveNote()" class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">Save</button>
+                <button onclick="toggleNoteEdit()" class="px-3 py-1.5 border border-slate-300 rounded-lg text-sm hover:bg-slate-50 dark:hover:bg-slate-700">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════ 6. REQUEST INFORMATION (collapsible) ═══════════════ -->
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700">
+        <button onclick="document.getElementById('info-body').classList.toggle('hidden');this.querySelector('.chevron').classList.toggle('rotate-180')"
+            class="w-full px-6 py-4 flex items-center justify-between text-left">
+            <h3 class="font-semibold">Request Information</h3>
+            <svg class="chevron w-5 h-5 text-slate-400 transition-transform rotate-180" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div id="info-body">
+            <form id="req-detail-form" class="px-6 pb-6 space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
+                    {% macro info_field(label, name, val, readonly=false, type='text') %}
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-0.5">{{ label }}</label>
+                        {% if not CAN_EDIT or readonly %}
+                        <p class="text-sm font-medium">{{ val or '—' }}</p>
+                        {% else %}
+                        <input type="{{ type }}" name="{{ name }}" value="{{ val or '' }}" class="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+                        {% endif %}
+                    </div>
+                    {% endmacro %}
+
+                    {{ info_field('Classification', 'classification', request_data['classification']) }}
+                    {{ info_field('Originator', 'originator', request_data['originator']) }}
+                    {{ info_field('Plant', 'plant', request_data['plant']) }}
+                    {{ info_field('Device Name', 'device_name', request_data['device_name']) }}
+                    {{ info_field('Lot #', 'lot_no', request_data['lot_no']) }}
+                    {{ info_field('Customer', 'customer', request_data['customer']) }}
+                    {{ info_field('Pkg Info', 'pkg_info', request_data['pkg_info']) }}
+                    {{ info_field('Automotive', 'automotive', 'Yes' if request_data['automotive'] else 'No', readonly=true) }}
+                </div>
+
+                <!-- Right column extra fields -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3 pt-2 border-t border-slate-100 dark:border-slate-700 mt-2">
+                    {{ info_field('Date LTC', 'date_ltc', request_data['date_ltc'], type='date') }}
+                    {{ info_field('Product Hierarchy', 'product_hierarchy', request_data['product_hierarchy']) }}
+                    {{ info_field('PDL', 'pdl', request_data['pdl']) }}
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-0.5">Body Size</label>
+                        <p class="text-sm font-medium">{{ request_data['body_size_x'] or '—' }} × {{ request_data['body_size_y'] or '—' }} mm</p>
+                    </div>
+                    {{ info_field('Package Thickness', 'package_thickness', request_data['package_thickness'], readonly=true) }}
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-0.5">Ball</label>
+                        <p class="text-sm font-medium">Pitch: {{ request_data['ball_pitch'] or '—' }} &bull; Count: {{ request_data['ball_count'] or '—' }}</p>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-0.5">Lead</label>
+                        <p class="text-sm font-medium">Pitch: {{ request_data['lead_pitch'] or '—' }} &bull; Count: {{ request_data['lead_count'] or '—' }}</p>
+                    </div>
+                    {{ info_field('Total SS', 'total_ss', request_data['total_ss']) }}
+                </div>
+
+                <div class="pt-2 border-t border-slate-100 dark:border-slate-700">
+                    <label class="block text-xs font-medium text-slate-500 mb-0.5">Purpose</label>
+                    {% if CAN_EDIT %}
+                    <textarea name="purpose" rows="2" class="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">{{ request_data['purpose'] or '' }}</textarea>
+                    {% else %}
+                    <p class="text-sm">{{ request_data['purpose'] or '—' }}</p>
+                    {% endif %}
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-500 mb-0.5">Deadline</label>
+                    {% if CAN_EDIT %}
+                    <input type="date" name="deadline" value="{{ request_data['deadline'] or '' }}" class="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+                    {% else %}
+                    <p class="text-sm font-medium">{{ request_data['deadline'] or '—' }}</p>
+                    {% endif %}
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-500 mb-0.5">Engineer Special Instructions</label>
+                    {% if CAN_EDIT %}
+                    <textarea name="engineer_special_instruction" rows="2" class="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">{{ request_data['engineer_special_instruction'] or '' }}</textarea>
+                    {% else %}
+                    <p class="text-sm whitespace-pre-wrap">{{ request_data['engineer_special_instruction'] or '—' }}</p>
+                    {% endif %}
+                </div>
+
+                {% if CAN_EDIT %}
+                <div class="flex gap-2 pt-2">
+                    <button type="button" onclick="saveRequestDetails()" class="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
+                        Save Changes
+                    </button>
+                </div>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+
+    <!-- ═══════════════ 7. LEG TABS ═══════════════ -->
+    {% if legs | length > 0 %}
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 px-6 py-3">
+        <div class="flex items-center gap-2 flex-wrap" id="leg-tabs">
+            {% for leg in legs %}
+            <button onclick="switchLeg({{ leg }})" class="leg-tab px-4 py-1.5 text-sm font-medium rounded-lg transition
+                {% if loop.first %}bg-blue-600 text-white{% else %}bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300{% endif %}"
+                data-leg="{{ leg }}">
+                LEG {{ leg }}
+            </button>
+            {% endfor %}
+            {% if CAN_EDIT %}
+            <button onclick="addLeg()" class="px-3 py-1.5 text-sm font-medium border border-dashed border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-500">+ Add LEG</button>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ═══════════════ 8. PROCESS STEPS (collapsible) ═══════════════ -->
+    <div class="rounded-xl shadow border border-slate-200 dark:border-slate-700 overflow-hidden">
+        <button onclick="document.getElementById('steps-body').classList.toggle('hidden');this.querySelector('.chevron').classList.toggle('rotate-180')"
+            class="w-full bg-slate-700 dark:bg-slate-900 text-white px-6 py-3 flex items-center justify-between text-left">
+            <span class="font-semibold text-sm">Process Steps</span>
+            <div class="flex items-center gap-3">
+                <span class="text-xs text-slate-300" id="steps-count-label">{{ total_steps }} steps</span>
+                <svg class="chevron w-5 h-5 text-slate-300 transition-transform rotate-180" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+            </div>
+        </button>
+        <div id="steps-body" class="bg-white dark:bg-slate-800">
+            <div class="px-6 py-3 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
+                <span class="text-sm text-slate-500">Showing steps for current LEG</span>
+                {% if CAN_EDIT or IS_ADMIN_PLANNER or ROLE in ['Technician', 'TECHNICIAN'] %}
+                <button onclick="openAddStepModal()" class="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+                    Add Step
+                </button>
+                {% endif %}
+            </div>
+            {% if steps %}
+            <div class="divide-y divide-slate-100 dark:divide-slate-700" id="steps-list">
+                {% set ns = namespace(current_leg=-1) %}
+                {% for step in steps %}
+                    {% if step['leg'] != ns.current_leg %}
+                        {% set ns.current_leg = step['leg'] %}
+                    {% endif %}
+                    <div class="step-row px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors cursor-pointer" data-leg="{{ step['leg'] }}" data-step-num="{{ step['step_number'] }}"
+                        onclick='openEditStep("{{ request_data["id"] }}", {{ step["leg"] }}, {{ step["step_number"] }}, {{ {"step_name": step["step_name"], "status": step["status"], "machine_no": step["machine_no"], "rack_no": step["rack_no"], "operator_id": step["operator_id"], "tray_no": step["tray_no"], "qty_in": step["qty_in"], "qty_out": step["qty_out"], "notes": step["notes"], "started_at": step["started_at"], "completed_at": step["completed_at"]} | tojson }})'>
+                        <div class="flex items-start gap-3">
+                            <div class="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-sm mt-0.5
+                            {%- if step['status'] == 'completed' %} bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600
+                            {%- elif step['status'] == 'in_progress' %} bg-blue-100 dark:bg-blue-900/30 text-blue-600 animate-pulse
+                            {%- elif step['status'] == 'on_hold' %} bg-amber-100 dark:bg-amber-900/30 text-amber-600
+                            {%- else %} bg-slate-100 dark:bg-slate-700 text-slate-400{%- endif %}">
+                                {% if step['status'] == 'completed' %}✓{% elif step['status'] == 'in_progress' %}▶{% elif step['status'] == 'on_hold' %}⏸{% else %}○{% endif %}
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <span class="font-medium text-sm">{{ step['step_number'] }}. {{ step['step_name'] }}</span>
+                                    <span class="px-2 py-0.5 text-xs rounded-full font-medium
+                                    {%- if step['status'] == 'completed' %} bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400
+                                    {%- elif step['status'] == 'in_progress' %} bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400
+                                    {%- elif step['status'] == 'on_hold' %} bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400
+                                    {%- else %} bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400{%- endif %}">
+                                        {{ (step['status'] or 'pending') | replace('_',' ') | title }}
+                                    </span>
+                                    <span class="text-xs text-slate-400 bg-slate-50 dark:bg-slate-700 px-1.5 py-0.5 rounded">LEG {{ step['leg'] }}</span>
+                                </div>
+                                <div class="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-slate-500 dark:text-slate-400">
+                                    {% if step['machine_no'] %}
+                                    <span>🔧 {{ step['machine_no'] }}{% if step['rack_no'] %} / Rack: <strong>{{ step['rack_no'] }}</strong>{% endif %}</span>
+                                    {% endif %}
+                                    {% if step['started_at'] %}<span>▶ {{ step['started_at'][:16] | replace('T', ' ') }}</span>{% endif %}
+                                    {% if step['completed_at'] %}<span>✓ {{ step['completed_at'][:16] | replace('T', ' ') }}</span>{% endif %}
+                                    {% if step['tray_no'] %}<span>Tray: {{ step['tray_no'] }}</span>{% endif %}
+                                    {% if step['qty_in'] is not none %}<span>In: {{ step['qty_in'] }}{% if step['qty_out'] is not none %} → Out: {{ step['qty_out'] }}{% endif %}</span>{% endif %}
+                                    {% set cf = step.get('custom_fields', {}) or {} %}
+                                    {% if cf.get('test_item') %}<span class="text-blue-600 dark:text-blue-400">📋 {{ cf['test_item'] }}</span>{% endif %}
+                                    {% if cf.get('test_condition') %}<span class="text-violet-600 dark:text-violet-400">🧪 {{ cf['test_condition'] }}</span>{% endif %}
+                                    {% if step['notes'] %}<span class="w-full italic mt-0.5">{{ step['notes'][:120] }}{% if step['notes'] | length > 120 %}…{% endif %}</span>{% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="p-8 text-center text-slate-400">
+                <svg class="w-10 h-10 mx-auto mb-2 text-slate-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                No process steps added yet.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- ═══════════════ 9. REL TEST TRAVELLER TABLE (collapsible) ═══════════════ -->
+    {% if steps | length > 0 %}
+    <div class="rounded-xl shadow border border-slate-200 dark:border-slate-700 overflow-hidden">
+        <button onclick="document.getElementById('traveller-body').classList.toggle('hidden');this.querySelector('.chevron').classList.toggle('rotate-180')"
+            class="w-full bg-slate-700 dark:bg-slate-900 text-white px-6 py-3 flex items-center justify-between text-left">
+            <span class="font-semibold text-sm">Rel Test Traveller — {{ request_data['request_number'] }}</span>
+            <svg class="chevron w-5 h-5 text-slate-300 transition-transform" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div id="traveller-body" class="hidden bg-white dark:bg-slate-800 overflow-x-auto">
+            {% for leg_num in legs %}
+            <div class="traveller-leg" data-leg="{{ leg_num }}">
+                <div class="px-4 py-2 bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-600 flex items-center gap-2">
+                    <span class="text-xs font-bold tracking-widest text-slate-500 uppercase">Rel Test Traveller — REL</span>
+                    <span class="px-2 py-0.5 text-xs font-bold bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 rounded">LEG {{ leg_num }}</span>
+                </div>
+                <table class="w-full text-xs">
+                    <thead>
+                        <tr class="bg-blue-600 text-white">
+                            <th class="px-2 py-2 text-left font-medium whitespace-nowrap">Test Item</th>
+                            <th class="px-2 py-2 text-left font-medium whitespace-nowrap">Test Condition</th>
+                            <th class="px-2 py-2 text-center font-medium">Qty IN</th>
+                            <th class="px-2 py-2 text-left font-medium whitespace-nowrap">Date/Time IN</th>
+                            <th class="px-2 py-2 text-left font-medium whitespace-nowrap">Date/Time OUT</th>
+                            <th class="px-2 py-2 text-left font-medium">Operator</th>
+                            <th class="px-2 py-2 text-left font-medium whitespace-nowrap">Machine No.</th>
+                            <th class="px-2 py-2 text-center font-medium">Qty OUT</th>
+                            <th class="px-2 py-2 text-left font-medium">Tray No.</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+                        {% set leg_steps = steps | selectattr('leg', 'equalto', leg_num) | list %}
+                        {% for step in leg_steps %}
+                        {% set cf = step.get('custom_fields', {}) or {} %}
+                        <tr class="{% if step['status'] == 'completed' %}bg-emerald-50/50 dark:bg-emerald-900/10{% elif step['status'] == 'in_progress' %}bg-blue-50/50 dark:bg-blue-900/10{% endif %} hover:bg-slate-50 dark:hover:bg-slate-700/30"
+                            data-request-id="{{ request_data['id'] }}" data-leg="{{ step['leg'] }}" data-step-num="{{ step['step_number'] }}">
+                            <td class="px-2 py-2 font-medium">{{ cf.get('test_item') or step['step_name'] }}</td>
+                            <td class="px-2 py-2 editable-cell" data-field="test_condition" data-type="text">{{ cf.get('test_condition', '') }}</td>
+                            <td class="px-2 py-2 text-center editable-cell" data-field="qty_in" data-type="number">{{ step['qty_in'] if step['qty_in'] is not none else '' }}</td>
+                            <td class="px-2 py-2 editable-cell" data-field="started_at" data-type="datetime-local">{{ (step['started_at'] or '')[:16] | replace('T', ' ') }}</td>
+                            <td class="px-2 py-2 editable-cell" data-field="completed_at" data-type="datetime-local">{{ (step['completed_at'] or '')[:16] | replace('T', ' ') }}</td>
+                            <td class="px-2 py-2 editable-cell" data-field="operator_id" data-type="select">{{ step['operator_id'] or '' }}</td>
+                            <td class="px-2 py-2 editable-cell" data-field="machine_no" data-type="text">{{ step['machine_no'] or '' }}</td>
+                            <td class="px-2 py-2 text-center editable-cell" data-field="qty_out" data-type="number">{{ step['qty_out'] if step['qty_out'] is not none else '' }}</td>
+                            <td class="px-2 py-2 editable-cell" data-field="tray_no" data-type="text">{{ step['tray_no'] or '' }}</td>
+                        </tr>
+                        {% endfor %}
+                        {% if not leg_steps %}
+                        <tr><td colspan="9" class="px-4 py-6 text-center text-slate-400 italic">No steps in this leg yet.</td></tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+
+<!-- ====== Step Edit / Add Modal ====== -->
+<div id="step-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 sticky top-0 bg-white dark:bg-slate-800 z-10">
+            <h3 id="step-modal-title" class="text-lg font-semibold">Edit Process Step</h3>
+            <button onclick="closeStepModal()" class="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-2xl leading-none">&times;</button>
+        </div>
+        <div class="p-6 space-y-4">
+            <input type="hidden" id="sf-request-id">
+            <input type="hidden" id="sf-leg">
+            <input type="hidden" id="sf-step-number">
+
+            <div>
+                <label class="block text-sm font-medium mb-1">Step Name *</label>
+                <input id="sf-step-name" list="step-names-list" autocomplete="off"
+                    class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm"
+                    placeholder="Select or type a step name">
+                <datalist id="step-names-list">
+                    {% for name in available_step_names %}
+                    <option value="{{ name }}">
+                    {% endfor %}
+                </datalist>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">Status</label>
+                    <select id="sf-status" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+                        <option value="pending">Pending</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="completed">Completed</option>
+                        <option value="on_hold">On Hold</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Leg</label>
+                    <input type="number" id="sf-leg-display" min="1" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">Machine No</label>
+                    <select id="sf-machine-no" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+                        <option value="">— Select Machine —</option>
+                        {% for m in machines %}
+                        <option value="{{ m['machine_no'] }}">{{ m['machine_no'] }}{% if m['description'] %} — {{ m['description'] }}{% endif %}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Rack No / Name</label>
+                    <input type="text" id="sf-rack-no" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm" placeholder="e.g. R-03 or Rack A">
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium mb-1">Operator (Employee)</label>
+                <select id="sf-operator-id" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+                    <option value="">— Select Operator —</option>
+                    {% for emp in employees %}
+                    <option value="{{ emp['id'] }}">{{ emp['name'] }}{% if emp['position'] %} ({{ emp['position'] }}){% endif %}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">Tray No</label>
+                    <input type="text" id="sf-tray-no" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm" placeholder="e.g. T-001">
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Qty In</label>
+                        <input type="number" id="sf-qty-in" min="0" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Qty Out</label>
+                        <input type="number" id="sf-qty-out" min="0" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">Start of Process</label>
+                    <input type="datetime-local" id="sf-started-at" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">End of Process</label>
+                    <input type="datetime-local" id="sf-completed-at" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium mb-1">Notes</label>
+                <textarea id="sf-notes" rows="2" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm" placeholder="Optional notes…"></textarea>
+            </div>
+
+            <div id="step-modal-error" class="hidden text-red-600 text-sm bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded-lg"></div>
+
+            <div class="flex justify-end gap-2 pt-2">
+                <button type="button" onclick="closeStepModal()" class="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm hover:bg-slate-50 dark:hover:bg-slate-700">Cancel</button>
+                <button type="button" onclick="saveStep()" id="step-save-btn" class="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 font-medium">Save Step</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const REQ_ID  = '{{ request_data["id"] }}';
+const STATUS  = '{{ STATUS }}';
+const ROLE    = '{{ ROLE }}';
+let currentLeg = {{ legs[0] if legs else 1 }};
+
+/* ── Helpers ────────────────────────────────────────────────── */
+function getToken() { const m = document.cookie.match(/access_token=([^;]+)/); return m ? m[1] : null; }
+async function apiFetch(url, opts) {
+    const token = getToken();
+    const headers = { ...(opts?.headers || {}) };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const res = await fetch(url, { ...opts, headers, credentials: 'same-origin' });
+    if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || 'API error ' + res.status); }
+    return res.json();
+}
+function toast(msg, type) { if (window.showToast) window.showToast(msg, type); else alert(msg); }
+
+/* ── LEG switching ──────────────────────────────────────────── */
+function switchLeg(leg) {
+    currentLeg = leg;
+    document.querySelectorAll('.leg-tab').forEach(t => {
+        const isActive = parseInt(t.dataset.leg) === leg;
+        t.className = t.className.replace(/bg-blue-600 text-white|bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300/g, '');
+        t.classList.add(...(isActive ? ['bg-blue-600','text-white'] : ['bg-slate-100','text-slate-600','hover:bg-slate-200','dark:bg-slate-700','dark:text-slate-300']));
+    });
+    document.querySelectorAll('.step-row').forEach(r => r.style.display = parseInt(r.dataset.leg) === leg ? '' : 'none');
+    document.querySelectorAll('.traveller-leg').forEach(t => t.style.display = parseInt(t.dataset.leg) === leg ? '' : 'none');
+}
+// Initialize: show only first leg
+document.addEventListener('DOMContentLoaded', () => switchLeg(currentLeg));
+
+async function addLeg() {
+    const legs = [...document.querySelectorAll('.leg-tab')].map(t => parseInt(t.dataset.leg));
+    const nextLeg = Math.max(0, ...legs) + 1;
+    toast('Leg ' + nextLeg + ' created. Add steps via the modal.', 'success');
+    location.reload();
+}
+
+/* ── Workflow actions ──────────────────────────────────────── */
+async function workflowAction(action) {
+    const labels = {'submit-review':'Submit for Review','submit-approval':'Submit for Approval','approve':'Approve','reject':'Reject'};
+    if (!confirm(`${labels[action] || action} this request?`)) return;
+    const btns = document.querySelectorAll('.wf-btn');
+    btns.forEach(b => { b.disabled = true; b.style.opacity = '0.5'; });
+    const msg = document.getElementById('wf-msg');
+    try {
+        const data = await apiFetch(`/api/requests/${REQ_ID}/${action}`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+        msg.textContent = data.message || 'Done'; msg.className = 'mt-2 text-sm font-medium text-emerald-600'; msg.classList.remove('hidden');
+        setTimeout(() => location.reload(), 1200);
+    } catch(err) {
+        msg.textContent = err.message; msg.className = 'mt-2 text-sm font-medium text-red-600'; msg.classList.remove('hidden');
+        btns.forEach(b => { b.disabled = false; b.style.opacity = '1'; });
+    }
+}
+
+async function discontinueRequest() {
+    const reason = prompt('Reason for discontinuing (optional):');
+    if (reason === null) return;
+    try {
+        const data = await apiFetch(`/api/requests/${REQ_ID}/discontinue`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({reason}) });
+        toast(data.message || 'Discontinued', 'success');
+        setTimeout(() => location.reload(), 1200);
+    } catch(err) { toast(err.message, 'error'); }
+}
+
+async function completeReport() {
+    if (!confirm('Mark this request as completed?')) return;
+    const notes = document.getElementById('analysis-notes')?.value || '';
+    try {
+        const data = await apiFetch(`/api/requests/${REQ_ID}/complete-report`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({notes}) });
+        toast(data.message || 'Report completed', 'success');
+        setTimeout(() => location.reload(), 1200);
+    } catch(err) { toast(err.message, 'error'); }
+}
+
+/* ── Planner Estimation ─────────────────────────────────────── */
+function togglePlannerEdit() {
+    document.getElementById('planner-read').classList.toggle('hidden');
+    document.getElementById('planner-edit').classList.toggle('hidden');
+}
+async function savePlannerEstimation() {
+    try {
+        await apiFetch(`/api/requests/${REQ_ID}/planner-estimation`, {
+            method: 'PATCH', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({
+                planner_est_start: document.getElementById('pe-start').value || null,
+                planner_est_end: document.getElementById('pe-end').value || null,
+                planner_note: document.getElementById('pe-note').value || null
+            })
+        });
+        toast('Planner estimation saved', 'success');
+        setTimeout(() => location.reload(), 800);
+    } catch(err) { toast(err.message, 'error'); }
+}
+
+/* ── Analysis Notes ──────────────────────────────────────────── */
+async function saveAnalysisNotes() {
+    try {
+        await apiFetch(`/api/requests/${REQ_ID}`, {
+            method: 'PATCH', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ analysis_notes: document.getElementById('analysis-notes').value })
+        });
+        toast('Analysis notes saved', 'success');
+    } catch(err) { toast(err.message, 'error'); }
+}
+
+/* ── Public Note ────────────────────────────────────────────── */
+function toggleNoteEdit() {
+    document.getElementById('note-read').classList.toggle('hidden');
+    document.getElementById('note-edit').classList.toggle('hidden');
+}
+async function saveNote() {
+    try {
+        await apiFetch(`/api/requests/${REQ_ID}/note`, {
+            method: 'PATCH', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ note: document.getElementById('note-text').value })
+        });
+        toast('Note saved', 'success');
+        setTimeout(() => location.reload(), 800);
+    } catch(err) { toast(err.message, 'error'); }
+}
+async function deleteNote() {
+    if (!confirm('Delete public note?')) return;
+    try {
+        await apiFetch(`/api/requests/${REQ_ID}/note`, { method: 'DELETE' });
+        toast('Note deleted', 'success');
+        setTimeout(() => location.reload(), 800);
+    } catch(err) { toast(err.message, 'error'); }
+}
+
+/* ── Save Request Details ───────────────────────────────────── */
+async function saveRequestDetails() {
+    const form = document.getElementById('req-detail-form');
+    const data = {};
+    for (const [k, v] of new FormData(form)) data[k] = v;
+    try {
+        await apiFetch(`/api/requests/${REQ_ID}`, {
+            method: 'PATCH', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(data)
+        });
+        toast('Saved successfully', 'success');
+    } catch(err) { toast(err.message, 'error'); }
+}
+
+/* ── Step Edit / Add Modal ──────────────────────────────────── */
+function openEditStep(reqId, leg, stepNum, stepData) {
+    document.getElementById('step-modal-title').textContent = `Edit Step ${stepNum} — Leg ${leg}`;
+    document.getElementById('sf-request-id').value = reqId;
+    document.getElementById('sf-leg').value = leg;
+    document.getElementById('sf-leg-display').value = leg;
+    document.getElementById('sf-step-number').value = stepNum;
+    document.getElementById('sf-step-name').value = stepData.step_name || '';
+    document.getElementById('sf-status').value = stepData.status || 'pending';
+    document.getElementById('sf-machine-no').value = stepData.machine_no || '';
+    document.getElementById('sf-rack-no').value = stepData.rack_no || '';
+    document.getElementById('sf-operator-id').value = stepData.operator_id || '';
+    document.getElementById('sf-tray-no').value = stepData.tray_no || '';
+    document.getElementById('sf-qty-in').value = (stepData.qty_in != null) ? stepData.qty_in : '';
+    document.getElementById('sf-qty-out').value = (stepData.qty_out != null) ? stepData.qty_out : '';
+    document.getElementById('sf-notes').value = stepData.notes || '';
+    const toLocal = v => v ? v.replace(' ', 'T').substring(0, 16) : '';
+    document.getElementById('sf-started-at').value = toLocal(stepData.started_at);
+    document.getElementById('sf-completed-at').value = toLocal(stepData.completed_at);
+    document.getElementById('step-modal-error').classList.add('hidden');
+    document.getElementById('step-modal').classList.remove('hidden');
+}
+
+function openAddStepModal() {
+    document.getElementById('step-modal-title').textContent = 'Add Process Step';
+    document.getElementById('sf-request-id').value = REQ_ID;
+    const legSteps = [...document.querySelectorAll(`.step-row[data-leg="${currentLeg}"]`)];
+    const nums = legSteps.map(el => parseInt(el.dataset.stepNum) || 0);
+    document.getElementById('sf-leg').value = currentLeg;
+    document.getElementById('sf-leg-display').value = currentLeg;
+    document.getElementById('sf-step-number').value = (Math.max(0, ...nums) + 1).toString();
+    document.getElementById('sf-step-name').value = '';
+    document.getElementById('sf-status').value = 'pending';
+    document.getElementById('sf-machine-no').value = '';
+    document.getElementById('sf-rack-no').value = '';
+    document.getElementById('sf-operator-id').value = '';
+    document.getElementById('sf-tray-no').value = '';
+    document.getElementById('sf-qty-in').value = '';
+    document.getElementById('sf-qty-out').value = '';
+    document.getElementById('sf-notes').value = '';
+    document.getElementById('sf-started-at').value = '';
+    document.getElementById('sf-completed-at').value = '';
+    document.getElementById('step-modal-error').classList.add('hidden');
+    document.getElementById('step-modal').classList.remove('hidden');
+}
+
+function closeStepModal() { document.getElementById('step-modal').classList.add('hidden'); }
+
+async function saveStep() {
+    const reqId = document.getElementById('sf-request-id').value;
+    const leg = document.getElementById('sf-leg-display').value || document.getElementById('sf-leg').value;
+    const stepNum = document.getElementById('sf-step-number').value;
+    const errDiv = document.getElementById('step-modal-error');
+    errDiv.classList.add('hidden');
+
+    const payload = {};
+    const stepName = document.getElementById('sf-step-name').value.trim();
+    if (stepName) payload.step_name = stepName;
+    payload.status = document.getElementById('sf-status').value;
+    payload.machine_no = document.getElementById('sf-machine-no').value;
+    payload.rack_no = document.getElementById('sf-rack-no').value.trim();
+    const opId = document.getElementById('sf-operator-id').value;
+    payload.operator_id = opId || null;
+    payload.tray_no = document.getElementById('sf-tray-no').value.trim();
+    const qtyIn = document.getElementById('sf-qty-in').value;
+    if (qtyIn !== '') payload.qty_in = parseInt(qtyIn);
+    const qtyOut = document.getElementById('sf-qty-out').value;
+    if (qtyOut !== '') payload.qty_out = parseInt(qtyOut);
+    payload.notes = document.getElementById('sf-notes').value.trim();
+    const startedAt = document.getElementById('sf-started-at').value;
+    if (startedAt) payload.started_at = startedAt.length === 16 ? startedAt + ':00' : startedAt;
+    const completedAt = document.getElementById('sf-completed-at').value;
+    if (completedAt) payload.completed_at = completedAt.length === 16 ? completedAt + ':00' : completedAt;
+
+    const btn = document.getElementById('step-save-btn');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+        const __token = getToken();
+        const __hdrs = { 'Content-Type': 'application/json' };
+        if (__token) __hdrs['Authorization'] = 'Bearer ' + __token;
+        const r = await fetch(`/api/requests/${reqId}/steps/${stepNum}?leg=${leg}`, {
+            method: 'PATCH',
+            headers: __hdrs,
+            credentials: 'same-origin',
+            body: JSON.stringify(payload)
+        });
+        const data = await r.json().catch(() => ({}));
+        if (r.ok) {
+            toast('Step saved', 'success');
+            closeStepModal();
+            setTimeout(() => location.reload(), 800);
+        } else {
+            errDiv.textContent = data.detail || 'Save failed';
+            errDiv.classList.remove('hidden');
+        }
+    } catch (err) {
+        errDiv.textContent = 'Network error: ' + err.message;
+        errDiv.classList.remove('hidden');
+    } finally {
+        btn.disabled = false; btn.textContent = 'Save Step';
+    }
+}
+
+document.getElementById('step-modal').addEventListener('click', function(e) { if (e.target === this) closeStepModal(); });
+
+/* ── Traveller Table Inline Edit ────────────────────────────── */
+const EMPLOYEES = {{ employees | tojson }};
+document.querySelectorAll('.editable-cell').forEach(cell => {
+    cell.style.cursor = 'text';
+    cell.addEventListener('dblclick', function() {
+        if (this.querySelector('input, select, textarea')) return;
+        const row = this.closest('tr');
+        const reqId = row.dataset.requestId;
+        const leg = row.dataset.leg;
+        const stepNum = row.dataset.stepNum;
+        const field = this.dataset.field;
+        const type = this.dataset.type;
+        const curVal = this.textContent.trim();
+
+        let input;
+        if (type === 'select' && field === 'operator_id') {
+            input = document.createElement('select');
+            input.innerHTML = '<option value="">—</option>' + EMPLOYEES.map(e =>
+                `<option value="${e.id}" ${e.id == curVal ? 'selected' : ''}>${e.name}</option>`
+            ).join('');
+            input.className = 'w-full px-1 py-0.5 text-xs border border-blue-400 rounded bg-white dark:bg-slate-700';
+        } else if (type === 'datetime-local') {
+            input = document.createElement('input');
+            input.type = 'datetime-local';
+            input.value = curVal ? curVal.replace(' ', 'T') : '';
+            input.className = 'w-full px-1 py-0.5 text-xs border border-blue-400 rounded bg-white dark:bg-slate-700';
+        } else if (type === 'number') {
+            input = document.createElement('input');
+            input.type = 'number'; input.min = '0';
+            input.value = curVal;
+            input.className = 'w-20 px-1 py-0.5 text-xs border border-blue-400 rounded bg-white dark:bg-slate-700 text-center';
+        } else {
+            input = document.createElement('input');
+            input.type = 'text'; input.value = curVal;
+            input.className = 'w-full px-1 py-0.5 text-xs border border-blue-400 rounded bg-white dark:bg-slate-700';
+        }
+
+        this.textContent = '';
+        this.appendChild(input);
+        input.focus();
+
+        const cellRef = this;
+        const commit = async () => {
+            let newVal = input.value;
+            if (input.tagName === 'SELECT') newVal = input.value;
+
+            const payload = {};
+            if (field === 'test_condition') {
+                payload.custom_fields = { test_condition: newVal };
+            } else if (field === 'started_at' || field === 'completed_at') {
+                payload[field] = newVal ? (newVal.length === 16 ? newVal + ':00' : newVal) : null;
+            } else if (field === 'qty_in' || field === 'qty_out') {
+                payload[field] = newVal !== '' ? parseInt(newVal) : null;
+            } else if (field === 'operator_id') {
+                payload[field] = newVal || null;
+            } else {
+                payload[field] = newVal;
+            }
+
+            try {
+                const __tk = getToken();
+                const __h = { 'Content-Type': 'application/json' };
+                if (__tk) __h['Authorization'] = 'Bearer ' + __tk;
+                await fetch(`/api/requests/${reqId}/steps/${stepNum}?leg=${leg}`, {
+                    method: 'PATCH',
+                    headers: __h,
+                    credentials: 'same-origin',
+                    body: JSON.stringify(payload)
+                });
+                // Update display
+                if (field === 'operator_id' && input.tagName === 'SELECT') {
+                    cellRef.textContent = input.selectedOptions[0]?.text || '';
+                } else if (type === 'datetime-local') {
+                    cellRef.textContent = newVal ? newVal.substring(0, 16).replace('T', ' ') : '';
+                } else {
+                    cellRef.textContent = newVal;
+                }
+            } catch(err) {
+                cellRef.textContent = curVal;
+                toast('Save failed: ' + err.message, 'error');
+            }
+        };
+        input.addEventListener('blur', commit);
+        input.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+            if (e.key === 'Escape') { cellRef.textContent = curVal; }
+        });
+    });
+});
+</script>
+{% endblock %}

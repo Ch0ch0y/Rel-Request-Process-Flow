@@ -1,0 +1,9 @@
+# Ignore all backup files to prevent accidental commits
+*.xlsx
+*.xls
+*.db
+*.sqlite
+
+# But keep the info file and structure
+!BACKUP_INFO.txt
+!.gitignore

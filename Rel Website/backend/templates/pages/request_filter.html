@@ -1,0 +1,460 @@
+{% extends "layout.html" %}
+
+{% block title %}RELDMS - Request Filter & Analytics{% endblock %}
+{% block page_title %}RELDMS{% endblock %}
+
+{% block page_content %}
+
+<!-- Header -->
+<div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+    <div>
+        <h2 class="text-xl font-bold flex items-center gap-2">
+            <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
+            RELDMS
+        </h2>
+        <p class="text-sm text-slate-500 dark:text-slate-400">Reliability Data Management System &mdash; search, filter, analyze</p>
+    </div>
+    <button id="btnExportCsv" onclick="exportCsv()" class="hidden px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 inline-flex items-center gap-1.5">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        Export CSV
+    </button>
+</div>
+
+<!-- Source Tabs -->
+<div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 mb-6">
+    <div class="flex border-b border-slate-200 dark:border-slate-700">
+        <button onclick="switchSource('live')" class="source-tab flex-1 px-4 py-3 text-sm font-medium border-b-2 border-blue-600 text-blue-600" data-source="live">
+            <svg class="w-4 h-4 inline mr-1 -mt-0.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
+            Live Database
+        </button>
+        <button onclick="switchSource('backup')" class="source-tab flex-1 px-4 py-3 text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-700" data-source="backup">
+            <svg class="w-4 h-4 inline mr-1 -mt-0.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>
+            From Backup
+        </button>
+        <button onclick="switchSource('import')" class="source-tab flex-1 px-4 py-3 text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-700" data-source="import">
+            <svg class="w-4 h-4 inline mr-1 -mt-0.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+            Import File
+        </button>
+    </div>
+
+    <!-- Import Panel -->
+    <div id="panel-import" class="p-6 bg-violet-50/50 dark:bg-violet-900/10 hidden">
+        <p class="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Import Backup File</p>
+        <label class="block border-2 border-dashed border-violet-300 dark:border-violet-600 rounded-xl p-8 text-center cursor-pointer hover:border-violet-400 transition-colors" id="dropZone">
+            <input type="file" accept=".zip,.xlsx" class="hidden" id="importFileInput" onchange="handleImportFile(this)">
+            <div id="importDefault">
+                <svg class="w-10 h-10 mx-auto text-violet-400 mb-2" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                <p class="text-sm text-slate-600 dark:text-slate-400">Click or drag &amp; drop a <strong>.zip</strong> or <strong>.xlsx</strong> file</p>
+            </div>
+            <div id="importLoading" class="hidden">
+                <svg class="animate-spin h-8 w-8 mx-auto text-violet-500 mb-2" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                <p class="text-sm text-slate-500">Parsing file…</p>
+            </div>
+            <div id="importDone" class="hidden">
+                <svg class="w-10 h-10 mx-auto text-emerald-500 mb-2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <p class="text-sm text-emerald-600" id="importDoneMsg">File loaded</p>
+            </div>
+        </label>
+        <div id="importError" class="hidden mt-3 px-4 py-2 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 rounded-lg text-sm"></div>
+    </div>
+
+    <!-- Backup Panel -->
+    <div id="panel-backup" class="p-6 bg-amber-50/50 dark:bg-amber-900/10 hidden">
+        <div id="backupLoading" class="text-center py-4 hidden">
+            <svg class="animate-spin h-6 w-6 mx-auto text-amber-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+        </div>
+        <div id="backupList" class="space-y-2"></div>
+        <div id="backupError" class="hidden mt-3 px-4 py-2 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 rounded-lg text-sm"></div>
+        <div id="backupInfo" class="hidden mt-3 px-4 py-2 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 rounded-lg text-sm"></div>
+    </div>
+</div>
+
+<!-- Filter Form -->
+<div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-5 mb-6">
+    <div class="flex items-center gap-2 mb-4">
+        <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
+        <span class="text-sm font-semibold text-slate-700 dark:text-slate-200">Filter Options</span>
+        <span id="realtimeHint" class="hidden text-xs text-slate-400 ml-2">Filters applied in real-time</span>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
+        <div>
+            <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Date From</label>
+            <input type="date" id="fDateFrom" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-700" oninput="onFilterChange()">
+        </div>
+        <div>
+            <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Date To</label>
+            <input type="date" id="fDateTo" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-700" oninput="onFilterChange()">
+        </div>
+        <div>
+            <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">REL# / Device</label>
+            <input type="text" id="fSearch" placeholder="Search…" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-700" oninput="onFilterChange()">
+        </div>
+        <div>
+            <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Status</label>
+            <select id="fStatus" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-700" onchange="onFilterChange()">
+                <option value="">All</option>
+                <option value="incoming">Incoming</option>
+                <option value="pending">Pending</option>
+                <option value="review">Review</option>
+                <option value="approval">Approval</option>
+                <option value="testing">Testing</option>
+                <option value="analysis">Analysis</option>
+                <option value="completed">Completed</option>
+                <option value="discontinued">Discontinued</option>
+            </select>
+        </div>
+        <div>
+            <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Created By</label>
+            <input type="text" id="fCreatedBy" placeholder="Username…" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-700" oninput="onFilterChange()">
+        </div>
+    </div>
+    <div class="flex gap-2 mt-4">
+        <button id="btnLiveSearch" onclick="liveSearch()" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 inline-flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            Search
+        </button>
+        <button onclick="resetFilters()" class="px-4 py-2 border border-slate-300 dark:border-slate-600 text-sm rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700">Reset Filters</button>
+    </div>
+</div>
+
+<!-- Error Banner -->
+<div id="errorBanner" class="hidden mb-6 px-4 py-3 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 rounded-lg text-sm"></div>
+
+<!-- Results Table -->
+<div id="resultsCard" class="hidden bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 mb-6">
+    <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3">
+        <h3 class="font-semibold">Results</h3>
+        <span id="resultsCount" class="px-2 py-0.5 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 rounded-full text-xs font-medium">0</span>
+        <span id="sourceBadge" class="px-2 py-0.5 bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300 rounded text-xs font-medium ml-1">Live</span>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead class="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-700">
+                <tr>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">REL#</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Device</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Lot No.</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Customer</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Progress</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Created By</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Created At</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Deadline</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide"></th>
+                </tr>
+            </thead>
+            <tbody id="resultsBody" class="divide-y divide-slate-100 dark:divide-slate-700">
+            </tbody>
+        </table>
+    </div>
+    <div id="emptyResults" class="hidden p-8 text-center text-slate-400">
+        <svg class="w-10 h-10 mx-auto mb-2 text-slate-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+        <p>No requests match your filters.</p>
+    </div>
+</div>
+
+<!-- Placeholder when no search yet -->
+<div id="placeholder" class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-12 text-center">
+    <svg id="phIconLive" class="w-16 h-16 mx-auto mb-4 text-slate-300 dark:text-slate-600" fill="none" stroke="currentColor" stroke-width="1" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
+    <svg id="phIconBackup" class="hidden w-16 h-16 mx-auto mb-4 text-slate-300 dark:text-slate-600" fill="none" stroke="currentColor" stroke-width="1" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>
+    <svg id="phIconImport" class="hidden w-16 h-16 mx-auto mb-4 text-slate-300 dark:text-slate-600" fill="none" stroke="currentColor" stroke-width="1" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+    <p id="phText" class="text-slate-400 dark:text-slate-500">Use the Search button above to query the live database.</p>
+</div>
+
+<!-- Backup Loading Overlay -->
+<div id="backupOverlay" class="hidden fixed inset-0 bg-black/30 z-50 flex items-center justify-center">
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow-xl p-8 text-center">
+        <svg class="animate-spin h-10 w-10 mx-auto text-amber-500 mb-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+        <p class="text-sm text-slate-600 dark:text-slate-300">Parsing backup file…</p>
+    </div>
+</div>
+
+<script>
+function getToken() { const m = document.cookie.match(/access_token=([^;]+)/); return m ? m[1] : null; }
+async function apiFetch(url, opts) {
+    const token = getToken();
+    const h = { ...(opts?.headers || {}) };
+    if (token) h['Authorization'] = 'Bearer ' + token;
+    const r = await fetch(url, { ...opts, headers: h, credentials: 'same-origin' });
+    if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.detail || 'API error ' + r.status); }
+    return r.json();
+}
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function toast(msg, type) { if (window.showToast) window.showToast(msg, type); else alert(msg); }
+
+let currentSource = 'live';
+let allRows = [];           // raw data array (for backup/import client-side filtering)
+let fetchedResults = null;   // currently displayed rows
+
+const statusColors = {
+    incoming: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300',
+    pending: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+    review: 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300',
+    approval: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
+    testing: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+    analysis: 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300',
+    completed: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
+    discontinued: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+};
+
+function switchSource(src) {
+    currentSource = src;
+    document.querySelectorAll('.source-tab').forEach(t => {
+        const active = t.dataset.source === src;
+        t.className = t.className.replace(/border-blue-600 text-blue-600|border-transparent text-slate-500 hover:text-slate-700/g, '');
+        t.classList.add(...(active ? ['border-blue-600','text-blue-600'] : ['border-transparent','text-slate-500','hover:text-slate-700']));
+    });
+    document.getElementById('panel-import').classList.toggle('hidden', src !== 'import');
+    document.getElementById('panel-backup').classList.toggle('hidden', src !== 'backup');
+    document.getElementById('btnLiveSearch').classList.toggle('hidden', src !== 'live');
+    document.getElementById('realtimeHint').classList.toggle('hidden', src === 'live');
+
+    // Placeholder icons
+    document.getElementById('phIconLive').classList.toggle('hidden', src !== 'live');
+    document.getElementById('phIconBackup').classList.toggle('hidden', src !== 'backup');
+    document.getElementById('phIconImport').classList.toggle('hidden', src !== 'import');
+
+    const hints = { live: 'Use the Search button above to query the live database.',
+        backup: 'Select a backup file above to load historical data.',
+        import: 'Upload a .zip or .xlsx file above to analyze its data.' };
+    document.getElementById('phText').textContent = hints[src];
+
+    const badges = { live: 'Live', backup: 'Backup', import: 'Import' };
+    document.getElementById('sourceBadge').textContent = badges[src];
+
+    if (src === 'backup') loadBackupList();
+    // Reset results when switching
+    allRows = [];
+    fetchedResults = null;
+    document.getElementById('resultsCard').classList.add('hidden');
+    document.getElementById('placeholder').classList.remove('hidden');
+}
+
+// ── Live Search ────────────────────────────────────────────────────
+async function liveSearch() {
+    const params = new URLSearchParams();
+    const search = document.getElementById('fSearch').value.trim();
+    const status = document.getElementById('fStatus').value;
+    const dateFrom = document.getElementById('fDateFrom').value;
+    const dateTo = document.getElementById('fDateTo').value;
+    const createdBy = document.getElementById('fCreatedBy').value.trim();
+    if (search) params.set('search', search);
+    if (status) params.set('status', status);
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
+    if (createdBy) params.set('created_by', createdBy);
+    try {
+        document.getElementById('errorBanner').classList.add('hidden');
+        const data = await apiFetch('/api/requests?' + params.toString());
+        renderResults(data);
+    } catch (e) {
+        showError(e.message);
+    }
+}
+
+// ── Backup ─────────────────────────────────────────────────────────
+async function loadBackupList() {
+    const listEl = document.getElementById('backupList');
+    const loading = document.getElementById('backupLoading');
+    loading.classList.remove('hidden');
+    listEl.innerHTML = '';
+    try {
+        const backups = await apiFetch('/api/filter-backups');
+        loading.classList.add('hidden');
+        if (!backups.length) { listEl.innerHTML = '<p class="text-sm text-slate-400">No backups found.</p>'; return; }
+        // Group by month
+        const groups = {};
+        backups.forEach(b => {
+            const d = b.modified || b.created || '';
+            const key = d ? d.substring(0, 7) : 'Unknown';
+            (groups[key] = groups[key] || []).push(b);
+        });
+        Object.keys(groups).sort().reverse().forEach(month => {
+            const grp = document.createElement('div');
+            grp.innerHTML = `
+                <button onclick="this.nextElementSibling.classList.toggle('hidden');this.querySelector('.chev').classList.toggle('rotate-90')" class="w-full text-left px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-200 flex items-center justify-between">
+                    <span>${esc(month)} <span class="text-xs text-slate-400 ml-1">(${groups[month].length})</span></span>
+                    <svg class="chev w-4 h-4 transition-transform" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+                </button>
+                <div class="hidden pl-4 space-y-1 mt-1"></div>`;
+            const inner = grp.querySelector('div');
+            groups[month].forEach(b => {
+                const btn = document.createElement('button');
+                btn.className = 'w-full text-left px-3 py-1.5 rounded text-xs text-slate-600 dark:text-slate-300 hover:bg-amber-100 dark:hover:bg-amber-900/20 truncate';
+                btn.textContent = b.filename;
+                btn.onclick = () => selectBackup(b.filename);
+                inner.appendChild(btn);
+            });
+            listEl.appendChild(grp);
+        });
+    } catch (e) {
+        loading.classList.add('hidden');
+        document.getElementById('backupError').textContent = e.message;
+        document.getElementById('backupError').classList.remove('hidden');
+    }
+}
+
+async function selectBackup(filename) {
+    document.getElementById('backupOverlay').classList.remove('hidden');
+    document.getElementById('backupError').classList.add('hidden');
+    document.getElementById('backupInfo').classList.add('hidden');
+    try {
+        const data = await apiFetch('/api/filter-backups/' + encodeURIComponent(filename));
+        allRows = data.requests || data || [];
+        document.getElementById('backupInfo').textContent = `Loaded ${allRows.length} records from ${filename}`;
+        document.getElementById('backupInfo').classList.remove('hidden');
+        applyClientFilters();
+    } catch (e) {
+        document.getElementById('backupError').textContent = e.message;
+        document.getElementById('backupError').classList.remove('hidden');
+    } finally {
+        document.getElementById('backupOverlay').classList.add('hidden');
+    }
+}
+
+// ── Import ─────────────────────────────────────────────────────────
+async function handleImportFile(input) {
+    if (!input.files.length) return;
+    const file = input.files[0];
+    document.getElementById('importDefault').classList.add('hidden');
+    document.getElementById('importLoading').classList.remove('hidden');
+    document.getElementById('importDone').classList.add('hidden');
+    document.getElementById('importError').classList.add('hidden');
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const token = getToken();
+        const __hdrs = {};
+        if (token) __hdrs['Authorization'] = 'Bearer ' + token;
+        const r = await fetch('/api/filter-backups/upload-preview', {
+            method: 'POST', headers: __hdrs, credentials: 'same-origin', body: formData
+        });
+        if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.detail || 'Upload failed'); }
+        const data = await r.json();
+        allRows = data.requests || data || [];
+        document.getElementById('importLoading').classList.add('hidden');
+        document.getElementById('importDone').classList.remove('hidden');
+        document.getElementById('importDoneMsg').textContent = `Loaded ${allRows.length} records from ${file.name}`;
+        applyClientFilters();
+    } catch (e) {
+        document.getElementById('importLoading').classList.add('hidden');
+        document.getElementById('importDefault').classList.remove('hidden');
+        document.getElementById('importError').textContent = e.message;
+        document.getElementById('importError').classList.remove('hidden');
+    }
+}
+
+// Drag & drop
+const dropZone = document.getElementById('dropZone');
+['dragenter','dragover'].forEach(ev => dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.add('border-violet-500'); }));
+['dragleave','drop'].forEach(ev => dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.remove('border-violet-500'); }));
+dropZone.addEventListener('drop', e => {
+    const f = e.dataTransfer.files[0];
+    if (f) { document.getElementById('importFileInput').files = e.dataTransfer.files; handleImportFile(document.getElementById('importFileInput')); }
+});
+
+// ── Client-side filter (for backup/import) ─────────────────────────
+function onFilterChange() {
+    if (currentSource !== 'live') applyClientFilters();
+}
+
+function applyClientFilters() {
+    const search = document.getElementById('fSearch').value.trim().toLowerCase();
+    const status = document.getElementById('fStatus').value;
+    const dateFrom = document.getElementById('fDateFrom').value;
+    const dateTo = document.getElementById('fDateTo').value;
+    const createdBy = document.getElementById('fCreatedBy').value.trim().toLowerCase();
+    let rows = allRows.filter(r => {
+        if (search) {
+            const hay = [r.request_number, r.device_name, r.customer, r.lot_no, r.classification].filter(Boolean).join(' ').toLowerCase();
+            if (!hay.includes(search)) return false;
+        }
+        if (status && (r.status || '').toLowerCase() !== status) return false;
+        if (dateFrom && r.created_at && r.created_at.substring(0,10) < dateFrom) return false;
+        if (dateTo && r.created_at && r.created_at.substring(0,10) > dateTo) return false;
+        if (createdBy && !(r.created_by_username || '').toLowerCase().includes(createdBy)) return false;
+        return true;
+    });
+    renderResults(rows);
+}
+
+// ── Render ─────────────────────────────────────────────────────────
+function renderResults(rows) {
+    fetchedResults = rows;
+    document.getElementById('placeholder').classList.add('hidden');
+    document.getElementById('resultsCard').classList.remove('hidden');
+    document.getElementById('resultsCount').textContent = rows.length;
+    document.getElementById('btnExportCsv').classList.toggle('hidden', !rows.length);
+
+    const tbody = document.getElementById('resultsBody');
+    const empty = document.getElementById('emptyResults');
+    if (!rows.length) { tbody.innerHTML = ''; empty.classList.remove('hidden'); return; }
+    empty.classList.add('hidden');
+
+    const isLive = currentSource === 'live';
+    const now = new Date();
+    tbody.innerHTML = rows.map(r => {
+        const st = (r.status || 'incoming').toLowerCase();
+        const cls = statusColors[st] || statusColors.incoming;
+        const pDone = r.completed_steps || 0, pTotal = r.total_steps || 0;
+        const pPct = pTotal ? Math.round(pDone / pTotal * 100) : 0;
+        const created = r.created_at ? new Date(r.created_at).toLocaleDateString('en-PH') : '—';
+        const deadline = r.deadline || '';
+        const overdue = deadline && new Date(deadline) < now && !['completed','discontinued'].includes(st);
+        return `<tr class="hover:bg-slate-50 dark:hover:bg-slate-700/30 group">
+            <td class="px-4 py-3">${isLive ? `<a href="/requests/${esc(r.id)}" class="font-semibold text-blue-600 hover:underline">${esc(r.request_number || '')}</a>` : `<span class="font-semibold">${esc(r.request_number || '')}</span>`}</td>
+            <td class="px-4 py-3"><span class="px-2 py-0.5 rounded-full text-xs font-semibold ${cls}">${esc(st.charAt(0).toUpperCase() + st.slice(1))}</span></td>
+            <td class="px-4 py-3 max-w-[150px] truncate text-slate-700 dark:text-slate-200">${esc(r.device_name || '—')}</td>
+            <td class="px-4 py-3 text-slate-600 dark:text-slate-300 text-xs">${esc(r.lot_no || '—')}</td>
+            <td class="px-4 py-3 max-w-[120px] truncate text-slate-600 dark:text-slate-300 text-xs">${esc(r.customer || '—')}</td>
+            <td class="px-4 py-3 min-w-[120px]">
+                <div class="flex items-center gap-2">
+                    <div class="flex-1 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden"><div class="h-full bg-blue-500 rounded-full" style="width:${pPct}%"></div></div>
+                    <span class="text-xs text-slate-400 whitespace-nowrap">${pDone}/${pTotal}</span>
+                </div>
+            </td>
+            <td class="px-4 py-3 text-xs text-slate-600 dark:text-slate-300">
+                <span class="inline-flex items-center gap-1"><svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>${esc(r.created_by_username || '—')}</span>
+            </td>
+            <td class="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">${created}</td>
+            <td class="px-4 py-3 text-xs whitespace-nowrap ${overdue ? 'text-red-600 font-semibold' : 'text-slate-500'}">${deadline ? (overdue ? '⚠ ' : '') + new Date(deadline).toLocaleDateString('en-PH') : '—'}</td>
+            <td class="px-4 py-3">${isLive ? `<a href="/requests/${esc(r.id)}" class="opacity-0 group-hover:opacity-100 text-blue-600">→</a>` : ''}</td>
+        </tr>`;
+    }).join('');
+}
+
+function resetFilters() {
+    document.getElementById('fSearch').value = '';
+    document.getElementById('fStatus').value = '';
+    document.getElementById('fDateFrom').value = '';
+    document.getElementById('fDateTo').value = '';
+    document.getElementById('fCreatedBy').value = '';
+    allRows = [];
+    fetchedResults = null;
+    document.getElementById('resultsCard').classList.add('hidden');
+    document.getElementById('placeholder').classList.remove('hidden');
+    document.getElementById('errorBanner').classList.add('hidden');
+    document.getElementById('btnExportCsv').classList.add('hidden');
+}
+
+function showError(msg) {
+    const el = document.getElementById('errorBanner');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+}
+
+// ── CSV Export ──────────────────────────────────────────────────────
+function exportCsv() {
+    if (!fetchedResults || !fetchedResults.length) return;
+    const cols = ['request_number','status','device_name','lot_no','customer','created_by_username','created_at','deadline'];
+    const header = cols.join(',');
+    const rows = fetchedResults.map(r => cols.map(c => '"' + String(r[c] || '').replace(/"/g, '""') + '"').join(','));
+    const csv = [header, ...rows].join('\n');
+    const blob = new Blob([csv], {type: 'text/csv'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'reldms_export_' + new Date().toISOString().slice(0,10) + '.csv';
+    a.click();
+}
+</script>
+{% endblock %}

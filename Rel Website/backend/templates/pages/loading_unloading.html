@@ -1,0 +1,318 @@
+{% extends "layout.html" %}
+
+{% block title %}Loading/Unloading Monitor - REL Request{% endblock %}
+{% block page_title %}Loading & Unloading Monitor{% endblock %}
+
+{% block page_content %}
+
+<!-- Header -->
+<div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+    <div>
+        <h2 class="text-xl font-bold flex items-center gap-2">
+            <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0"/></svg>
+            Loading / Unloading Monitor
+        </h2>
+        <p class="text-sm text-slate-500 dark:text-slate-400">Track in-progress and completed machine operations</p>
+    </div>
+    <div class="flex items-center gap-2">
+        <button onclick="location.reload()" class="p-2 rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-500" title="Refresh">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        </button>
+        <span class="text-xs text-slate-400" id="last-refresh">Last refresh: <script>document.write(new Date().toLocaleTimeString('en-PH'))</script></span>
+    </div>
+</div>
+
+<!-- Stats Cards -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-4">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            </div>
+            <div>
+                <p class="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Active</p>
+                <p class="text-2xl font-bold text-blue-600">{{ stats.active_jobs }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-4">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+                <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </div>
+            <div>
+                <p class="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Completed Today</p>
+                <p class="text-2xl font-bold text-emerald-600">{{ stats.completed_today }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-4">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center">
+                <svg class="w-5 h-5 text-slate-600 dark:text-slate-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+            </div>
+            <div>
+                <p class="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Total History</p>
+                <p class="text-2xl font-bold text-slate-700 dark:text-slate-200">{{ history_operations | length }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-4">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
+                <svg class="w-5 h-5 text-violet-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </div>
+            <div>
+                <p class="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Avg Duration</p>
+                <p class="text-2xl font-bold text-violet-600">{{ stats.avg_duration }}</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Filter Tabs + Search -->
+<div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 px-4 py-3 mb-6">
+    <form method="GET" action="/loading-unloading" class="flex flex-wrap gap-3 items-end">
+        <div class="flex-1 min-w-48">
+            <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Search</label>
+            <input type="text" name="search" value="{{ search }}"
+                placeholder="Request #, machine, employee, device…"
+                class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-700">
+        </div>
+        <div class="min-w-48">
+            <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Step Type</label>
+            <select name="step_filter" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-700">
+                <option value="">— All Steps —</option>
+                {% for sn in monitored_step_names %}
+                <option value="{{ sn }}" {% if step_filter == sn %}selected{% endif %}>{{ sn }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="flex gap-2">
+            <button type="submit" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 font-medium">Search</button>
+            {% if search or step_filter %}
+            <a href="/loading-unloading" class="px-4 py-2 border border-slate-300 dark:border-slate-600 text-sm rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700">Clear</a>
+            {% endif %}
+        </div>
+        <div class="ml-auto">
+            <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Excel Report</label>
+            <div class="flex gap-2">
+                <select id="export-step-filter" class="px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-700">
+                    <option value="">All Steps</option>
+                    {% for sn in monitored_step_names %}
+                    <option value="{{ sn }}">{{ sn }}</option>
+                    {% endfor %}
+                </select>
+                <button type="button" onclick="downloadReport()" class="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 whitespace-nowrap font-medium">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    Download .xlsx
+                </button>
+            </div>
+        </div>
+    </form>
+</div>
+
+<!-- Tab buttons for quick filter -->
+<div class="flex gap-2 mb-4">
+    <button onclick="filterTab('all')" class="tab-btn px-4 py-1.5 text-sm font-medium rounded-lg bg-blue-600 text-white" data-tab="all">
+        All <span class="ml-1 opacity-80">({{ (active_operations | length) + (history_operations | length) }})</span>
+    </button>
+    <button onclick="filterTab('active')" class="tab-btn px-4 py-1.5 text-sm font-medium rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300 hover:bg-slate-200" data-tab="active">
+        In Progress <span class="ml-1 opacity-80">({{ active_operations | length }})</span>
+    </button>
+    <button onclick="filterTab('history')" class="tab-btn px-4 py-1.5 text-sm font-medium rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300 hover:bg-slate-200" data-tab="history">
+        Completed <span class="ml-1 opacity-80">({{ history_operations | length }})</span>
+    </button>
+</div>
+
+<!-- Active Operations -->
+<div id="section-active" class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 mb-6">
+    <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3">
+        <span class="flex h-3 w-3 relative">
+            {% if active_operations %}
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
+            {% else %}
+            <span class="relative inline-flex rounded-full h-3 w-3 bg-slate-300 dark:bg-slate-600"></span>
+            {% endif %}
+        </span>
+        <h3 class="font-semibold">Active Operations <span class="text-sm font-normal text-slate-500">({{ active_operations | length }})</span></h3>
+    </div>
+    {% if active_operations %}
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead class="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-700">
+                <tr>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Request #</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Device / Customer</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Step</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Machine</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Rack</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Operator</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Start of Process</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide"></th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+                {% for op in active_operations %}
+                <tr class="hover:bg-blue-50/50 dark:hover:bg-slate-700/30">
+                    <td class="px-4 py-3">
+                        <a href="/requests/{{ op.request_id }}" class="font-semibold text-blue-600 hover:underline">{{ op.request_number }}</a>
+                        {% if op.lot_no %}<div class="text-xs text-slate-400 mt-0.5">Lot: {{ op.lot_no }}</div>{% endif %}
+                    </td>
+                    <td class="px-4 py-3">
+                        <div class="font-medium text-slate-700 dark:text-slate-200 truncate max-w-40">{{ op.device_name or '—' }}</div>
+                        {% if op.customer %}<div class="text-xs text-slate-400">{{ op.customer }}</div>{% endif %}
+                    </td>
+                    <td class="px-4 py-3">
+                        <span class="px-2 py-0.5 bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 rounded-full text-xs font-semibold">{{ op.step_name }}</span>
+                        <span class="text-xs text-slate-400 ml-1">L{{ op.leg }}/S{{ op.step_number }}</span>
+                    </td>
+                    <td class="px-4 py-3">
+                        {% if op.machine_no %}<span class="font-mono text-xs px-1.5 py-0.5 bg-slate-100 dark:bg-slate-700 rounded">{{ op.machine_no }}</span>{% else %}—{% endif %}
+                    </td>
+                    <td class="px-4 py-3">
+                        {% if op.rack_no %}<span class="px-2 py-0.5 bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 rounded text-xs font-medium">{{ op.rack_no }}</span>{% else %}—{% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-slate-600 dark:text-slate-300 text-xs">{{ op.employee_name or '—' }}</td>
+                    <td class="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{{ op.started_at|datefmt('%Y-%m-%d %H:%M') }}</td>
+                    <td class="px-4 py-3">
+                        <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                            <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
+                            In Progress
+                        </span>
+                    </td>
+                    <td class="px-4 py-3">
+                        <a href="/requests/{{ op.request_id }}" class="text-xs text-blue-600 hover:underline font-medium">View →</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="p-8 text-center text-slate-400">
+        <svg class="w-10 h-10 mx-auto mb-2 text-slate-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+        No active operations at this time.
+    </div>
+    {% endif %}
+</div>
+
+<!-- History Table -->
+<div id="section-history" class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700">
+    <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3">
+        <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <h3 class="font-semibold">Completed <span class="text-sm font-normal text-slate-500">({{ history_operations | length }})</span></h3>
+    </div>
+
+    {% if history_operations %}
+    <!-- Step type summary -->
+    <div class="px-6 py-2 bg-slate-50 dark:bg-slate-700/30 border-b border-slate-200 dark:border-slate-700 flex flex-wrap gap-2">
+        {% set step_counts = {} %}
+        {% for op in history_operations %}
+            {% if op.step_name not in step_counts %}{% set _ = step_counts.update({op.step_name: 0}) %}{% endif %}
+            {% set _ = step_counts.update({op.step_name: step_counts[op.step_name] + 1}) %}
+        {% endfor %}
+        {% for sname, cnt in step_counts.items() %}
+        <span class="px-2.5 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-full text-xs font-medium text-slate-600 dark:text-slate-300">
+            {{ sname }}: <strong>{{ cnt }}</strong>
+        </span>
+        {% endfor %}
+    </div>
+
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead class="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-700">
+                <tr>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Request #</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Device / Customer</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Step</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Machine</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Rack</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Operator</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Start</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">End</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Duration</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide"></th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+                {% for op in history_operations %}
+                <tr class="hover:bg-slate-50 dark:hover:bg-slate-700/30"
+                    data-started="{{ op.started_at.isoformat() if op.started_at else '' }}"
+                    data-completed="{{ op.completed_at.isoformat() if op.completed_at else '' }}">
+                    <td class="px-4 py-3">
+                        <a href="/requests/{{ op.request_id }}" class="font-semibold text-blue-600 hover:underline">{{ op.request_number }}</a>
+                        {% if op.lot_no %}<div class="text-xs text-slate-400 mt-0.5">Lot: {{ op.lot_no }}</div>{% endif %}
+                    </td>
+                    <td class="px-4 py-3">
+                        <div class="font-medium text-slate-700 dark:text-slate-200 truncate max-w-40">{{ op.device_name or '—' }}</div>
+                        {% if op.customer %}<div class="text-xs text-slate-400">{{ op.customer }}</div>{% endif %}
+                    </td>
+                    <td class="px-4 py-3">
+                        <span class="px-2 py-0.5 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 rounded-full text-xs font-semibold">{{ op.step_name }}</span>
+                        <span class="text-xs text-slate-400 ml-1">L{{ op.leg }}/S{{ op.step_number }}</span>
+                    </td>
+                    <td class="px-4 py-3">
+                        {% if op.machine_no %}<span class="font-mono text-xs px-1.5 py-0.5 bg-slate-100 dark:bg-slate-700 rounded">{{ op.machine_no }}</span>{% else %}—{% endif %}
+                    </td>
+                    <td class="px-4 py-3">
+                        {% if op.rack_no %}<span class="px-2 py-0.5 bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 rounded text-xs font-medium">{{ op.rack_no }}</span>{% else %}—{% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-xs text-slate-600 dark:text-slate-300">{{ op.employee_name or '—' }}</td>
+                    <td class="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{{ op.started_at|datefmt('%Y-%m-%d %H:%M') }}</td>
+                    <td class="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{{ op.completed_at|datefmt('%Y-%m-%d %H:%M') }}</td>
+                    <td class="px-4 py-3 text-xs font-medium text-slate-600 dark:text-slate-300 duration-cell">—</td>
+                    <td class="px-4 py-3">
+                        <a href="/requests/{{ op.request_id }}" class="text-xs text-blue-600 hover:underline font-medium">View →</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="p-8 text-center text-slate-400">
+        <svg class="w-10 h-10 mx-auto mb-2 text-slate-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+        No completed operations found{% if search %} matching "{{ search }}"{% endif %}.
+    </div>
+    {% endif %}
+</div>
+
+<script>
+function downloadReport() {
+    const stepFilter = document.getElementById('export-step-filter').value;
+    let url = '/api/loading-unloading/export';
+    if (stepFilter) url += '?step_name=' + encodeURIComponent(stepFilter);
+    window.location.href = url;
+}
+
+// Duration calculation
+document.querySelectorAll('tr[data-started]').forEach(row => {
+    const s = row.dataset.started, c = row.dataset.completed;
+    if (!s || !c) return;
+    try {
+        const diff = (new Date(c) - new Date(s)) / 1000;
+        if (diff <= 0) return;
+        const d = Math.floor(diff / 86400), h = Math.floor((diff % 86400) / 3600), m = Math.floor((diff % 3600) / 60);
+        const cell = row.querySelector('.duration-cell');
+        if (cell) cell.textContent = d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+    } catch(e) {}
+});
+
+// Tab filter
+function filterTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(b => {
+        const active = b.dataset.tab === tab;
+        b.className = b.className.replace(/bg-blue-600 text-white|bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300 hover:bg-slate-200/g, '');
+        b.classList.add(...(active ? ['bg-blue-600','text-white'] : ['bg-slate-100','text-slate-600','dark:bg-slate-700','dark:text-slate-300','hover:bg-slate-200']));
+    });
+    document.getElementById('section-active').style.display = tab === 'history' ? 'none' : '';
+    document.getElementById('section-history').style.display = tab === 'active' ? 'none' : '';
+}
+
+// Auto-refresh every 2 minutes
+setTimeout(() => location.reload(), 120000);
+</script>
+{% endblock %}

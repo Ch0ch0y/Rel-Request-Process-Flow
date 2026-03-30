@@ -1,0 +1,36 @@
+{
+  "tetris": [
+    {
+      "name": "Choy",
+      "score": 12500,
+      "date": "2026-03-23"
+    },
+    {
+      "name": "Choy",
+      "score": 178,
+      "date": "2026-03-23"
+    }
+  ],
+  "typing": [
+    {
+      "name": "Choy",
+      "score": 92,
+      "date": "2026-03-23",
+      "wpm": 92
+    }
+  ],
+  "flappy": [
+    {
+      "name": "Choy",
+      "score": 185,
+      "date": "2026-03-23"
+    }
+  ],
+  "puzzle": [
+    {
+      "name": "Choy",
+      "score": 11,
+      "date": "2026-03-23"
+    }
+  ]
+}

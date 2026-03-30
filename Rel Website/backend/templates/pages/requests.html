@@ -1,0 +1,540 @@
+{% extends "layout.html" %}
+
+{% block title %}All Requests - RELDMS{% endblock %}
+
+{% block page_content %}
+<div class="space-y-4" id="requests-page">
+    <!-- Header -->
+    <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-6 py-4 shadow-sm">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                    <svg class="w-4.5 h-4.5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg>
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold text-slate-900 dark:text-white">All Requests</h1>
+                    <p class="text-xs text-slate-500 dark:text-slate-400" id="req-count-text">Loading...</p>
+                </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+                {% if user and user.role in ['Admin', 'Reliability Engineer', 'Planner'] %}
+                <button onclick="openImportModal('excel')" class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-3.5 py-2 font-medium text-sm shadow-sm hover:shadow-md transition-all">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    Import Excel
+                </button>
+                <button onclick="openImportModal('word')" class="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-3.5 py-2 font-medium text-sm shadow-sm hover:shadow-md transition-all">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    Import Word
+                </button>
+                {% endif %}
+                {% if user and not user.is_guest %}
+                <a href="/requests/new" class="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-lg px-3.5 py-2 font-medium text-sm shadow-sm hover:shadow-md transition-all">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    New Request
+                </a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Search and Filter -->
+    <div class="flex flex-col sm:flex-row gap-3">
+        <div class="flex-1 flex gap-2">
+            <div class="flex-1 relative">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" id="searchInput" placeholder="Search by REL#, device, customer, lot, originator..."
+                    class="w-full pl-10 pr-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 focus:bg-white dark:focus:bg-slate-700 dark:text-slate-100 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm transition-all">
+            </div>
+            <button onclick="loadRequests()" class="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium shadow-sm transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                Search
+            </button>
+        </div>
+        <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+            <select id="statusFilter" onchange="loadRequests()"
+                class="border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5 bg-slate-50 dark:bg-slate-800 focus:bg-white dark:focus:bg-slate-700 dark:text-slate-100 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm transition-all">
+                <option value="">All Status</option>
+                <option value="incoming">Request (Incoming)</option>
+                <option value="review">Review</option>
+                <option value="approval">Approval</option>
+                <option value="testing">Testing</option>
+                <option value="analysis">Analysis</option>
+                <option value="completed">Completed</option>
+                <option value="discontinued">Discontinued</option>
+                <option value="delayed">Delayed</option>
+                <option value="upcoming">Upcoming Deadlines</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Loading -->
+    <div id="req-loading" class="flex items-center justify-center py-20">
+        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+    </div>
+    <!-- Error -->
+    <div id="req-error" class="hidden p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400"></div>
+    <!-- Empty -->
+    <div id="req-empty" class="hidden text-center py-20">
+        <p class="text-slate-400 text-lg">No requests found.</p>
+    </div>
+    <!-- Request List -->
+    <div id="req-list" class="hidden bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-sm divide-y divide-slate-100 dark:divide-slate-700 overflow-hidden"></div>
+</div>
+
+<!-- Import Modal -->
+<div id="importModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4" style="display:none">
+    <div class="fixed inset-0 bg-black/50" onclick="closeImportModal()"></div>
+    <div class="relative bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-lg flex flex-col max-h-[85vh]">
+        <!-- Header -->
+        <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
+            <div class="flex items-center gap-3">
+                <div id="importIconWrap" class="p-2 rounded-lg"></div>
+                <div>
+                    <h2 id="importTitle" class="text-lg font-bold text-slate-900 dark:text-white"></h2>
+                    <p id="importSubtitle" class="text-xs text-slate-400"></p>
+                </div>
+            </div>
+            <button onclick="closeImportModal()" class="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded">
+                <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <!-- Body -->
+        <div class="px-6 py-5 overflow-y-auto flex-1">
+            <div id="importError" class="hidden mb-4 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 rounded-lg text-sm flex items-start gap-2">
+                <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <span id="importErrorText"></span>
+            </div>
+            <!-- Upload step -->
+            <div id="importUploadStep" class="space-y-4">
+                <div id="dropZone" class="relative flex flex-col items-center justify-center p-8 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 hover:border-slate-400 dark:hover:border-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700/50 cursor-pointer transition-all">
+                    <input type="file" id="importFileInput" multiple class="hidden">
+                    <svg class="w-10 h-10 mb-2 text-slate-300 dark:text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    <p class="text-sm font-medium text-slate-600 dark:text-slate-300" id="dropZoneText"></p>
+                    <p class="text-xs text-slate-400 mt-1">Select one or multiple files — each file creates one request</p>
+                </div>
+                <div id="fileListWrap" class="hidden">
+                    <p id="fileCountLabel" class="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2"></p>
+                    <div id="fileList" class="max-h-44 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg divide-y divide-slate-100 dark:divide-slate-700"></div>
+                </div>
+                <div id="importTips" class="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3 text-xs text-slate-500 dark:text-slate-400 space-y-1"></div>
+            </div>
+            <!-- Processing step -->
+            <div id="importProcessingStep" class="hidden flex flex-col items-center justify-center py-12">
+                <div class="w-12 h-12 border-4 border-blue-200 dark:border-blue-800 border-t-blue-500 rounded-full animate-spin mb-4"></div>
+                <p id="processingText" class="text-sm font-medium text-slate-700 dark:text-slate-200"></p>
+                <p id="processingSubtext" class="text-xs text-slate-400 mt-1"></p>
+            </div>
+            <!-- Results step -->
+            <div id="importResultsStep" class="hidden space-y-4">
+                <div class="grid grid-cols-3 gap-3">
+                    <div class="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3 text-center">
+                        <p id="rTotalFiles" class="text-2xl font-bold text-slate-800 dark:text-slate-100">0</p>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">Files</p>
+                    </div>
+                    <div class="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3 text-center">
+                        <p id="rCreated" class="text-2xl font-bold text-emerald-600">0</p>
+                        <p class="text-xs text-emerald-600">Created</p>
+                    </div>
+                    <div id="rFailedCard" class="rounded-lg p-3 text-center bg-slate-50 dark:bg-slate-700/50">
+                        <p id="rFailed" class="text-2xl font-bold text-slate-400">0</p>
+                        <p id="rFailedLabel" class="text-xs text-slate-400">Failed</p>
+                    </div>
+                </div>
+                <div id="rCreatedList"></div>
+                <div id="rErrorList"></div>
+            </div>
+        </div>
+        <!-- Footer -->
+        <div class="px-6 py-4 border-t border-slate-200 dark:border-slate-700 flex gap-3 justify-end flex-shrink-0">
+            <div id="footerUpload">
+                <button onclick="closeImportModal()" class="px-4 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600 rounded-lg text-sm font-medium">Cancel</button>
+                <button id="importBtn" onclick="doImport()" disabled class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 shadow-sm inline-flex items-center gap-2 ml-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    <span id="importBtnText">Import</span>
+                </button>
+            </div>
+            <div id="footerResults" class="hidden">
+                <button onclick="resetImportModal()" class="px-4 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600 rounded-lg text-sm font-medium">Import More</button>
+                <button onclick="closeImportModal()" class="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-medium shadow-sm ml-2">Done</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    const userRole = '{{ user.role | default("") }}';
+    const isGuest = {{ 'true' if user and user.is_guest else 'false' }};
+
+    function getToken() {
+        const m = document.cookie.match(/access_token=([^;]+)/);
+        return m ? m[1] : null;
+    }
+    async function apiFetch(url, opts) {
+        const token = getToken();
+        const headers = { ...(opts?.headers || {}) };
+        if (token) headers['Authorization'] = 'Bearer ' + token;
+        const res = await fetch(url, { ...opts, headers, credentials: 'same-origin' });
+        if (!res.ok) throw new Error('API error ' + res.status);
+        return res.json();
+    }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+    const STATUS_STYLES = {
+        incoming:'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/40 dark:text-amber-400 dark:border-amber-800',
+        pending:'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/40 dark:text-amber-400 dark:border-amber-800',
+        review:'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/40 dark:text-blue-400 dark:border-blue-800',
+        approval:'bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-900/40 dark:text-violet-400 dark:border-violet-800',
+        testing:'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/40 dark:text-orange-400 dark:border-orange-800',
+        in_progress:'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/40 dark:text-orange-400 dark:border-orange-800',
+        analysis:'bg-teal-100 text-teal-700 border-teal-200 dark:bg-teal-900/40 dark:text-teal-400 dark:border-teal-800',
+        completed:'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-400 dark:border-emerald-800',
+        discontinued:'bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/40 dark:text-rose-400 dark:border-rose-800',
+    };
+    const STATUS_LABELS = {
+        incoming:'Request', pending:'Request', review:'Review', approval:'Approval',
+        testing:'Testing', in_progress:'Testing', analysis:'Analysis',
+        completed:'Completed', discontinued:'Discontinued'
+    };
+    function statusBadge(status) {
+        const cls = STATUS_STYLES[status] || 'bg-slate-100 text-slate-600 border-slate-200';
+        const label = STATUS_LABELS[status] || (status || '').replace('_',' ');
+        return '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ' + cls + '">' + label + '</span>';
+    }
+
+    // Process timeline mini visualization
+    function miniTimeline(steps) {
+        if (!steps || !steps.length) return '';
+        const colors = { completed:'bg-emerald-500', in_progress:'bg-blue-500', pending:'bg-slate-300 dark:bg-slate-600', hold:'bg-orange-500' };
+        const dots = steps.slice(0, 15).map(s =>
+            '<div class="w-2 h-2 rounded-full ' + (colors[s.status] || colors.pending) + '" title="' + esc(s.step_name) + ' (' + s.status + ')"></div>'
+        ).join('');
+        return '<div class="flex items-center gap-0.5 mt-2">' + dots + '</div>';
+    }
+
+    // Set initial filter from URL params
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('status')) {
+        document.getElementById('statusFilter').value = params.get('status');
+    }
+
+    // Enter key on search
+    document.getElementById('searchInput').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') loadRequests();
+    });
+
+    window.loadRequests = async function() {
+        const search = document.getElementById('searchInput').value.trim();
+        const status = document.getElementById('statusFilter').value;
+        let url = '/api/requests?';
+        if (search) url += 'search=' + encodeURIComponent(search) + '&';
+        if (status) url += 'status=' + encodeURIComponent(status);
+
+        document.getElementById('req-loading').classList.remove('hidden');
+        document.getElementById('req-list').classList.add('hidden');
+        document.getElementById('req-empty').classList.add('hidden');
+        document.getElementById('req-error').classList.add('hidden');
+
+        try {
+            const data = await apiFetch(url);
+            document.getElementById('req-loading').classList.add('hidden');
+            document.getElementById('req-count-text').textContent = data.length + ' request' + (data.length !== 1 ? 's' : '') + ' found';
+
+            if (data.length === 0) {
+                document.getElementById('req-empty').classList.remove('hidden');
+                return;
+            }
+
+            const list = document.getElementById('req-list');
+            list.classList.remove('hidden');
+            list.innerHTML = data.map(req => {
+                const isDelayed = req.deadline && new Date(req.deadline) < new Date() && req.status !== 'completed';
+                const delayedDot = isDelayed ? '<span class="relative flex h-2.5 w-2.5" title="Delayed"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span><span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-600"></span></span>' : '';
+                const noticeBadge = req.note ? '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-900/40 dark:text-amber-400 dark:border-amber-800" title="' + esc(req.note) + '"><svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg> Notice</span>' : '';
+                const classBadge = req.classification ? '<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700 border border-purple-200 dark:bg-purple-900/40 dark:text-purple-400 dark:border-purple-800">' + esc(req.classification) + '</span>' : '';
+                const autoBadge = req.automotive ? '<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200">Automotive</span>' : '';
+
+                // Active step
+                const activeStep = req.steps?.find(s => s.status === 'in_progress') || req.steps?.find(s => s.status === 'pending');
+                const activeStepHtml = activeStep ? '<div class="mt-1.5"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-700/50"><svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' + esc(activeStep.step_name) + '</span></div>' : '';
+
+                // Note display
+                const noteHtml = req.note ? '<div class="mt-1.5 flex items-start gap-1.5 px-2 py-1.5 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/50 max-w-lg"><svg class="w-3 h-3 text-amber-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg><span class="text-xs text-amber-800 dark:text-amber-300 line-clamp-2 leading-snug">' + esc(req.note) + '</span></div>' : '';
+
+                const deadlineText = req.deadline ? '<span class="text-xs text-slate-400 dark:text-slate-500">Due: ' + esc(req.deadline) + '</span>' : '';
+
+                // Delete button for admin
+                const deleteBtn = userRole === 'Admin' ? '<button onclick="event.preventDefault();event.stopPropagation();deleteRequest(\'' + req.id + '\')" class="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button>' : '';
+
+                return '<a href="/requests/' + req.id + '" class="flex items-center gap-4 px-6 py-4 hover:bg-blue-50/40 dark:hover:bg-blue-900/10 hover:shadow-[inset_3px_0_0_#3b82f6] transition-all group">' +
+                    '<div class="flex-1 min-w-0">' +
+                        '<div class="flex items-center gap-3 mb-1 flex-wrap">' +
+                            '<span class="font-mono text-base font-bold text-blue-700 dark:text-blue-400 tracking-tight">' + esc(req.request_number) + '</span>' +
+                            statusBadge(req.status) + delayedDot + noticeBadge + autoBadge + classBadge +
+                        '</div>' +
+                        '<div class="flex items-center gap-4 text-xs text-slate-400 dark:text-slate-500">' +
+                            (req.device_name ? '<span>Device: ' + esc(req.device_name) + '</span>' : '') +
+                            (req.customer ? '<span>Customer: ' + esc(req.customer) + '</span>' : '') +
+                            (req.lot_no ? '<span>Lot: ' + esc(req.lot_no) + '</span>' : '') +
+                            '<span>by ' + esc(req.created_by_username || '—') + '</span>' +
+                        '</div>' +
+                        activeStepHtml + noteHtml + miniTimeline(req.steps) +
+                    '</div>' +
+                    '<div class="flex items-center gap-3 flex-shrink-0">' + deadlineText + deleteBtn +
+                        '<svg class="w-4 h-4 text-slate-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>' +
+                    '</div></a>';
+            }).join('');
+        } catch(err) {
+            document.getElementById('req-loading').classList.add('hidden');
+            const errEl = document.getElementById('req-error');
+            errEl.classList.remove('hidden');
+            errEl.textContent = 'Failed to load requests: ' + err.message;
+        }
+    };
+
+    window.deleteRequest = async function(id) {
+        if (!confirm('Are you sure you want to permanently delete this request? All associated steps and data will be lost.')) return;
+        try {
+            await apiFetch('/api/requests/' + id, { method: 'DELETE' });
+            window.showToast('Request deleted', 'success');
+            loadRequests();
+        } catch(err) {
+            window.showToast('Failed to delete: ' + err.message, 'error');
+        }
+    };
+
+    /* ── Import Modal Logic ── */
+    let importMode = ''; // 'excel' or 'word'
+    let importFiles = [];
+
+    window.openImportModal = function(mode) {
+        importMode = mode;
+        importFiles = [];
+        const modal = document.getElementById('importModal');
+        modal.style.display = 'flex';
+        modal.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+
+        // Configure header
+        const iconWrap = document.getElementById('importIconWrap');
+        if (mode === 'excel') {
+            iconWrap.className = 'p-2 bg-emerald-50 dark:bg-emerald-900/30 rounded-lg';
+            iconWrap.innerHTML = '<svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+            document.getElementById('importTitle').textContent = 'Import Request Sheets';
+            document.getElementById('importSubtitle').textContent = 'Upload Reliability Test Request Sheet files (.xlsx)';
+            document.getElementById('importFileInput').accept = '.xlsx,.xls';
+            document.getElementById('dropZoneText').innerHTML = 'Drop your <span class="text-blue-600 dark:text-blue-400">Reliability Test Request Sheets</span> here';
+            document.getElementById('importTips').innerHTML = '<p class="font-medium text-slate-600 dark:text-slate-300">How it works:</p><ul class="list-disc list-inside space-y-0.5"><li>Each .xlsx file should be a standard Reliability Test Request Sheet</li><li>General info is read from fixed cells (D8–D18, O8–O17)</li><li>The original REL# from the sheet is stored as reference</li><li>Leg traveller sections (LEG 1, LEG 2 …) are imported as process steps</li><li>Files without traveller sections use the 16 default process steps</li></ul>';
+            document.getElementById('importBtn').className = 'px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 shadow-sm inline-flex items-center gap-2 ml-2';
+        } else {
+            iconWrap.className = 'p-2 bg-blue-50 dark:bg-blue-900/30 rounded-lg';
+            iconWrap.innerHTML = '<svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+            document.getElementById('importTitle').textContent = 'Import Word Travellers';
+            document.getElementById('importSubtitle').textContent = 'Reliability Test Traveller (.docx)';
+            document.getElementById('importFileInput').accept = '.docx';
+            document.getElementById('dropZoneText').innerHTML = 'Drop your <span class="text-blue-600 dark:text-blue-400">.docx</span> files here';
+            document.getElementById('importTips').innerHTML = '<p class="font-medium text-slate-600 dark:text-slate-300">How it works:</p><ul class="list-disc list-inside space-y-0.5"><li>Each .docx file should be a Reliability Test Traveller document</li><li>Tables are parsed to extract request details and leg data</li><li>One request is created per file with RMS numbering</li></ul>';
+            document.getElementById('importBtn').className = 'px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 shadow-sm inline-flex items-center gap-2 ml-2';
+        }
+        resetImportModal();
+    };
+
+    window.closeImportModal = function() {
+        document.getElementById('importModal').style.display = 'none';
+        document.getElementById('importModal').classList.add('hidden');
+        document.body.style.overflow = '';
+        importFiles = [];
+    };
+
+    window.resetImportModal = function() {
+        importFiles = [];
+        document.getElementById('importUploadStep').classList.remove('hidden');
+        document.getElementById('importProcessingStep').classList.add('hidden');
+        document.getElementById('importResultsStep').classList.add('hidden');
+        document.getElementById('importError').classList.add('hidden');
+        document.getElementById('footerUpload').classList.remove('hidden');
+        document.getElementById('footerResults').classList.add('hidden');
+        document.getElementById('importBtn').disabled = true;
+        updateFileList();
+    };
+
+    // Drag & drop
+    const dropZone = document.getElementById('dropZone');
+    dropZone.addEventListener('click', () => document.getElementById('importFileInput').click());
+    dropZone.addEventListener('dragenter', e => { e.preventDefault(); dropZone.classList.add('border-blue-500', 'bg-blue-50', 'dark:bg-blue-900/20'); dropZone.classList.remove('border-slate-300', 'dark:border-slate-600'); });
+    dropZone.addEventListener('dragover', e => e.preventDefault());
+    dropZone.addEventListener('dragleave', e => { e.preventDefault(); dropZone.classList.remove('border-blue-500', 'bg-blue-50', 'dark:bg-blue-900/20'); dropZone.classList.add('border-slate-300', 'dark:border-slate-600'); });
+    dropZone.addEventListener('drop', e => {
+        e.preventDefault();
+        dropZone.classList.remove('border-blue-500', 'bg-blue-50', 'dark:bg-blue-900/20');
+        dropZone.classList.add('border-slate-300', 'dark:border-slate-600');
+        if (e.dataTransfer.files?.length) addImportFiles(e.dataTransfer.files);
+    });
+
+    document.getElementById('importFileInput').addEventListener('change', function() {
+        if (this.files?.length) addImportFiles(this.files);
+        this.value = '';
+    });
+
+    function addImportFiles(newFiles) {
+        const ext = importMode === 'excel' ? ['.xlsx', '.xls'] : ['.docx'];
+        const valid = Array.from(newFiles).filter(f => ext.some(e => f.name.toLowerCase().endsWith(e)));
+        if (valid.length === 0) {
+            showImportError('Only ' + ext.join('/') + ' files are supported');
+            return;
+        }
+        const existingNames = new Set(importFiles.map(f => f.name));
+        const unique = valid.filter(f => !existingNames.has(f.name));
+        importFiles = importFiles.concat(unique);
+        hideImportError();
+        updateFileList();
+    }
+
+    window.removeImportFile = function(idx) {
+        importFiles.splice(idx, 1);
+        updateFileList();
+    }
+
+    function updateFileList() {
+        const wrap = document.getElementById('fileListWrap');
+        const list = document.getElementById('fileList');
+        const btn = document.getElementById('importBtn');
+        const btnText = document.getElementById('importBtnText');
+        if (importFiles.length === 0) {
+            wrap.classList.add('hidden');
+            btn.disabled = true;
+            btnText.textContent = 'Import';
+            return;
+        }
+        wrap.classList.remove('hidden');
+        btn.disabled = false;
+        btnText.textContent = 'Import ' + importFiles.length + ' File' + (importFiles.length > 1 ? 's' : '');
+        document.getElementById('fileCountLabel').textContent = importFiles.length + ' file' + (importFiles.length > 1 ? 's' : '') + ' selected';
+        const fileIcon = importMode === 'excel'
+            ? '<svg class="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'
+            : '<svg class="w-4 h-4 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+        list.innerHTML = importFiles.map((f, i) =>
+            '<div class="flex items-center gap-2 px-3 py-2 group">' +
+            fileIcon +
+            '<span class="text-sm text-slate-700 dark:text-slate-200 truncate flex-1" title="' + esc(f.name) + '">' + esc(f.name) + '</span>' +
+            '<span class="text-xs text-slate-400 flex-shrink-0">' + (f.size / 1024).toFixed(0) + ' KB</span>' +
+            '<button onclick="removeImportFile(' + i + ')" class="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">' +
+            '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>' +
+            '</button></div>'
+        ).join('');
+    }
+
+    function showImportError(msg) {
+        document.getElementById('importError').classList.remove('hidden');
+        document.getElementById('importErrorText').textContent = msg;
+    }
+    function hideImportError() {
+        document.getElementById('importError').classList.add('hidden');
+    }
+
+    window.doImport = async function() {
+        if (importFiles.length === 0) return;
+        // Show processing
+        document.getElementById('importUploadStep').classList.add('hidden');
+        document.getElementById('importProcessingStep').classList.remove('hidden');
+        document.getElementById('footerUpload').classList.add('hidden');
+        document.getElementById('processingText').textContent = 'Processing ' + importFiles.length + ' file' + (importFiles.length > 1 ? 's' : '') + '...';
+        document.getElementById('processingSubtext').textContent = importMode === 'excel' ? 'Reading request sheets and creating entries' : 'Parsing Word document tables';
+        hideImportError();
+
+        const formData = new FormData();
+        importFiles.forEach(f => formData.append('files', f));
+        const endpoint = importMode === 'excel' ? '/api/requests/import' : '/api/requests/import-word';
+
+        try {
+            const token = getToken();
+            const headers = {};
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: headers,
+                credentials: 'same-origin',
+                body: formData
+            });
+            if (!res.ok) {
+                const e = await res.json().catch(() => ({}));
+                let msg = 'Import failed (' + res.status + ')';
+                if (typeof e.detail === 'string') msg = e.detail;
+                else if (Array.isArray(e.detail)) msg = e.detail.map(d => d.msg || JSON.stringify(d)).join('; ');
+                throw new Error(msg);
+            }
+            const result = await res.json();
+            showResults(result);
+            if (result.created > 0) loadRequests();
+        } catch(err) {
+            showImportError(err.message);
+            document.getElementById('importProcessingStep').classList.add('hidden');
+            document.getElementById('importUploadStep').classList.remove('hidden');
+            document.getElementById('footerUpload').classList.remove('hidden');
+        }
+    };
+
+    function showResults(result) {
+        document.getElementById('importProcessingStep').classList.add('hidden');
+        document.getElementById('importResultsStep').classList.remove('hidden');
+        document.getElementById('footerUpload').classList.add('hidden');
+        document.getElementById('footerResults').classList.remove('hidden');
+
+        document.getElementById('rTotalFiles').textContent = result.total_files || 0;
+        document.getElementById('rCreated').textContent = result.created || 0;
+        document.getElementById('rFailed').textContent = result.failed || 0;
+        const failedCard = document.getElementById('rFailedCard');
+        const failedLabel = document.getElementById('rFailedLabel');
+        if (result.failed > 0) {
+            failedCard.className = 'rounded-lg p-3 text-center bg-red-50 dark:bg-red-900/20';
+            document.getElementById('rFailed').className = 'text-2xl font-bold text-red-600';
+            failedLabel.className = 'text-xs text-red-500';
+        } else {
+            failedCard.className = 'rounded-lg p-3 text-center bg-slate-50 dark:bg-slate-700/50';
+            document.getElementById('rFailed').className = 'text-2xl font-bold text-slate-400';
+            failedLabel.className = 'text-xs text-slate-400';
+        }
+
+        // Created list
+        const cl = document.getElementById('rCreatedList');
+        if (result.created_requests?.length > 0) {
+            cl.innerHTML = '<p class="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">Created Requests</p>' +
+                '<div class="max-h-44 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg divide-y divide-slate-100 dark:divide-slate-700">' +
+                result.created_requests.map(r => {
+                    const legs = r.legs != null ? '<span class="ml-auto text-xs text-blue-500 flex-shrink-0">' + r.legs + ' leg' + (r.legs !== 1 ? 's' : '') + ', ' + r.leg_items + ' step' + (r.leg_items !== 1 ? 's' : '') + '</span>' : '';
+                    const device = r.device_name ? '<span class="text-slate-400 text-xs truncate">— ' + esc(r.device_name) + '</span>' : '';
+                    const customer = r.customer ? '<span class="text-slate-400 text-xs truncate">' + (r.device_name ? ' · ' : '— ') + esc(r.customer) + '</span>' : '';
+                    const warnings = (r.warnings || []).map(w => '<p class="text-xs text-amber-600 mt-0.5">⚠ ' + esc(w) + '</p>').join('');
+                    return '<div class="flex items-center gap-2 px-3 py-2 text-sm">' +
+                        '<svg class="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>' +
+                        '<span class="font-mono font-bold text-blue-700 dark:text-blue-400">' + esc(r.request_number) + '</span>' +
+                        device + customer + legs + warnings + '</div>';
+                }).join('') + '</div>';
+        } else {
+            cl.innerHTML = '';
+        }
+
+        // Error list
+        const el = document.getElementById('rErrorList');
+        if (result.errors?.length > 0) {
+            el.innerHTML = '<p class="text-xs font-medium uppercase tracking-wider text-red-500 mb-2">Errors</p>' +
+                '<div class="max-h-32 overflow-y-auto border border-red-200 dark:border-red-800 rounded-lg divide-y divide-red-100 dark:divide-red-800/50 bg-red-50/50 dark:bg-red-900/20">' +
+                result.errors.map(err =>
+                    '<div class="px-3 py-2 text-sm">' +
+                    '<span class="font-medium text-red-700 dark:text-red-400">' + esc(err.file) + ':</span> ' +
+                    '<span class="text-red-600 dark:text-red-300">' + (err.errors || []).join('; ') + '</span></div>'
+                ).join('') + '</div>';
+        } else {
+            el.innerHTML = '';
+        }
+    }
+
+    // Initial load
+    loadRequests();
+})();
+</script>
+{% endblock %}

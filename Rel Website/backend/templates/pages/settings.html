@@ -1,0 +1,669 @@
+{% extends "layout.html" %}
+
+{% block title %}Settings - REL Request Process Flow{% endblock %}
+{% block page_title %}Settings{% endblock %}
+
+{% block page_content %}
+<div class="space-y-8 max-w-4xl mx-auto">
+
+    <!-- ═══ My Profile ═══ -->
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-6">
+        <h3 class="text-lg font-semibold mb-4">My Profile</h3>
+        <div class="flex items-start gap-6">
+            <!-- Avatar -->
+            <div class="flex flex-col items-center gap-2">
+                <div id="avatarPreview" class="w-20 h-20 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 flex items-center justify-center text-2xl font-bold cursor-pointer overflow-hidden" onclick="viewAvatarLightbox()">
+                    {{ user.username[0]|upper if user.username else '?' }}
+                </div>
+                <div class="flex gap-1">
+                    <button onclick="document.getElementById('avatarInput').click()" class="text-xs text-primary-600 hover:underline">Upload</button>
+                    <button onclick="removeAvatar()" class="text-xs text-red-500 hover:underline">Remove</button>
+                </div>
+                <input type="file" id="avatarInput" accept="image/*" class="hidden" onchange="handleAvatarUpload(event)">
+            </div>
+            <!-- Form -->
+            <form onsubmit="saveProfile(event)" class="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">Username</label>
+                    <input type="text" id="profUsername" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Position</label>
+                    <input type="text" id="profPosition" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Email</label>
+                    <input type="email" id="profEmail" disabled class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-100 dark:bg-slate-600 text-sm opacity-60">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Plant</label>
+                    <input type="text" id="profPlant" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Manager</label>
+                    <input type="text" id="profManager" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+                </div>
+                <div class="md:col-span-2 flex justify-end">
+                    <button type="submit" id="btnSaveProfile" class="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium">Save Profile</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ═══ Change Password ═══ -->
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-6">
+        <h3 class="text-lg font-semibold mb-4">Change Password</h3>
+        <form onsubmit="changePassword(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+                <label class="block text-sm font-medium mb-1">Current Password</label>
+                <input type="password" id="pwCurrent" required class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1">New Password</label>
+                <input type="password" id="pwNew" required minlength="6" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1">Confirm New</label>
+                <input type="password" id="pwConfirm" required class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+            </div>
+            <div class="md:col-span-3 flex justify-end">
+                <button type="submit" id="btnChangePw" class="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium">Change Password</button>
+            </div>
+        </form>
+    </div>
+
+    {% if user.role in ('Admin', 'ADMIN') %}
+    <!-- ═══ General Settings ═══ -->
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-6">
+        <h3 class="text-lg font-semibold mb-4">General Settings</h3>
+        <form onsubmit="saveSettings(event)" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-medium mb-1">App Name</label>
+                <input type="text" id="setAppName" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1">Company Name</label>
+                <input type="text" id="setCompany" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1">Contact Email</label>
+                <input type="email" id="setEmail" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1">App Logo URL</label>
+                <input type="text" id="setLogo" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1">Technician Login Code</label>
+                <input type="password" id="setTechCode" maxlength="6" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm font-mono tracking-widest">
+            </div>
+            <div class="md:col-span-2 flex justify-end">
+                <button type="submit" id="btnSaveSettings" class="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium">Save Settings</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- ═══ Machine Management ═══ -->
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold">Machine Management</h3>
+            <button onclick="document.getElementById('machineFormRow').classList.toggle('hidden')" class="text-sm text-primary-600 hover:underline">+ Add Machine</button>
+        </div>
+        <div id="machineFormRow" class="hidden mb-4 flex gap-2">
+            <input type="text" id="machNo" placeholder="Machine #" class="flex-1 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+            <input type="text" id="machDesc" placeholder="Description" class="flex-1 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+            <button onclick="addMachine()" class="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm">Add</button>
+        </div>
+        <div id="machineList" class="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden max-h-64 overflow-y-auto">
+            <table class="w-full">
+                <thead class="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
+                    <tr>
+                        <th class="px-4 py-2 text-left text-xs font-semibold uppercase">Machine #</th>
+                        <th class="px-4 py-2 text-left text-xs font-semibold uppercase">Description</th>
+                        <th class="px-4 py-2 text-right text-xs font-semibold uppercase">Action</th>
+                    </tr>
+                </thead>
+                <tbody id="machineBody" class="divide-y divide-slate-200 dark:divide-slate-700 text-sm"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ═══ Employee Management ═══ -->
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold">Employee Management</h3>
+            <button onclick="document.getElementById('empFormRow').classList.toggle('hidden')" class="text-sm text-primary-600 hover:underline">+ Add Employee</button>
+        </div>
+        <div id="empFormRow" class="hidden mb-4 flex gap-2">
+            <input type="text" id="empId" placeholder="Employee ID" class="flex-1 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+            <input type="text" id="empName" placeholder="Name" class="flex-1 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+            <input type="text" id="empPos" placeholder="Position" class="flex-1 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+            <button onclick="addEmployee()" class="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm">Add</button>
+        </div>
+        <div class="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden max-h-64 overflow-y-auto">
+            <table class="w-full">
+                <thead class="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
+                    <tr>
+                        <th class="px-4 py-2 text-left text-xs font-semibold uppercase">ID</th>
+                        <th class="px-4 py-2 text-left text-xs font-semibold uppercase">Name</th>
+                        <th class="px-4 py-2 text-left text-xs font-semibold uppercase">Position</th>
+                        <th class="px-4 py-2 text-right text-xs font-semibold uppercase">Action</th>
+                    </tr>
+                </thead>
+                <tbody id="empBody" class="divide-y divide-slate-200 dark:divide-slate-700 text-sm"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ═══ Process Steps ═══ -->
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold">Process Steps</h3>
+            <button onclick="saveSteps()" id="btnSaveSteps" class="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium">Save Steps</button>
+        </div>
+        <!-- Presets -->
+        <div class="mb-4">
+            <label class="block text-xs font-semibold text-slate-500 uppercase mb-2">Presets</label>
+            <div class="flex flex-wrap gap-2" id="presetButtons"></div>
+        </div>
+        <!-- Step List -->
+        <div id="stepList" class="space-y-2 mb-4"></div>
+        <!-- Add Step -->
+        <div class="flex gap-2">
+            <input type="text" id="newStepName" placeholder="New step name..." class="flex-1 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+            <button onclick="addStep()" class="px-4 py-2 bg-slate-200 dark:bg-slate-600 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-500 text-sm">Add Step</button>
+        </div>
+    </div>
+
+    <!-- ═══ Database Backups ═══ -->
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold">Database Backups</h3>
+            <button onclick="createBackup()" id="btnCreateBackup" class="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium">Create Backup</button>
+        </div>
+        <div id="backupListSettings" class="space-y-2"></div>
+    </div>
+
+    <!-- ═══ Maintenance Mode ═══ -->
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold">Maintenance Mode</h3>
+            <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="maintToggle" onchange="toggleMaintenance()" class="sr-only peer">
+                <div class="w-11 h-6 bg-slate-200 peer-focus:ring-2 peer-focus:ring-primary-300 rounded-full peer dark:bg-slate-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-500"></div>
+            </label>
+        </div>
+        <div id="maintMsgWrap" class="hidden">
+            <input type="text" id="maintMsg" placeholder="Maintenance message..." class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm">
+        </div>
+    </div>
+
+    <!-- ═══ Server Controls ═══ -->
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-6">
+        <h3 class="text-lg font-semibold mb-4">Server Controls</h3>
+        <div class="flex gap-3">
+            <button onclick="restartBackend()" id="btnRestart" class="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-medium flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                Restart Backend
+            </button>
+        </div>
+    </div>
+
+    <!-- ═══ System Health ═══ -->
+    <div class="bg-slate-900 text-white rounded-xl shadow border border-slate-700 p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold">System Health</h3>
+            <div class="flex items-center gap-2">
+                <div id="healthDot" class="w-3 h-3 rounded-full bg-slate-500"></div>
+                <select id="healthPeriod" onchange="loadHealth()" class="text-xs bg-slate-800 border border-slate-600 rounded px-2 py-1">
+                    <option value="24H">24 Hours</option>
+                    <option value="7D">7 Days</option>
+                    <option value="30D">30 Days</option>
+                </select>
+            </div>
+        </div>
+        <div id="healthMetrics" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4"></div>
+        <canvas id="healthChart" height="120"></canvas>
+    </div>
+    {% endif %}
+
+    <!-- ═══ System Information ═══ -->
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-6">
+        <h3 class="text-lg font-semibold mb-4">System Information</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+            <div class="flex justify-between py-2 border-b border-slate-100 dark:border-slate-700"><span class="text-slate-500">Database</span><span class="font-medium">SQLite</span></div>
+            <div class="flex justify-between py-2 border-b border-slate-100 dark:border-slate-700"><span class="text-slate-500">Backend</span><span class="font-medium">FastAPI + Python</span></div>
+            <div class="flex justify-between py-2 border-b border-slate-100 dark:border-slate-700"><span class="text-slate-500">Frontend</span><span class="font-medium">Jinja2 + Tailwind CSS</span></div>
+            <div class="flex justify-between py-2 border-b border-slate-100 dark:border-slate-700"><span class="text-slate-500">Mode</span><span class="font-medium">LAN / Offline</span></div>
+        </div>
+    </div>
+</div>
+
+<!-- Avatar Lightbox -->
+<div id="avatarLB" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/80 cursor-pointer" onclick="this.classList.add('hidden')">
+    <img id="avatarLBImg" src="" class="max-w-[80vw] max-h-[80vh] rounded-xl shadow-2xl">
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script>
+// ─── Core ───
+let profile = {};
+let settings = {};
+let machines = [];
+let employees = [];
+let backupsList = [];
+let stepsConfig = [];
+let presetsConfig = {};
+let healthChart = null;
+const isAdmin = {{ 'true' if user.role in ('Admin', 'ADMIN') else 'false' }};
+
+function getToken() { const m = document.cookie.match(/access_token=([^;]+)/); return m ? m[1] : null; }
+async function apiFetch(url, opts) {
+    const token = getToken();
+    const headers = { ...(opts?.headers || {}) };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    if (opts?.body && typeof opts.body === 'string') headers['Content-Type'] = 'application/json';
+    const res = await fetch(url, { ...opts, headers, credentials: 'same-origin' });
+    if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || 'API error ' + res.status); }
+    if (res.status === 204) return {};
+    return res.json();
+}
+function toast(msg, type) { if (window.showToast) window.showToast(msg, type); else alert(msg); }
+function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// ─── Init ───
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        profile = await apiFetch('/api/auth/me');
+        fillProfile();
+    } catch(e) { console.error(e); }
+
+    if (isAdmin) {
+        Promise.all([
+            apiFetch('/api/settings').then(s => { settings = s; fillSettings(); loadSteps(); }).catch(()=>{}),
+            apiFetch('/api/machines').then(d => { machines = d.machines || []; renderMachines(); }).catch(()=>{}),
+            apiFetch('/api/employees').then(d => { employees = d.employees || []; renderEmployees(); }).catch(()=>{}),
+            apiFetch('/api/backups').then(d => { backupsList = d; renderBackups(); }).catch(()=>{}),
+            apiFetch('/api/maintenance').then(d => { fillMaintenance(d); }).catch(()=>{}),
+            loadHealth()
+        ]);
+    }
+});
+
+// ─── Profile ───
+function fillProfile() {
+    document.getElementById('profUsername').value = profile.username || '';
+    document.getElementById('profPosition').value = profile.position || '';
+    document.getElementById('profEmail').value = profile.email || '';
+    document.getElementById('profPlant').value = profile.plant || '';
+    document.getElementById('profManager').value = profile.manager || '';
+    if (profile.avatar) {
+        document.getElementById('avatarPreview').innerHTML = `<img src="${esc(profile.avatar)}" class="w-full h-full object-cover">`;
+    }
+}
+
+async function saveProfile(e) {
+    e.preventDefault();
+    const btn = document.getElementById('btnSaveProfile');
+    btn.disabled = true; btn.textContent = 'Saving...';
+    try {
+        await apiFetch('/api/auth/profile', {
+            method: 'PATCH',
+            body: JSON.stringify({
+                username: document.getElementById('profUsername').value,
+                position: document.getElementById('profPosition').value,
+                plant: document.getElementById('profPlant').value,
+                manager: document.getElementById('profManager').value
+            })
+        });
+        toast('Profile saved', 'success');
+    } catch(e) { toast(e.message, 'error'); }
+    finally { btn.disabled = false; btn.textContent = 'Save Profile'; }
+}
+
+async function handleAvatarUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        try {
+            await apiFetch('/api/auth/profile', { method: 'PATCH', body: JSON.stringify({ avatar: e.target.result }) });
+            document.getElementById('avatarPreview').innerHTML = `<img src="${e.target.result}" class="w-full h-full object-cover">`;
+            toast('Avatar updated', 'success');
+        } catch(err) { toast(err.message, 'error'); }
+    };
+    reader.readAsDataURL(file);
+}
+
+async function removeAvatar() {
+    try {
+        await apiFetch('/api/auth/profile', { method: 'PATCH', body: JSON.stringify({ avatar: '' }) });
+        const initial = (profile.username || '?')[0].toUpperCase();
+        document.getElementById('avatarPreview').innerHTML = initial;
+        toast('Avatar removed', 'success');
+    } catch(e) { toast(e.message, 'error'); }
+}
+
+function viewAvatarLightbox() {
+    const img = document.querySelector('#avatarPreview img');
+    if (!img) return;
+    document.getElementById('avatarLBImg').src = img.src;
+    document.getElementById('avatarLB').classList.remove('hidden');
+}
+
+// ─── Change Password ───
+async function changePassword(e) {
+    e.preventDefault();
+    const cur = document.getElementById('pwCurrent').value;
+    const nw = document.getElementById('pwNew').value;
+    const conf = document.getElementById('pwConfirm').value;
+    if (nw !== conf) { toast('Passwords do not match', 'error'); return; }
+    if (nw.length < 6) { toast('Password must be at least 6 characters', 'error'); return; }
+    const btn = document.getElementById('btnChangePw');
+    btn.disabled = true; btn.textContent = 'Changing...';
+    try {
+        await apiFetch('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ current_password: cur, new_password: nw }) });
+        toast('Password changed', 'success');
+        document.getElementById('pwCurrent').value = '';
+        document.getElementById('pwNew').value = '';
+        document.getElementById('pwConfirm').value = '';
+    } catch(e) { toast(e.message, 'error'); }
+    finally { btn.disabled = false; btn.textContent = 'Change Password'; }
+}
+
+// ─── General Settings ───
+function fillSettings() {
+    document.getElementById('setAppName').value = settings.app_name || '';
+    document.getElementById('setCompany').value = settings.company_name || '';
+    document.getElementById('setEmail').value = settings.contact_email || '';
+    document.getElementById('setLogo').value = settings.app_logo || '';
+    document.getElementById('setTechCode').value = settings.tech_auth_code || '';
+}
+
+async function saveSettings(e) {
+    e.preventDefault();
+    const btn = document.getElementById('btnSaveSettings');
+    btn.disabled = true; btn.textContent = 'Saving...';
+    try {
+        await apiFetch('/api/settings', {
+            method: 'PATCH',
+            body: JSON.stringify({
+                app_name: document.getElementById('setAppName').value,
+                company_name: document.getElementById('setCompany').value,
+                contact_email: document.getElementById('setEmail').value,
+                app_logo: document.getElementById('setLogo').value,
+                tech_auth_code: document.getElementById('setTechCode').value
+            })
+        });
+        toast('Settings saved', 'success');
+    } catch(e) { toast(e.message, 'error'); }
+    finally { btn.disabled = false; btn.textContent = 'Save Settings'; }
+}
+
+// ─── Machine Management ───
+function renderMachines() {
+    const body = document.getElementById('machineBody');
+    if (!machines.length) { body.innerHTML = '<tr><td colspan="3" class="px-4 py-4 text-center text-slate-500">No machines</td></tr>'; return; }
+    body.innerHTML = machines.map(m => `<tr class="hover:bg-slate-50 dark:hover:bg-slate-700/50">
+        <td class="px-4 py-2 font-mono">${esc(m.machine_no)}</td>
+        <td class="px-4 py-2">${esc(m.description)}</td>
+        <td class="px-4 py-2 text-right"><button onclick="deleteMachine(${m.id})" class="text-red-500 hover:text-red-700 text-xs">Delete</button></td>
+    </tr>`).join('');
+}
+
+async function addMachine() {
+    const no = document.getElementById('machNo').value.trim();
+    const desc = document.getElementById('machDesc').value.trim();
+    if (!no) { toast('Machine # required', 'error'); return; }
+    try {
+        const m = await apiFetch('/api/machines', { method: 'POST', body: JSON.stringify({ machine_no: no, description: desc }) });
+        machines.push(m);
+        renderMachines();
+        document.getElementById('machNo').value = '';
+        document.getElementById('machDesc').value = '';
+        toast('Machine added', 'success');
+    } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteMachine(id) {
+    if (!confirm('Delete this machine?')) return;
+    try {
+        await apiFetch('/api/machines/' + id, { method: 'DELETE' });
+        machines = machines.filter(m => m.id !== id);
+        renderMachines();
+        toast('Machine deleted', 'success');
+    } catch(e) { toast(e.message, 'error'); }
+}
+
+// ─── Employee Management ───
+function renderEmployees() {
+    const body = document.getElementById('empBody');
+    if (!employees.length) { body.innerHTML = '<tr><td colspan="4" class="px-4 py-4 text-center text-slate-500">No employees</td></tr>'; return; }
+    body.innerHTML = employees.map(e => `<tr class="hover:bg-slate-50 dark:hover:bg-slate-700/50">
+        <td class="px-4 py-2 font-mono">${esc(e.id)}</td>
+        <td class="px-4 py-2">${esc(e.name)}</td>
+        <td class="px-4 py-2">${esc(e.position || '-')}</td>
+        <td class="px-4 py-2 text-right"><button onclick="deleteEmployee('${esc(e.id)}')" class="text-red-500 hover:text-red-700 text-xs">Delete</button></td>
+    </tr>`).join('');
+}
+
+async function addEmployee() {
+    const id = document.getElementById('empId').value.trim();
+    const name = document.getElementById('empName').value.trim();
+    const pos = document.getElementById('empPos').value.trim();
+    if (!id || !name) { toast('ID and Name required', 'error'); return; }
+    try {
+        const e = await apiFetch('/api/employees', { method: 'POST', body: JSON.stringify({ id, name, position: pos }) });
+        employees.push(e);
+        renderEmployees();
+        document.getElementById('empId').value = '';
+        document.getElementById('empName').value = '';
+        document.getElementById('empPos').value = '';
+        toast('Employee added', 'success');
+    } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteEmployee(id) {
+    if (!confirm('Delete this employee?')) return;
+    try {
+        await apiFetch('/api/employees/' + encodeURIComponent(id), { method: 'DELETE' });
+        employees = employees.filter(e => e.id !== id);
+        renderEmployees();
+        toast('Employee deleted', 'success');
+    } catch(e) { toast(e.message, 'error'); }
+}
+
+// ─── Process Steps ───
+const QUICK_STEPS = ['Incoming Inspection','Visual','O/S','SAT','Bake','T & H Soak','Reflow','Electrical Test','Reliability Test','Serialize Samples'];
+const DEFAULT_PRESETS = {
+    'Precon + Long Term': ['Incoming Inspection','Visual','Serialize Samples','O/S','SAT','Bake','T & H Soak','Reflow','Electrical Test','SAT','O/S','Visual','Reliability Test','SAT','O/S','Visual'],
+    'MRT': ['Incoming Inspection','Visual','Serialize Samples','O/S','SAT','Bake','T & H Soak','Reflow','Electrical Test','Visual'],
+    'Rel Only': ['Incoming Inspection','Visual','Serialize Samples','Reliability Test','SAT','O/S','Visual'],
+    'RelMon': ['Incoming Inspection','Visual','SAT','O/S','Bake','T & H Soak','Reflow','Electrical Test','SAT','O/S','Visual']
+};
+
+function loadSteps() {
+    stepsConfig = (settings.process_steps || []).map((s, i) => typeof s === 'string' ? { step_number: i+1, step_name: s } : s);
+    presetsConfig = settings.process_presets || DEFAULT_PRESETS;
+    renderPresets();
+    renderStepList();
+}
+
+function renderPresets() {
+    const container = document.getElementById('presetButtons');
+    const names = Object.keys(presetsConfig).length ? Object.keys(presetsConfig) : Object.keys(DEFAULT_PRESETS);
+    container.innerHTML = names.map(name => 
+        `<button onclick="applyPreset('${esc(name)}')" class="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 hover:border-primary-400 text-sm transition">${esc(name)}</button>`
+    ).join('');
+}
+
+function applyPreset(name) {
+    const steps = (presetsConfig[name] || DEFAULT_PRESETS[name] || []);
+    stepsConfig = steps.map((s, i) => ({ step_number: i+1, step_name: typeof s === 'string' ? s : s.step_name }));
+    renderStepList();
+}
+
+function renderStepList() {
+    const container = document.getElementById('stepList');
+    if (!stepsConfig.length) {
+        container.innerHTML = '<p class="text-sm text-slate-500 py-2">No steps configured. Select a preset or add steps manually.</p>';
+        return;
+    }
+    container.innerHTML = stepsConfig.map((s, i) => `<div class="flex items-center gap-2 bg-slate-50 dark:bg-slate-700/50 px-3 py-2 rounded-lg">
+        <span class="w-6 h-6 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 flex items-center justify-center text-xs font-bold">${i+1}</span>
+        <input type="text" value="${esc(s.step_name)}" onchange="stepsConfig[${i}].step_name=this.value" class="flex-1 px-2 py-1 border border-transparent hover:border-slate-300 dark:hover:border-slate-600 rounded bg-transparent text-sm focus:border-primary-400 focus:outline-none">
+        <button onclick="stepsConfig.splice(${i},1);renderStepList()" class="p-1 text-red-400 hover:text-red-600"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+    </div>`).join('');
+}
+
+function addStep() {
+    const name = document.getElementById('newStepName').value.trim();
+    if (!name) return;
+    stepsConfig.push({ step_number: stepsConfig.length + 1, step_name: name });
+    document.getElementById('newStepName').value = '';
+    renderStepList();
+}
+
+async function saveSteps() {
+    const btn = document.getElementById('btnSaveSteps');
+    btn.disabled = true; btn.textContent = 'Saving...';
+    try {
+        await apiFetch('/api/settings', {
+            method: 'PATCH',
+            body: JSON.stringify({ process_steps: stepsConfig, process_presets: presetsConfig })
+        });
+        toast('Steps saved', 'success');
+    } catch(e) { toast(e.message, 'error'); }
+    finally { btn.disabled = false; btn.textContent = 'Save Steps'; }
+}
+
+// ─── Database Backups ───
+function renderBackups() {
+    const container = document.getElementById('backupListSettings');
+    if (!backupsList.length) {
+        container.innerHTML = '<p class="text-sm text-slate-500">No backups yet.</p>';
+        return;
+    }
+    container.innerHTML = backupsList.slice(0, 10).map(b => {
+        const date = b.created_at ? new Date(b.created_at).toLocaleDateString() : '';
+        const type = b.type === 'Manual' ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">Manual</span>' : '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">Auto</span>';
+        return `<div class="flex items-center justify-between py-2 px-3 rounded-lg border border-slate-200 dark:border-slate-700">
+            <div class="flex items-center gap-3">
+                ${type}
+                <span class="text-sm font-medium">${esc(b.filename)}</span>
+                <span class="text-xs text-slate-500">${date} · ${b.size_mb || '?'} MB</span>
+            </div>
+            <div class="flex gap-2">
+                <a href="/api/backups/${encodeURIComponent(b.filename)}" class="text-primary-600 text-xs hover:underline">Download</a>
+                <button onclick="deleteBackupSetting('${esc(b.filename)}')" class="text-red-500 text-xs hover:underline">Delete</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+async function createBackup() {
+    if (!confirm('Create a backup? This will archive completed requests.')) return;
+    const btn = document.getElementById('btnCreateBackup');
+    btn.disabled = true; btn.textContent = 'Creating...';
+    try {
+        await apiFetch('/api/backups', { method: 'POST' });
+        toast('Backup created', 'success');
+        backupsList = await apiFetch('/api/backups');
+        renderBackups();
+    } catch(e) { toast(e.message, 'error'); }
+    finally { btn.disabled = false; btn.textContent = 'Create Backup'; }
+}
+
+async function deleteBackupSetting(filename) {
+    if (!confirm('Delete ' + filename + '?')) return;
+    try {
+        await apiFetch('/api/backups/' + encodeURIComponent(filename), { method: 'DELETE' });
+        backupsList = backupsList.filter(b => b.filename !== filename);
+        renderBackups();
+        toast('Backup deleted', 'success');
+    } catch(e) { toast(e.message, 'error'); }
+}
+
+// ─── Maintenance Mode ───
+function fillMaintenance(data) {
+    document.getElementById('maintToggle').checked = data.active;
+    if (data.active) {
+        document.getElementById('maintMsgWrap').classList.remove('hidden');
+        document.getElementById('maintMsg').value = data.message || '';
+    }
+}
+
+async function toggleMaintenance() {
+    const active = document.getElementById('maintToggle').checked;
+    const msg = document.getElementById('maintMsg').value || 'System is under maintenance';
+    try {
+        await apiFetch('/api/maintenance', { method: 'POST', body: JSON.stringify({ active, message: msg }) });
+        document.getElementById('maintMsgWrap').classList.toggle('hidden', !active);
+        toast(active ? 'Maintenance mode enabled' : 'Maintenance mode disabled', 'success');
+    } catch(e) {
+        document.getElementById('maintToggle').checked = !active;
+        toast(e.message, 'error');
+    }
+}
+
+// ─── Server Controls ───
+async function restartBackend() {
+    if (!confirm('Restart the backend server?')) return;
+    const btn = document.getElementById('btnRestart');
+    btn.disabled = true; btn.textContent = 'Restarting...';
+    try {
+        await apiFetch('/api/admin/restart-backend', { method: 'POST' });
+        toast('Backend restarting...', 'success');
+        setTimeout(() => { btn.disabled = false; btn.innerHTML = '<svg class="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> Restart Backend'; }, 5000);
+    } catch(e) { toast(e.message, 'error'); btn.disabled = false; }
+}
+
+// ─── System Health ───
+async function loadHealth() {
+    const period = document.getElementById('healthPeriod') ? document.getElementById('healthPeriod').value : '24H';
+    try {
+        const data = await apiFetch('/api/system/health?period=' + period);
+        const dot = document.getElementById('healthDot');
+        dot.className = 'w-3 h-3 rounded-full ' + (data.status === 'healthy' ? 'bg-emerald-500 animate-pulse' : data.status === 'degraded' ? 'bg-yellow-500' : 'bg-red-500');
+
+        document.getElementById('healthMetrics').innerHTML = [
+            { label: 'CPU', value: (data.cpu_pct || 0).toFixed(1) + '%', color: 'text-blue-400' },
+            { label: 'Memory', value: (data.mem_pct || 0).toFixed(1) + '%', color: 'text-purple-400' },
+            { label: 'Success Rate', value: (data.success_rate || 0).toFixed(1) + '%', color: 'text-emerald-400' },
+            { label: 'Uptime', value: data.uptime_pct ? data.uptime_pct.toFixed(1) + '%' : '-', color: 'text-amber-400' }
+        ].map(m => `<div class="bg-slate-800 rounded-lg p-3">
+            <div class="text-xs text-slate-400 mb-1">${m.label}</div>
+            <div class="text-lg font-bold ${m.color}">${m.value}</div>
+        </div>`).join('');
+
+        // Chart
+        if (data.chart_data && data.chart_data.length) {
+            const labels = data.chart_data.map(d => d.time || d.label || '');
+            const completed = data.chart_data.map(d => d.completed || 0);
+            const running = data.chart_data.map(d => d.running || 0);
+            const failed = data.chart_data.map(d => d.failed || 0);
+            if (healthChart) healthChart.destroy();
+            healthChart = new Chart(document.getElementById('healthChart'), {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [
+                        { label: 'Completed', data: completed, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', fill: true, tension: 0.4 },
+                        { label: 'Running', data: running, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', fill: true, tension: 0.4 },
+                        { label: 'Failed', data: failed, borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.1)', fill: true, tension: 0.4 }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { labels: { color: '#94a3b8', font: { size: 11 } } } },
+                    scales: {
+                        x: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: 'rgba(100,116,139,0.1)' } },
+                        y: { ticks: { color: '#64748b' }, grid: { color: 'rgba(100,116,139,0.1)' } }
+                    }
+                }
+            });
+        }
+    } catch(e) { console.error('Health check failed:', e); }
+}
+</script>
+{% endblock %}

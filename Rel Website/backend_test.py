@@ -4,7 +4,7 @@ import sys
 from datetime import datetime
 
 class RelRequestAPITester:
-    def __init__(self, base_url="https://rel-request-steps.preview.emergentagent.com"):
+    def __init__(self, base_url="http://localhost:8000"):
         self.base_url = base_url
         self.api_url = f"{self.base_url}/api"
         self.token = None

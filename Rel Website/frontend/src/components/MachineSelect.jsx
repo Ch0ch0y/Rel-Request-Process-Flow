@@ -1,0 +1,135 @@
+import { useState, useRef, useEffect } from 'react';
+import api from '../api';
+import { ChevronsUpDown, X } from 'lucide-react';
+
+let cachedMachines = null;
+
+/**
+ * MachineSelect
+ * Autocomplete input for Machine #.
+ * - Type a machine number or description to filter suggestions.
+ * - Select from the dropdown or type a custom value manually.
+ * - Shows the description badge next to the selected machine number.
+ * - Data is fetched from the backend API (managed via Settings).
+ */
+export default function MachineSelect({ value, onChange, className = '' }) {
+  const [machines, setMachines] = useState(cachedMachines || []);
+  const [query, setQuery] = useState(value || '');
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (!cachedMachines) {
+      api.getMachines().then(data => {
+        cachedMachines = data.machines;
+        setMachines(data.machines);
+      }).catch(() => {});
+    }
+  }, []);
+
+  // Sync query when value changes externally
+  useEffect(() => {
+    setQuery(value || '');
+  }, [value]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setOpen(false);
+        if (query !== value) onChange(query);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [query, value, onChange]);
+
+  const filtered = query.trim() === ''
+    ? machines
+    : machines.filter(m =>
+        m.machine_no.toLowerCase().includes(query.toLowerCase()) ||
+        m.description.toLowerCase().includes(query.toLowerCase())
+      );
+
+  const matched = machines.find(m => m.machine_no === value);
+
+  const handleSelect = (machine) => {
+    setQuery(machine.machine_no);
+    onChange(machine.machine_no);
+    setOpen(false);
+  };
+
+  const handleInputChange = (e) => {
+    setQuery(e.target.value);
+    onChange(e.target.value);
+    setOpen(true);
+  };
+
+  const handleClear = () => {
+    setQuery('');
+    onChange('');
+    setOpen(false);
+  };
+
+  return (
+    <div ref={containerRef} className={`relative ${className}`}>
+      {/* Input row */}
+      <div className="relative flex items-center">
+        <input
+          type="text"
+          value={query}
+          onChange={handleInputChange}
+          onFocus={() => setOpen(true)}
+          placeholder="Search or type machine #"
+          className="w-full border border-slate-200 rounded-lg pl-3 pr-8 py-2.5 bg-slate-50
+            focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm transition-all"
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={() => (value ? handleClear() : setOpen(o => !o))}
+          className="absolute right-2.5 text-slate-400 hover:text-slate-600 transition-colors"
+        >
+          {value ? <X className="w-3.5 h-3.5" /> : <ChevronsUpDown className="w-3.5 h-3.5" />}
+        </button>
+      </div>
+
+      {/* Description badge when a known machine is selected */}
+      {matched && !open && (
+        <p className="mt-1 text-xs text-blue-600 font-medium px-1 truncate">
+          {matched.description}
+        </p>
+      )}
+
+      {/* Dropdown */}
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg
+          max-h-60 overflow-y-auto text-sm ring-1 ring-slate-100">
+          {filtered.length === 0 ? (
+            <div className="px-4 py-3 text-slate-400 text-xs text-center">
+              No machine found — value will be saved as typed.
+            </div>
+          ) : (
+            filtered.map(m => (
+              <button
+                key={m.id ?? m.machine_no}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); handleSelect(m); }}
+                className={`w-full flex items-center justify-between px-4 py-2.5 hover:bg-blue-50 transition-colors text-left
+                  ${value === m.machine_no ? 'bg-blue-50' : ''}`}
+              >
+                <span className="font-mono font-semibold text-slate-800 text-xs">{m.machine_no}</span>
+                <span className="text-xs text-slate-500 ml-3 truncate max-w-[55%] text-right">{m.description}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Call this to bust the cache after adding/deleting machines in Settings */
+export function invalidateMachineCache() {
+  cachedMachines = null;
+}

@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      - JWT_SECRET=change-me
+      - CORS_ORIGINS=*
+      - DB_PATH=/app/data/rel_database.db
+    ports:
+      - "8000:8000"
+    volumes:
+      - db_data:/app/data
+      - ./backend/uploads:/app/uploads
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  db_data:

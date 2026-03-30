@@ -1,0 +1,222 @@
+{% extends "layout.html" %}
+
+{% block title %}Retention Monitor - REL Request{% endblock %}
+{% block page_title %}Retention Monitor{% endblock %}
+
+{% block page_content %}
+
+<!-- Header -->
+<div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+    <div>
+        <h2 class="text-xl font-bold flex items-center gap-2">
+            <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>
+            Retention Monitor
+        </h2>
+        <p class="text-sm text-slate-500 dark:text-slate-400">Track retention details for completed requests</p>
+    </div>
+    <div class="flex items-center gap-3">
+        <span id="badgeRecorded" class="px-2.5 py-1 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 rounded-full text-xs font-semibold">Recorded: 0</span>
+        <span id="badgePending" class="px-2.5 py-1 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 rounded-full text-xs font-semibold">Pending: 0</span>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-4 mb-6">
+    <div class="flex flex-wrap items-center gap-3">
+        <div class="flex-1 min-w-48 relative">
+            <svg class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            <input type="text" id="fSearch" placeholder="Search request#, device, customer, lot…" oninput="applyFilters()"
+                class="w-full pl-10 pr-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-700">
+        </div>
+        <div class="flex gap-1" id="classButtons">
+            <button onclick="setClassFilter('')" class="cls-btn px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white" data-cls="">All</button>
+            <button onclick="setClassFilter('RR')" class="cls-btn px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300" data-cls="RR">RR</button>
+            <button onclick="setClassFilter('RRS')" class="cls-btn px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300" data-cls="RRS">RRS</button>
+            <button onclick="setClassFilter('RMS')" class="cls-btn px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300" data-cls="RMS">RMS</button>
+        </div>
+        <select id="fBoxLocation" onchange="applyFilters()" class="px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-700 min-w-40">
+            <option value="">All Box Locations</option>
+        </select>
+    </div>
+</div>
+
+<!-- Loading / Error / Table -->
+<div id="loadingState" class="text-center py-12">
+    <svg class="animate-spin h-8 w-8 mx-auto text-blue-500 mb-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+    <p class="text-sm text-slate-400">Loading completed requests…</p>
+</div>
+
+<div id="errorState" class="hidden px-4 py-3 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 rounded-lg text-sm mb-6"></div>
+
+<div id="tableCard" class="hidden bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700">
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead class="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-700">
+                <tr>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Request #</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Class</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Device</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Customer</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Lot No.</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Box Location</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Type</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Qty</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide"></th>
+                </tr>
+            </thead>
+            <tbody id="tableBody" class="divide-y divide-slate-100 dark:divide-slate-700"></tbody>
+        </table>
+    </div>
+    <div id="emptyState" class="hidden p-8 text-center text-slate-400">
+        <svg class="w-12 h-12 mx-auto mb-3 text-slate-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>
+        <p>No retention records match your filters.</p>
+    </div>
+    <div id="footerRow" class="px-6 py-3 border-t border-slate-200 dark:border-slate-700 text-xs text-slate-400"></div>
+</div>
+
+<script>
+function getToken() { const m = document.cookie.match(/access_token=([^;]+)/); return m ? m[1] : null; }
+async function apiFetch(url, opts) {
+    const token = getToken();
+    const h = { ...(opts?.headers || {}) };
+    if (token) h['Authorization'] = 'Bearer ' + token;
+    const r = await fetch(url, { ...opts, headers: h, credentials: 'same-origin' });
+    if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.detail || 'API error ' + r.status); }
+    return r.json();
+}
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function toast(msg, type) { if (window.showToast) window.showToast(msg, type); else alert(msg); }
+
+let allRequests = [];
+let classFilter = '';
+
+const classBadge = {
+    'RR': 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+    'RRS': 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
+    'RMS': 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300',
+};
+
+function extractRetentionSummary(req) {
+    let rd = req.retention_details;
+    if (!rd) return { type: '', quantity: 0, boxLocation: '' };
+    if (typeof rd === 'string') { try { rd = JSON.parse(rd); } catch { return { type: rd, quantity: 0, boxLocation: '' }; } }
+    const parts = [], locs = [];
+    let qty = 0;
+    if (rd.reliability_tested_box) {
+        parts.push('Reliability Tested');
+        if (rd.reliability_tested_box.box_location) locs.push(rd.reliability_tested_box.box_location);
+        qty += parseInt(rd.reliability_tested_box.quantity) || 0;
+    }
+    if (rd.excess_units_box) {
+        parts.push('Excess Units');
+        if (rd.excess_units_box.box_location) locs.push(rd.excess_units_box.box_location);
+        qty += parseInt(rd.excess_units_box.quantity) || 0;
+    }
+    if (rd.tanyag_box) {
+        parts.push('Sent to Tanyag');
+        if (rd.tanyag_box.box_location) locs.push(rd.tanyag_box.box_location);
+        qty += parseInt(rd.tanyag_box.quantity) || 0;
+    }
+    return { type: parts.join(', ') || '—', quantity: qty, boxLocation: [...new Set(locs)].join(', ') };
+}
+
+function extractBoxLocations() {
+    const locs = new Set();
+    allRequests.forEach(r => {
+        const s = extractRetentionSummary(r);
+        if (s.boxLocation) s.boxLocation.split(', ').forEach(l => locs.add(l));
+    });
+    const sel = document.getElementById('fBoxLocation');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">All Box Locations</option>';
+    [...locs].sort().forEach(l => {
+        const o = document.createElement('option');
+        o.value = l; o.textContent = l;
+        if (l === cur) o.selected = true;
+        sel.appendChild(o);
+    });
+}
+
+function setClassFilter(cls) {
+    classFilter = cls;
+    document.querySelectorAll('.cls-btn').forEach(b => {
+        const active = b.dataset.cls === cls;
+        b.className = b.className.replace(/bg-blue-600 text-white|bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300/g, '');
+        b.classList.add(...(active ? ['bg-blue-600','text-white'] : ['bg-slate-100','text-slate-600','dark:bg-slate-700','dark:text-slate-300']));
+    });
+    applyFilters();
+}
+
+function applyFilters() {
+    const search = document.getElementById('fSearch').value.trim().toLowerCase();
+    const boxLoc = document.getElementById('fBoxLocation').value;
+    const filtered = allRequests.filter(r => {
+        if (classFilter && (r.classification || '').toUpperCase() !== classFilter) return false;
+        if (search) {
+            const hay = [r.request_number, r.device_name, r.customer, r.lot_no, r.originator].filter(Boolean).join(' ').toLowerCase();
+            if (!hay.includes(search)) return false;
+        }
+        if (boxLoc) {
+            const s = extractRetentionSummary(r);
+            if (!s.boxLocation.includes(boxLoc)) return false;
+        }
+        return true;
+    });
+    renderTable(filtered);
+}
+
+function renderTable(rows) {
+    const tbody = document.getElementById('tableBody');
+    const empty = document.getElementById('emptyState');
+    const footer = document.getElementById('footerRow');
+
+    let recorded = 0, pending = 0;
+    allRequests.forEach(r => { if (r.retention_details) recorded++; else pending++; });
+    document.getElementById('badgeRecorded').textContent = 'Recorded: ' + recorded;
+    document.getElementById('badgePending').textContent = 'Pending: ' + pending;
+
+    if (!rows.length) {
+        tbody.innerHTML = '';
+        empty.classList.remove('hidden');
+        footer.textContent = '';
+        return;
+    }
+    empty.classList.add('hidden');
+    footer.textContent = `Showing ${rows.length} of ${allRequests.length} completed requests`;
+
+    tbody.innerHTML = rows.map(r => {
+        const s = extractRetentionSummary(r);
+        const cls = (r.classification || '').toUpperCase();
+        const badge = classBadge[cls] || 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300';
+        return `<tr class="hover:bg-slate-50 dark:hover:bg-slate-700/30 group">
+            <td class="px-4 py-3"><a href="/requests/${esc(r.id)}" class="font-semibold text-blue-600 hover:underline">${esc(r.request_number || '')}</a></td>
+            <td class="px-4 py-3"><span class="px-2 py-0.5 rounded-full text-xs font-semibold ${badge}">${esc(cls || '—')}</span></td>
+            <td class="px-4 py-3 text-slate-700 dark:text-slate-200 max-w-[150px] truncate">${esc(r.device_name || '—')}</td>
+            <td class="px-4 py-3 text-slate-600 dark:text-slate-300 text-xs max-w-[120px] truncate">${esc(r.customer || '—')}</td>
+            <td class="px-4 py-3 text-slate-600 dark:text-slate-300 text-xs">${esc(r.lot_no || '—')}</td>
+            <td class="px-4 py-3 text-xs">${s.boxLocation ? esc(s.boxLocation) : '<span class="text-slate-400">—</span>'}</td>
+            <td class="px-4 py-3 text-xs">${esc(s.type)}</td>
+            <td class="px-4 py-3 text-xs font-medium">${s.quantity || '—'}</td>
+            <td class="px-4 py-3"><a href="/requests/${esc(r.id)}" class="opacity-0 group-hover:opacity-100 text-blue-600 transition-opacity">→</a></td>
+        </tr>`;
+    }).join('');
+}
+
+// Load data on page load
+(async function() {
+    try {
+        const data = await apiFetch('/api/requests?status=completed');
+        allRequests = data;
+        extractBoxLocations();
+        document.getElementById('loadingState').classList.add('hidden');
+        document.getElementById('tableCard').classList.remove('hidden');
+        applyFilters();
+    } catch (e) {
+        document.getElementById('loadingState').classList.add('hidden');
+        const err = document.getElementById('errorState');
+        err.textContent = 'Failed to load data: ' + e.message;
+        err.classList.remove('hidden');
+    }
+})();
+</script>
+{% endblock %}

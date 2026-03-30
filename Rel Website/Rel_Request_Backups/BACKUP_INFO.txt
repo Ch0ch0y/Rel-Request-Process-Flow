@@ -1,0 +1,32 @@
+╔═══════════════════════════════════════════════════════════════════╗
+║         REL REQUEST PROCESS FLOW - BACKUP STORAGE                 ║
+║                   SECURE DATA ARCHIVE                              ║
+╚═══════════════════════════════════════════════════════════════════╝
+
+This folder contains critical backup files for the Reliability Request 
+Process Flow system. These Excel files preserve all historical data 
+including completed requests, process steps, and system configurations.
+
+📁 FOLDER STRUCTURE:
+├── Manual_Backups/     - User-created backups
+├── Auto_Backups/       - System-generated monthly backups
+
+⚠️  IMPORTANT NOTES:
+• DO NOT DELETE these files - they contain irreplaceable historical data
+• Backup files are in Excel format (.xlsx) for easy access and portability
+• Each backup includes: Requests, Process Steps, Users, Settings, Login Logs
+• Completed requests are automatically removed from active database after backup
+• Keep backups secure - they may contain sensitive customer/device information
+
+📊 BACKUP DETAILS:
+• Manual backups: Created on-demand by administrators
+• Auto backups: Created monthly on the 1st at 2:00 AM
+• Retention: Last 12 monthly backups are kept automatically
+• File naming: rel_database_backup_YYYY-MM-DD_HHMMSS.xlsx
+
+🔒 SECURITY:
+• This folder should be backed up to external storage regularly
+• Consider encrypting backups if stored on shared drives
+• Ensure proper access controls are maintained
+
+Last updated: 2026-02-19 09:16:56

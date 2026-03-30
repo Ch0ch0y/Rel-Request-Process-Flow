@@ -1,0 +1,492 @@
+{% extends "layout.html" %}
+
+{% block title %}Dashboard - RELDMS{% endblock %}
+
+{% block extra_css %}
+{{ super() }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+.stagger-children > * { animation: fadeSlideUp 0.35s ease-out both; }
+.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 60ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 120ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 180ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 240ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 300ms; }
+@keyframes fadeSlideUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+</style>
+{% endblock %}
+
+{% block page_content %}
+<!-- Loading state -->
+<div id="dash-loading" class="flex items-center justify-center py-20">
+    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+</div>
+<!-- Error state -->
+<div id="dash-error" class="hidden p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400"></div>
+<!-- Dashboard content (hidden until data loads) -->
+<div id="dash-content" class="hidden space-y-6 stagger-children">
+
+    <!-- Header with PHT Clock -->
+    <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-6 py-5 shadow-sm">
+        <div class="flex items-start justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-blue-100 dark:bg-blue-900/30">
+                    <svg class="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold text-slate-900 dark:text-white tracking-tight">RELDMS Dashboard</h1>
+                    <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Semiconductor Package &amp; Test Services — Philippines Operations</p>
+                </div>
+            </div>
+            <div class="text-right flex-shrink-0">
+                <p class="text-2xl font-bold text-blue-600 dark:text-cyan-400 font-mono leading-none">
+                    <span id="pht-time">--:--</span> <span class="text-sm font-sans font-medium text-slate-500 dark:text-slate-400">PHT</span>
+                </p>
+                <p class="text-xs text-slate-500 dark:text-slate-400 mt-1" id="pht-date">—</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Workflow Pipeline -->
+    <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-6 py-5 shadow-sm">
+        <p class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">RELDMS · Process Flow</p>
+        <div class="flex items-center justify-between gap-1" id="pipeline-container">
+            <!-- Populated by JS -->
+        </div>
+        <p class="text-[10px] text-slate-400 dark:text-slate-500 text-center mt-3">Click a stage to view its requests</p>
+    </div>
+
+    <!-- Backup Warning Banner (hidden by default) -->
+    <div id="backup-warning" class="hidden rounded-xl border p-4 shadow-sm">
+        <div class="flex items-start gap-3">
+            <svg class="w-5 h-5 flex-shrink-0 mt-0.5" id="backup-warn-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <div class="flex-1">
+                <p class="text-sm font-medium" id="backup-warn-text"></p>
+                <a href="/settings" id="backup-warn-btn" class="hidden mt-2 inline-block px-4 py-1.5 rounded-lg text-xs font-medium text-white transition-colors">Go to Backup Settings</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stat Cards -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4" id="stat-cards">
+        <!-- Populated by JS -->
+    </div>
+
+    <!-- Chart + Sidebar Widgets -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Status Distribution Chart -->
+        <div class="lg:col-span-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm">
+            <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex items-center gap-2">
+                <svg class="w-4 h-4 text-slate-400 dark:text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="12" width="4" height="9"/><rect x="10" y="7" width="4" height="14"/><rect x="17" y="3" width="4" height="18"/></svg>
+                <h3 class="font-semibold text-slate-800 dark:text-slate-100">Status Distribution</h3>
+            </div>
+            <div class="p-6">
+                <canvas id="statusChart" height="260"></canvas>
+                <div class="flex flex-wrap gap-4 mt-4 justify-center" id="chart-legend"></div>
+            </div>
+        </div>
+
+        <!-- Right column widgets -->
+        <div class="space-y-4">
+            <!-- Upcoming Deadlines Card -->
+            <a href="/requests?status=upcoming" class="block bg-gradient-to-br from-violet-50 to-white dark:from-violet-900/20 dark:to-slate-800 border border-violet-200 dark:border-violet-700/50 rounded-xl p-5 shadow-sm cursor-pointer hover:shadow-md transition-all">
+                <div class="flex items-center gap-2 mb-1">
+                    <svg class="w-4 h-4 text-violet-600 dark:text-violet-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                    <span class="text-sm font-medium text-violet-700 dark:text-violet-300">Upcoming Deadlines</span>
+                </div>
+                <p class="text-3xl font-bold text-violet-900 dark:text-violet-200" id="upcoming-count">0</p>
+                <p class="text-xs text-violet-500 dark:text-violet-400 mt-1">Due within 3 days — click to view all</p>
+            </a>
+
+            <!-- Completion Rate -->
+            <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 shadow-sm">
+                <p class="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">Completion Rate</p>
+                <div class="flex items-center gap-4">
+                    <div class="relative w-20 h-20 flex-shrink-0">
+                        <canvas id="donutChart" width="80" height="80"></canvas>
+                        <div class="absolute inset-0 flex items-center justify-center">
+                            <span class="text-sm font-bold text-slate-900 dark:text-white" id="donut-pct">0%</span>
+                        </div>
+                    </div>
+                    <div>
+                        <p class="text-2xl font-bold text-slate-900 dark:text-white" id="completion-pct">0%</p>
+                        <p class="text-xs text-slate-400 dark:text-slate-500" id="completion-text">0 of 0 completed</p>
+                    </div>
+                </div>
+                <div class="w-full h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden mt-3">
+                    <div class="h-full bg-emerald-500 rounded-full transition-all duration-700" id="completion-bar" style="width:0%"></div>
+                </div>
+            </div>
+
+            <!-- Notices Board -->
+            <div class="group bg-amber-50 dark:bg-amber-900/15 border border-amber-200 dark:border-amber-700/40 rounded-xl shadow-sm overflow-hidden transition-shadow duration-300 hover:shadow-md">
+                <div class="px-4 py-3 border-b border-amber-200 dark:border-amber-700/40 flex items-center justify-between">
+                    <h3 class="font-semibold text-amber-900 dark:text-amber-300 flex items-center gap-2 text-sm">
+                        <svg class="w-4 h-4 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><line x1="12" y1="8" x2="12" y2="8"/></svg>
+                        Notices Board
+                        <span class="hidden ml-1 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-600 text-white" id="notices-badge"></span>
+                    </h3>
+                    <div class="flex items-center gap-2">
+                        <span class="text-[10px] text-amber-400 italic group-hover:opacity-0 transition-opacity duration-200 select-none">hover to expand</span>
+                        <a href="/requests" class="text-xs text-amber-700 hover:text-amber-900 dark:text-amber-400 dark:hover:text-amber-300 font-medium flex items-center gap-1">
+                            View All <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                        </a>
+                    </div>
+                </div>
+                <div class="divide-y divide-amber-100 dark:divide-amber-800/30 max-h-[88px] group-hover:max-h-[480px] overflow-y-auto transition-[max-height] duration-300 ease-in-out" id="notices-list">
+                    <p class="px-4 py-4 text-sm text-amber-400">Loading notices...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delayed + Upcoming Deadline + Recent Activity -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Delayed Requests -->
+        <div class="bg-white dark:bg-slate-800 border border-red-200 dark:border-red-700/50 rounded-xl shadow-sm">
+            <div class="px-6 py-4 border-b border-red-100 dark:border-red-700/50 flex items-center justify-between">
+                <h3 class="font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                    <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    Delayed Requests
+                    <span class="hidden ml-1 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400" id="delayed-badge"></span>
+                </h3>
+                <a href="/requests?status=delayed" class="text-xs text-red-600 hover:text-red-700 font-medium flex items-center gap-1">
+                    View All <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                </a>
+            </div>
+            <div class="divide-y divide-slate-100 dark:divide-slate-700" id="delayed-list">
+                <p class="px-6 py-4 text-sm text-slate-400">Loading...</p>
+            </div>
+        </div>
+
+        <!-- Upcoming Deadline Requests -->
+        <div class="bg-white dark:bg-slate-800 border border-violet-200 dark:border-violet-700/50 rounded-xl shadow-sm">
+            <div class="px-6 py-4 border-b border-violet-100 dark:border-violet-700/50 flex items-center justify-between">
+                <h3 class="font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                    <svg class="w-4 h-4 text-violet-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                    Upcoming Deadline Requests
+                    <span class="hidden ml-1 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-400" id="upcoming-badge"></span>
+                </h3>
+                <a href="/requests?status=upcoming" class="text-xs text-violet-600 hover:text-violet-700 font-medium flex items-center gap-1">
+                    View All <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                </a>
+            </div>
+            <div class="divide-y divide-slate-100 dark:divide-slate-700" id="upcoming-list">
+                <p class="px-6 py-4 text-sm text-slate-400">Loading...</p>
+            </div>
+        </div>
+
+        <!-- Recent Activity -->
+        <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm">
+            <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
+                <h3 class="font-semibold text-slate-800 dark:text-slate-100">Recent Activity</h3>
+                <a href="/requests" class="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 font-medium flex items-center gap-1">
+                    View All <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                </a>
+            </div>
+            <div class="divide-y divide-slate-100 dark:divide-slate-700" id="recent-list">
+                <p class="px-6 py-4 text-sm text-slate-400">Loading...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    const userRole = '{{ user.role | default("") }}';
+    const isGuest = {{ 'true' if user and user.is_guest else 'false' }};
+    const isTechnician = isGuest || userRole === 'Technician';
+
+    // PHT Clock
+    function updateClock() {
+        const now = new Date();
+        const time = now.toLocaleTimeString('en-PH', { timeZone:'Asia/Manila', hour:'2-digit', minute:'2-digit', hour12:false });
+        const date = now.toLocaleDateString('en-PH', { timeZone:'Asia/Manila', month:'long', day:'numeric', year:'numeric' });
+        document.getElementById('pht-time').textContent = time;
+        document.getElementById('pht-date').textContent = date;
+    }
+    updateClock();
+    setInterval(updateClock, 1000);
+
+    // Auth helper
+    function getToken() {
+        const m = document.cookie.match(/access_token=([^;]+)/);
+        return m ? m[1] : null;
+    }
+    async function apiFetch(url) {
+        const token = getToken();
+        const headers = {};
+        if (token) headers['Authorization'] = 'Bearer ' + token;
+        const res = await fetch(url, { headers, credentials: 'same-origin' });
+        if (!res.ok) throw new Error('API error ' + res.status);
+        return res.json();
+    }
+
+    // Status badge HTML
+    const STATUS_STYLES = {
+        incoming: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800',
+        pending:  'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800',
+        review:   'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800',
+        approval: 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-400 border-violet-200 dark:border-violet-800',
+        testing:  'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800',
+        in_progress: 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800',
+        analysis: 'bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-400 border-teal-200 dark:border-teal-800',
+        completed:'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800',
+    };
+    const STATUS_LABELS = {
+        incoming:'Request', pending:'Request', review:'Review', approval:'Approval',
+        testing:'Testing', in_progress:'Testing', analysis:'Analysis', completed:'Completed'
+    };
+    function statusBadge(status) {
+        const cls = STATUS_STYLES[status] || 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600';
+        const label = STATUS_LABELS[status] || (status || '').replace('_',' ');
+        return '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ' + cls + '">' + label + '</span>';
+    }
+
+    // Escape HTML
+    function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+    // Build workflow pipeline
+    function buildPipeline(stats) {
+        const stages = [
+            { id:'request',  label:'Request',  sub:'Submit test request',  color:'bg-amber-500',  ring:'ring-amber-300',  key:'pending_requests',   nav:'/requests?status=incoming',
+              icon:'<svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg>' },
+            { id:'review',   label:'Review',   sub:'Technical review',     color:'bg-blue-500',   ring:'ring-blue-300',   key:'review_requests',    nav:'/requests?status=review',
+              icon:'<svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>' },
+            { id:'approval', label:'Approval', sub:'Management approval',  color:'bg-violet-500', ring:'ring-violet-300', key:'approval_requests',  nav:'/approval',
+              icon:'<svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>' },
+            { id:'testing',  label:'Testing',  sub:'Execute tests',        color:'bg-orange-500', ring:'ring-orange-300', key:'testing_requests',   nav:'/requests?status=testing',
+              icon:'<svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>' },
+            { id:'analysis', label:'Analysis', sub:'Analyze results',      color:'bg-teal-500',   ring:'ring-teal-300',   key:'analysis_requests',  nav:'/requests?status=analysis',
+              icon:'<svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><rect x="3" y="12" width="4" height="9"/><rect x="10" y="7" width="4" height="14"/><rect x="17" y="3" width="4" height="18"/></svg>' },
+            { id:'completed',label:'Report',   sub:'Final documentation',  color:'bg-emerald-500',ring:'ring-emerald-300',key:'completed_requests', nav:'/completed',
+              icon:'<svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>' },
+        ];
+        const container = document.getElementById('pipeline-container');
+        container.innerHTML = stages.map((s, i) => {
+            const count = stats[s.key] ?? 0;
+            const sep = i < stages.length - 1 ? '<div class="text-slate-300 dark:text-slate-600 text-lg flex-shrink-0">›</div>' : '';
+            return '<a href="' + s.nav + '" class="flex flex-col items-center gap-1.5 flex-1 group cursor-pointer" title="View ' + s.label + ' requests">' +
+                '<div class="w-10 h-10 rounded-full flex items-center justify-center shadow-sm ring-2 ' + s.color + ' ' + s.ring + ' ring-offset-1 dark:ring-offset-slate-800 transition-transform duration-150 group-hover:scale-110">' + s.icon + '</div>' +
+                '<div class="text-center">' +
+                    '<p class="text-xs font-bold text-slate-800 dark:text-slate-100 leading-tight group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">' + s.label + '</p>' +
+                    '<p class="text-[10px] text-slate-400 dark:text-slate-500 leading-tight hidden sm:block">' + s.sub + '</p>' +
+                    '<p class="text-base font-black text-slate-900 dark:text-white mt-0.5">' + count + '</p>' +
+                '</div></a>' + sep;
+        }).join('');
+    }
+
+    // Build stat cards
+    function buildStatCards(stats) {
+        const cards = [
+            { label:'Active Requests', value:stats.total_requests, color:'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400', sub:'Currently in pipeline', href:'/requests',
+              icon:'<svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg>' },
+            { label:'In Testing', value:stats.testing_requests, color:'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400', sub:'Undergoing reliability tests', href:'/requests?status=testing',
+              icon:'<svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>' },
+            { label:'Delayed', value:stats.delayed_requests, color: stats.delayed_requests > 0 ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' : 'bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-500', sub:'Past deadline',
+              accent: stats.delayed_requests > 0 ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700/50' : '',
+              href: stats.delayed_requests > 0 ? '/requests?status=delayed' : null,
+              icon:'<svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' },
+            { label:'Completed', value:stats.completed_requests, color:'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400', sub:'All-time completed', href:'/completed',
+              icon:'<svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>' },
+        ];
+        document.getElementById('stat-cards').innerHTML = cards.map(c => {
+            const accent = c.accent || 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700';
+            const clickable = c.href ? 'cursor-pointer hover:scale-[1.02]' : '';
+            const tag = c.href ? 'a href="' + c.href + '"' : 'div';
+            const endTag = c.href ? 'a' : 'div';
+            return '<' + tag + ' class="relative overflow-hidden rounded-xl border p-5 shadow-sm hover:shadow-md transition-all duration-300 ' + accent + ' ' + clickable + '">' +
+                '<div class="absolute top-0 right-0 w-24 h-24 rounded-full opacity-[0.06] -mr-6 -mt-6 bg-current"></div>' +
+                '<div class="flex items-start justify-between"><div>' +
+                    '<p class="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">' + c.label + '</p>' +
+                    '<p class="text-3xl font-bold text-slate-900 dark:text-white mt-1">' + c.value + '</p>' +
+                    '<p class="text-xs text-slate-400 dark:text-slate-500 mt-1">' + c.sub + '</p>' +
+                '</div><div class="w-11 h-11 rounded-xl flex items-center justify-center ' + c.color + '">' + c.icon + '</div></div>' +
+            '</' + endTag + '>';
+        }).join('');
+    }
+
+    // Build status distribution chart
+    let barChart = null;
+    function buildBarChart(stats) {
+        const isDark = document.documentElement.classList.contains('dark');
+        const colors = {
+            Request: '#f59e0b', Review: '#3b82f6', Approval: isDark ? '#8b5cf6' : '#7c3aed',
+            Testing: isDark ? '#f97316' : '#ea580c', Analysis: isDark ? '#14b8a6' : '#0d9488',
+            Completed: '#10b981'
+        };
+        const data = [
+            { name: 'Request',   value: stats.pending_requests,   color: colors.Request },
+            { name: 'Review',    value: stats.review_requests,    color: colors.Review },
+            { name: 'Approval',  value: stats.approval_requests,  color: colors.Approval },
+            { name: 'Testing',   value: stats.testing_requests,   color: colors.Testing },
+            { name: 'Analysis',  value: stats.analysis_requests,  color: colors.Analysis },
+            { name: 'Completed', value: stats.completed_requests, color: colors.Completed },
+        ];
+        if (barChart) { barChart.destroy(); barChart = null; }
+        const cvs = document.getElementById('statusChart');
+        const existingBar = Chart.getChart(cvs);
+        if (existingBar) existingBar.destroy();
+        const ctx = cvs.getContext('2d');
+        barChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: data.map(d => d.name),
+                datasets: [{ data: data.map(d => d.value), backgroundColor: data.map(d => d.color), borderRadius: 6, barThickness: 48 }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false }, tooltip: {
+                    backgroundColor: isDark ? '#020617' : '#0f172a', titleColor: '#fff', bodyColor: '#cbd5e1',
+                    padding: 10, cornerRadius: 8, displayColors: false,
+                    callbacks: { label: ctx => ctx.parsed.y + ' requests' }
+                }},
+                scales: {
+                    x: { grid: { display: false }, ticks: { color: isDark ? '#94a3b8' : '#64748b', font: { size: 12 } } },
+                    y: { grid: { color: isDark ? '#334155' : '#f1f5f9', drawBorder: false }, ticks: { color: '#94a3b8', font: { size: 12 }, precision: 0 } }
+                }
+            }
+        });
+        // Legend
+        document.getElementById('chart-legend').innerHTML = data.map(d =>
+            '<div class="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">' +
+            '<div class="w-3 h-3 rounded-sm" style="background:' + d.color + '"></div>' +
+            d.name + ': <span class="font-semibold text-slate-700 dark:text-slate-200">' + d.value + '</span></div>'
+        ).join('');
+    }
+
+    // Build completion donut
+    let donutChartObj = null;
+    function buildDonut(stats) {
+        const total = stats.total_requests + stats.completed_requests;
+        const pct = total > 0 ? Math.round((stats.completed_requests / total) * 100) : 0;
+        document.getElementById('donut-pct').textContent = pct + '%';
+        document.getElementById('completion-pct').textContent = pct + '%';
+        document.getElementById('completion-text').textContent = stats.completed_requests + ' of ' + total + ' completed';
+        document.getElementById('completion-bar').style.width = pct + '%';
+        const isDark = document.documentElement.classList.contains('dark');
+        if (donutChartObj) { donutChartObj.destroy(); donutChartObj = null; }
+        const dcvs = document.getElementById('donutChart');
+        const existingDonut = Chart.getChart(dcvs);
+        if (existingDonut) existingDonut.destroy();
+        const ctx = dcvs.getContext('2d');
+        donutChartObj = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                datasets: [{ data: [pct, 100 - pct], backgroundColor: ['#10b981', isDark ? '#334155' : '#f1f5f9'], borderWidth: 0 }]
+            },
+            options: {
+                cutout: '65%', responsive: false, plugins: { legend: { display: false }, tooltip: { enabled: false } }
+            }
+        });
+    }
+
+    // Build request list (delayed/upcoming/recent)
+    function buildRequestList(containerId, items, emptyMsg, opts) {
+        const el = document.getElementById(containerId);
+        if (!items || items.length === 0) {
+            el.innerHTML = '<p class="px-6 py-4 text-sm text-slate-400">' + emptyMsg + '</p>';
+            return;
+        }
+        el.innerHTML = items.slice(0, 6).map(item => {
+            const note = item.note ? '<div class="mt-1 flex items-start gap-1"><svg class="w-3 h-3 text-amber-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg><span class="text-xs text-amber-700 dark:text-amber-400 line-clamp-1">' + esc(item.note) + '</span></div>' : '';
+            const rightText = opts.rightField ? '<p class="text-xs ' + (opts.rightClass || 'text-slate-400') + ' font-medium flex-shrink-0">' + (opts.rightLabel || '') + (item[opts.rightField] || '—') + '</p>' : '';
+            const badge = opts.showBadge ? '<div class="flex items-center gap-3 flex-shrink-0">' + statusBadge(item.status) + '</div>' : '';
+            return '<a href="/requests/' + item.id + '" class="flex items-center justify-between px-6 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">' +
+                '<div class="min-w-0"><p class="font-mono text-base font-bold text-blue-700 dark:text-blue-400 tracking-tight">' + esc(item.request_number) + '</p>' +
+                '<p class="text-xs text-slate-400 dark:text-slate-500 truncate">' + esc(item.device_name || item.customer || '—') + '</p>' + note + '</div>' +
+                rightText + badge + '</a>';
+        }).join('');
+    }
+
+    // Build notices list
+    function buildNotices(items) {
+        const badge = document.getElementById('notices-badge');
+        const el = document.getElementById('notices-list');
+        if (!items || items.length === 0) {
+            el.innerHTML = '<p class="px-4 py-4 text-sm text-amber-400">No active notices</p>';
+            badge.classList.add('hidden');
+            return;
+        }
+        badge.textContent = items.length;
+        badge.classList.remove('hidden');
+        el.innerHTML = items.map(item =>
+            '<a href="/requests/' + item.id + '" class="flex items-start justify-between px-4 py-2.5 hover:bg-amber-100/60 dark:hover:bg-amber-800/20 transition-colors gap-2">' +
+            '<div class="min-w-0"><p class="font-mono text-sm font-bold text-blue-700 dark:text-blue-400 tracking-tight">' + esc(item.request_number) + '</p>' +
+            '<p class="text-xs text-amber-600/70 dark:text-amber-400/70 truncate">' + esc(item.device_name || item.customer || '') + '</p>' +
+            '<div class="mt-0.5 flex items-start gap-1"><svg class="w-3 h-3 text-amber-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>' +
+            '<span class="text-xs text-amber-800 dark:text-amber-300/80">' + esc(item.note) + '</span></div></div>' +
+            (item.deadline ? '<p class="text-[10px] text-amber-600 dark:text-amber-400 font-medium flex-shrink-0 mt-0.5">Due: ' + esc(item.deadline) + '</p>' : '') +
+            '</a>'
+        ).join('');
+    }
+
+    // Backup warning
+    function showBackupWarning(stats) {
+        if (!stats.backup_warning) return;
+        const el = document.getElementById('backup-warning');
+        el.classList.remove('hidden');
+        const level = stats.backup_warning_level;
+        const borderCls = level === 'critical' ? 'bg-red-50 dark:bg-red-900/25 border-red-300 dark:border-red-700' :
+                          level === 'warning' ? 'bg-amber-50 dark:bg-amber-900/25 border-amber-300 dark:border-amber-700' :
+                          'bg-blue-50 dark:bg-blue-900/25 border-blue-300 dark:border-blue-700';
+        el.className = 'rounded-xl border p-4 shadow-sm ' + borderCls;
+        document.getElementById('backup-warn-text').textContent = stats.backup_warning;
+        const btn = document.getElementById('backup-warn-btn');
+        if (level !== 'info') {
+            btn.classList.remove('hidden');
+            btn.className = 'mt-2 inline-block px-4 py-1.5 rounded-lg text-xs font-medium text-white transition-colors ' +
+                (level === 'critical' ? 'bg-red-600 hover:bg-red-700' : 'bg-amber-600 hover:bg-amber-700');
+        }
+    }
+
+    // Main fetch
+    apiFetch('/api/dashboard/stats')
+        .then(stats => {
+            document.getElementById('dash-loading').classList.add('hidden');
+            document.getElementById('dash-content').classList.remove('hidden');
+
+            buildPipeline(stats);
+            buildStatCards(stats);
+            buildBarChart(stats);
+            buildDonut(stats);
+            showBackupWarning(stats);
+
+            // Upcoming count
+            document.getElementById('upcoming-count').textContent = stats.upcoming_deadline_requests || 0;
+
+            // Delayed
+            if (stats.delayed_requests > 0) {
+                const db = document.getElementById('delayed-badge');
+                db.textContent = stats.delayed_requests;
+                db.classList.remove('hidden');
+            }
+            buildRequestList('delayed-list', stats.delayed_requests_list, 'No delayed requests', { rightField: 'deadline', rightLabel: 'Deadline: ', rightClass: 'text-red-600 dark:text-red-400' });
+
+            // Upcoming deadline
+            if (stats.upcoming_deadline_requests > 0) {
+                const ub = document.getElementById('upcoming-badge');
+                ub.textContent = stats.upcoming_deadline_requests;
+                ub.classList.remove('hidden');
+            }
+            buildRequestList('upcoming-list', stats.upcoming_deadline_list, 'No upcoming deadlines', { rightField: 'deadline', rightLabel: 'Due: ', rightClass: 'text-violet-600 dark:text-violet-400' });
+
+            // Recent activity
+            buildRequestList('recent-list', stats.recent_activity, 'No recent activity', { showBadge: true });
+
+            // Notices
+            buildNotices(stats.noticed_requests_list);
+        })
+        .catch(err => {
+            document.getElementById('dash-loading').classList.add('hidden');
+            const errEl = document.getElementById('dash-error');
+            errEl.classList.remove('hidden');
+            errEl.textContent = 'Failed to load dashboard data: ' + err.message;
+        });
+})();
+</script>
+{% endblock %}

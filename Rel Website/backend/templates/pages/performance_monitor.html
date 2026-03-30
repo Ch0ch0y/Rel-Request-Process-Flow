@@ -1,0 +1,223 @@
+{% extends "layout.html" %}
+
+{% block title %}Performance Monitor - REL Request{% endblock %}
+{% block page_title %}Performance Monitor{% endblock %}
+
+{% block page_content %}
+<!-- Filters -->
+<div class="bg-white dark:bg-slate-800 rounded-lg shadow border border-slate-200 dark:border-slate-700 p-4 mb-6 flex flex-wrap gap-3 items-end">
+    <div>
+        <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Period</label>
+        <div class="flex rounded-lg overflow-hidden border border-slate-300 dark:border-slate-600">
+            <button type="button" onclick="setPeriod('day')" id="btn-day"
+                class="px-4 py-2 text-sm font-medium bg-primary-600 text-white">Day</button>
+            <button type="button" onclick="setPeriod('week')" id="btn-week"
+                class="px-4 py-2 text-sm font-medium bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-l border-slate-300 dark:border-slate-600">Week</button>
+            <button type="button" onclick="setPeriod('month')" id="btn-month"
+                class="px-4 py-2 text-sm font-medium bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-l border-slate-300 dark:border-slate-600">Month</button>
+        </div>
+    </div>
+    <div>
+        <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Employee</label>
+        <select id="emp-filter" onchange="loadData()"
+            class="px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-700">
+            <option value="">All Employees</option>
+            {% for emp in employees %}
+            <option value="{{ emp['id'] }}">{{ emp['name'] }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div id="date-range" class="hidden flex gap-2 items-end">
+        <div>
+            <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">From</label>
+            <input type="date" id="date-from" onchange="loadData()"
+                class="px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-700">
+        </div>
+        <div>
+            <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">To</label>
+            <input type="date" id="date-to" onchange="loadData()"
+                class="px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-700">
+        </div>
+    </div>
+    <button type="button" onclick="loadData()" class="px-4 py-2 bg-primary-600 text-white text-sm rounded-lg hover:bg-primary-700 ml-auto">
+        🔄 Refresh
+    </button>
+</div>
+
+<!-- Summary Cards -->
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6" id="summary-cards">
+    <div class="bg-white dark:bg-slate-800 rounded-lg shadow p-4 border border-slate-200 dark:border-slate-700">
+        <p class="text-sm text-slate-600 dark:text-slate-400">Total Points</p>
+        <p class="text-2xl font-bold text-primary-600" id="card-total-points">—</p>
+    </div>
+    <div class="bg-white dark:bg-slate-800 rounded-lg shadow p-4 border border-slate-200 dark:border-slate-700">
+        <p class="text-sm text-slate-600 dark:text-slate-400">Steps Completed</p>
+        <p class="text-2xl font-bold text-emerald-600" id="card-total-steps">—</p>
+    </div>
+    <div class="bg-white dark:bg-slate-800 rounded-lg shadow p-4 border border-slate-200 dark:border-slate-700">
+        <p class="text-sm text-slate-600 dark:text-slate-400">Active Employees</p>
+        <p class="text-2xl font-bold text-blue-600" id="card-active-emp">—</p>
+    </div>
+    <div class="bg-white dark:bg-slate-800 rounded-lg shadow p-4 border border-slate-200 dark:border-slate-700">
+        <p class="text-sm text-slate-600 dark:text-slate-400">Top Performer</p>
+        <p class="text-lg font-bold text-amber-600 truncate" id="card-top-performer">—</p>
+    </div>
+</div>
+
+<!-- Bar Chart -->
+<div class="bg-white dark:bg-slate-800 rounded-lg shadow border border-slate-200 dark:border-slate-700 p-6 mb-6">
+    <h3 class="text-lg font-semibold mb-4">Points by Employee</h3>
+    <div id="chart-container" class="min-h-[180px] flex items-end gap-2 overflow-x-auto pb-2">
+        <p class="text-slate-400 text-sm m-auto">Loading...</p>
+    </div>
+</div>
+
+<!-- Data Table -->
+<div class="bg-white dark:bg-slate-800 rounded-lg shadow border border-slate-200 dark:border-slate-700">
+    <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+        <h3 class="text-lg font-semibold">Employee Performance Detail</h3>
+        <span id="table-period-label" class="text-sm text-slate-500 dark:text-slate-400"></span>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead class="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-700">
+                <tr>
+                    <th class="px-4 py-3 text-left font-semibold">#</th>
+                    <th class="px-4 py-3 text-left font-semibold">Employee</th>
+                    <th class="px-4 py-3 text-left font-semibold">Period</th>
+                    <th class="px-4 py-3 text-right font-semibold">Steps</th>
+                    <th class="px-4 py-3 text-right font-semibold">Points</th>
+                    <th class="px-4 py-3 text-right font-semibold">Points/Step</th>
+                </tr>
+            </thead>
+            <tbody id="perf-table-body" class="divide-y divide-slate-200 dark:divide-slate-700">
+                <tr>
+                    <td colspan="6" class="px-4 py-8 text-center text-slate-400">Loading data...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+let currentPeriod = 'day';
+
+function setPeriod(p) {
+    currentPeriod = p;
+    ['day','week','month'].forEach(x => {
+        const btn = document.getElementById('btn-' + x);
+        if (x === p) {
+            btn.className = 'px-4 py-2 text-sm font-medium bg-primary-600 text-white';
+        } else {
+            btn.className = 'px-4 py-2 text-sm font-medium bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-l border-slate-300 dark:border-slate-600';
+        }
+    });
+    loadData();
+}
+
+async function loadData() {
+    const empId = document.getElementById('emp-filter').value;
+    const dateFrom = document.getElementById('date-from').value;
+    const dateTo = document.getElementById('date-to').value;
+
+    let url = `/api/reports/employee-performance?period=${currentPeriod}`;
+    if (empId) url += `&employee_id=${encodeURIComponent(empId)}`;
+    if (dateFrom) url += `&date_from=${encodeURIComponent(dateFrom)}`;
+    if (dateTo) url += `&date_to=${encodeURIComponent(dateTo)}`;
+
+    try {
+        const resp = await fetch(url);
+        if (!resp.ok) { renderError(); return; }
+        const data = await resp.json();
+        renderData(data);
+    } catch(e) {
+        renderError();
+    }
+}
+
+function renderData(data) {
+    const agg = data.aggregation || [];
+    // Sort by points desc
+    agg.sort((a, b) => b.points - a.points);
+
+    // Compute totals
+    const totPoints = agg.reduce((s, r) => s + r.points, 0);
+    const totSteps = agg.reduce((s, r) => s + r.steps_completed, 0);
+    const uniqueEmps = new Set(agg.map(r => r.employee_id)).size;
+    const topPerformer = agg.length > 0 ? agg[0].employee_name : '—';
+
+    document.getElementById('card-total-points').textContent = totPoints;
+    document.getElementById('card-total-steps').textContent = totSteps;
+    document.getElementById('card-active-emp').textContent = uniqueEmps;
+    document.getElementById('card-top-performer').textContent = topPerformer;
+
+    // Update period label
+    const periodLabels = { day: 'Daily', week: 'Weekly', month: 'Monthly' };
+    document.getElementById('table-period-label').textContent = periodLabels[currentPeriod] || '';
+
+    // Aggregate by employee for chart (sum points across all periods)
+    const byEmp = {};
+    agg.forEach(r => {
+        if (!byEmp[r.employee_name]) byEmp[r.employee_name] = { steps: 0, points: 0 };
+        byEmp[r.employee_name].points += r.points;
+        byEmp[r.employee_name].steps += r.steps_completed;
+    });
+
+    // Render chart
+    const empEntries = Object.entries(byEmp).sort((a, b) => b[1].points - a[1].points);
+    const maxPts = empEntries.length > 0 ? Math.max(...empEntries.map(e => e[1].points)) : 1;
+    const chartColors = [
+        '#6366f1','#22c55e','#3b82f6','#f59e0b','#ef4444','#8b5cf6','#14b8a6','#f97316','#ec4899','#06b6d4'
+    ];
+    const chartDiv = document.getElementById('chart-container');
+    if (empEntries.length === 0) {
+        chartDiv.innerHTML = '<p class="text-slate-400 text-sm m-auto">No data for selected filters.</p>';
+    } else {
+        chartDiv.innerHTML = empEntries.map(([name, stat], i) => {
+            const pct = Math.max(4, Math.round((stat.points / maxPts) * 160));
+            const color = chartColors[i % chartColors.length];
+            return `<div class="flex flex-col items-center gap-1 min-w-[60px]">
+                <span class="text-xs font-semibold text-slate-700 dark:text-slate-200">${stat.points}</span>
+                <div style="height:${pct}px;background:${color};width:36px;border-radius:4px 4px 0 0;" title="${name}: ${stat.points} pts, ${stat.steps} steps"></div>
+                <span class="text-xs text-slate-500 dark:text-slate-400 text-center leading-tight w-14 truncate">${name}</span>
+            </div>`;
+        }).join('');
+    }
+
+    // Render table
+    const tbody = document.getElementById('perf-table-body');
+    if (agg.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">No performance data found for selected period.</td></tr>';
+        return;
+    }
+    let rank = 1;
+    const rankIcons = ['🥇','🥈','🥉'];
+    tbody.innerHTML = agg.map((r, i) => {
+        const pps = r.steps_completed > 0 ? (r.points / r.steps_completed).toFixed(2) : '0.00';
+        const rankLabel = i < 3 ? rankIcons[i] : `${i + 1}`;
+        return `<tr class="hover:bg-slate-50 dark:hover:bg-slate-700/30">
+            <td class="px-4 py-3 text-center">${rankLabel}</td>
+            <td class="px-4 py-3 font-medium">${escHtml(r.employee_name || 'Unknown')}</td>
+            <td class="px-4 py-3 text-slate-500 dark:text-slate-400 text-xs font-mono">${escHtml(r.period || '')}</td>
+            <td class="px-4 py-3 text-right">${r.steps_completed}</td>
+            <td class="px-4 py-3 text-right font-semibold text-primary-600 dark:text-primary-400">${r.points}</td>
+            <td class="px-4 py-3 text-right text-slate-500">${pps}</td>
+        </tr>`;
+    }).join('');
+}
+
+function renderError() {
+    document.getElementById('perf-table-body').innerHTML =
+        '<tr><td colspan="6" class="px-4 py-8 text-center text-red-500">Failed to load performance data.</td></tr>';
+    document.getElementById('chart-container').innerHTML =
+        '<p class="text-red-400 text-sm m-auto">Error loading data.</p>';
+}
+
+function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Load on page open
+document.addEventListener('DOMContentLoaded', loadData);
+</script>
+{% endblock %}

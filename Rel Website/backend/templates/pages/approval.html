@@ -1,0 +1,333 @@
+{% extends "layout.html" %}
+
+{% block title %}Approval Queue - RELDMS{% endblock %}
+
+{% block page_content %}
+<div class="space-y-6 stagger-children" id="approval-page">
+
+    <!-- Section 1: Approval Queue -->
+    <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-6 py-4 shadow-sm">
+        <div class="flex items-center gap-3">
+            <div class="w-9 h-9 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
+                <svg class="w-5 h-5 text-violet-600 dark:text-violet-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </div>
+            <div class="flex-1">
+                <div class="flex items-center gap-2">
+                    <h1 class="text-lg font-bold text-slate-900 dark:text-white">Approval Queue</h1>
+                    <span id="pendingBadge" class="hidden inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-700"></span>
+                </div>
+                <p class="text-xs text-slate-500 dark:text-slate-400" id="queueDesc">Loading...</p>
+            </div>
+            <button onclick="loadApproval()" class="px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse"></span>
+                Refresh
+            </button>
+        </div>
+    </div>
+
+    <!-- Loading -->
+    <div id="loadingState" class="flex items-center justify-center py-16">
+        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600"></div>
+    </div>
+    <!-- Error -->
+    <div id="errorState" class="hidden p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400"></div>
+    <!-- Empty -->
+    <div id="emptyState" class="hidden bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm p-12 text-center">
+        <svg class="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto mb-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg>
+        <p class="text-slate-500 dark:text-slate-400 font-medium">No requests pending approval</p>
+        <p class="text-xs text-slate-400 dark:text-slate-500 mt-1">All caught up!</p>
+    </div>
+
+    <!-- Approval Table -->
+    <div id="approvalTable" class="hidden bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex items-center gap-2">
+            <svg class="w-4 h-4 text-violet-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <h3 class="font-semibold text-slate-800 dark:text-slate-100">Pending Approval</h3>
+            <span id="approvalCount" class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300">0</span>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/30">
+                        <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Request #</th>
+                        <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Classification</th>
+                        <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Device</th>
+                        <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Customer</th>
+                        <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Lot No.</th>
+                        <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Submitted By</th>
+                        <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Date</th>
+                        <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Status</th>
+                        <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="approvalBody" class="divide-y divide-slate-100 dark:divide-slate-700"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Section 2: Masterlist -->
+    <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex flex-wrap items-center gap-3">
+            <div class="w-9 h-9 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
+                <svg class="w-4 h-4 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+            </div>
+            <div class="flex-1 min-w-0">
+                <h2 class="font-bold text-slate-900 dark:text-white text-base">Masterlist</h2>
+                <p class="text-xs text-slate-500 dark:text-slate-400" id="mlDesc">Loading...</p>
+            </div>
+            <button onclick="loadMasterlist()" id="mlRefreshBtn" class="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+            </button>
+        </div>
+        <!-- ML Loading -->
+        <div id="mlLoading" class="flex items-center justify-center py-12">
+            <div class="animate-spin rounded-full h-7 w-7 border-b-2 border-blue-600"></div>
+        </div>
+        <!-- ML Error -->
+        <div id="mlError" class="hidden m-6 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg text-red-700 dark:text-red-400 text-sm"></div>
+        <!-- ML Empty -->
+        <div id="mlEmpty" class="hidden py-14 text-center">
+            <svg class="w-10 h-10 text-slate-200 dark:text-slate-600 mx-auto mb-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+            <p class="text-slate-500 dark:text-slate-400 font-medium text-sm">No RELDMS requests found</p>
+        </div>
+        <!-- ML Table -->
+        <div id="mlTableWrap" class="hidden overflow-x-auto">
+            <table class="min-w-full border-collapse text-[11px]">
+                <thead>
+                    <tr class="bg-blue-600" id="mlHead"></tr>
+                </thead>
+                <tbody id="mlBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function getToken() { const m = document.cookie.match(/access_token=([^;]+)/); return m ? m[1] : null; }
+async function apiFetch(url, opts) {
+    const token = getToken();
+    const headers = { ...(opts?.headers || {}) };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const res = await fetch(url, { ...opts, headers, credentials: 'same-origin' });
+    if (!res.ok) throw new Error('API error ' + res.status);
+    return res.json();
+}
+
+const STATUS_COLORS = {
+    approval:'bg-violet-100 text-violet-700 border-violet-200', review:'bg-blue-100 text-blue-700 border-blue-200',
+    testing:'bg-orange-100 text-orange-700 border-orange-200', analysis:'bg-teal-100 text-teal-700 border-teal-200',
+    completed:'bg-emerald-100 text-emerald-700 border-emerald-200', discontinued:'bg-slate-100 text-slate-500 border-slate-200',
+    incoming:'bg-amber-100 text-amber-700 border-amber-200', pending:'bg-amber-100 text-amber-700 border-amber-200',
+    in_progress:'bg-orange-100 text-orange-700 border-orange-200'
+};
+const STATUS_LABELS = {
+    approval:'Approval', review:'Review', testing:'Testing', analysis:'Analysis',
+    completed:'Completed', discontinued:'Discontinued', incoming:'Request', pending:'Request', in_progress:'Testing'
+};
+
+let approvalRequests = [];
+let masterlistData = [];
+let actionLoading = {};
+
+async function loadApproval() {
+    const loading = document.getElementById('loadingState');
+    const errorEl = document.getElementById('errorState');
+    const empty = document.getElementById('emptyState');
+    const table = document.getElementById('approvalTable');
+
+    loading.classList.remove('hidden');
+    errorEl.classList.add('hidden');
+    empty.classList.add('hidden');
+    table.classList.add('hidden');
+
+    try {
+        approvalRequests = await apiFetch('/api/requests?status=approval');
+        if (!Array.isArray(approvalRequests)) approvalRequests = approvalRequests.requests || [];
+        loading.classList.add('hidden');
+
+        const badge = document.getElementById('pendingBadge');
+        const desc = document.getElementById('queueDesc');
+        if (approvalRequests.length > 0) {
+            badge.textContent = approvalRequests.length + ' pending';
+            badge.classList.remove('hidden');
+            desc.textContent = approvalRequests.length + ' request' + (approvalRequests.length !== 1 ? 's' : '') + ' waiting for management decision';
+        } else {
+            badge.classList.add('hidden');
+            desc.textContent = 'No requests pending approval';
+        }
+
+        if (approvalRequests.length === 0) {
+            empty.classList.remove('hidden');
+            return;
+        }
+
+        document.getElementById('approvalCount').textContent = approvalRequests.length;
+        const body = document.getElementById('approvalBody');
+        body.innerHTML = approvalRequests.map(req => {
+            const sc = STATUS_COLORS[req.status] || 'bg-slate-100 text-slate-600 border-slate-200';
+            const sl = STATUS_LABELS[req.status] || req.status;
+            return `<tr class="hover:bg-slate-50 dark:hover:bg-slate-700/20 transition-colors">
+                <td class="px-4 py-3"><a href="/requests/${req.id}" class="font-mono text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1">${esc(req.request_number)}<svg class="w-3 h-3 opacity-60" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a></td>
+                <td class="px-4 py-3 text-slate-700 dark:text-slate-300">${esc(req.classification)}</td>
+                <td class="px-4 py-3 text-slate-700 dark:text-slate-300 font-medium">${esc(req.device_name)}</td>
+                <td class="px-4 py-3 text-slate-600 dark:text-slate-400">${esc(req.customer)}</td>
+                <td class="px-4 py-3 font-mono text-xs text-slate-600 dark:text-slate-400">${esc(req.lot_no)}</td>
+                <td class="px-4 py-3 text-slate-600 dark:text-slate-400">${esc(req.created_by_username)}</td>
+                <td class="px-4 py-3 text-slate-500 dark:text-slate-400 text-xs">${req.created_at ? new Date(req.created_at).toLocaleDateString() : ''}</td>
+                <td class="px-4 py-3"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${sc}">${esc(sl)}</span></td>
+                <td class="px-4 py-3">
+                    <div class="flex items-center gap-2" id="actions-${req.id}">
+                        <button onclick="handleAction('${req.id}','approve')" class="flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium transition-colors">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 9V5a3 3 0 00-3-3l-4 9v11h11.28a2 2 0 002-1.7l1.38-9a2 2 0 00-2-2.3H14z"/></svg>
+                            Approve
+                        </button>
+                        <button onclick="handleAction('${req.id}','reject')" class="flex items-center gap-1 px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-medium transition-colors">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 15v4a3 3 0 003 3l4-9V2H5.72a2 2 0 00-2 1.7l-1.38 9a2 2 0 002 2.3H10z"/></svg>
+                            Reject
+                        </button>
+                        <a href="/requests/${req.id}" class="flex items-center gap-1 px-2.5 py-1 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg text-xs font-medium transition-colors">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            View
+                        </a>
+                    </div>
+                </td>
+            </tr>`;
+        }).join('');
+        table.classList.remove('hidden');
+    } catch (err) {
+        loading.classList.add('hidden');
+        errorEl.textContent = err.message;
+        errorEl.classList.remove('hidden');
+    }
+}
+
+async function handleAction(id, action) {
+    const actionsDiv = document.getElementById('actions-' + id);
+    if (!actionsDiv) return;
+    actionsDiv.innerHTML = '<span class="text-xs text-slate-400">Processing...</span>';
+    try {
+        const url = action === 'approve' ? `/api/requests/${id}/approve` : `/api/requests/${id}/reject`;
+        await apiFetch(url, { method: 'POST' });
+        actionsDiv.innerHTML = `<span class="text-xs font-medium text-emerald-600">${action === 'approve' ? 'Approved' : 'Rejected'}</span>`;
+        setTimeout(() => loadApproval(), 1500);
+    } catch (err) {
+        actionsDiv.innerHTML = `<span class="text-xs font-medium text-red-600">Error: ${esc(err.message)}</span>`;
+    }
+}
+
+// ── Masterlist ──
+const ML_COLS = [
+    {key:'ww',label:'WW'},{key:'date_received',label:'Date Received'},{key:'rrs_no',label:'RRS No.'},
+    {key:'purpose',label:'Purpose'},{key:'qual_type',label:'Qual Type'},{key:'customer',label:'Customer'},
+    {key:'pkg_type',label:'Pkg. Type'},{key:'lc_bc',label:'L/C B/C'},{key:'rr_agile_no',label:'RR/Agile No.'},
+    {key:'test_level',label:'Test Level'},{key:'qty',label:'Qty'},{key:'num_days',label:'# of Days'},
+    {key:'num_legs',label:'# of Legs'},{key:'est_start',label:'Est. Start'},{key:'est_completion',label:'Est. Completion'},
+    {key:'recommit',label:'Re-Commit'},{key:'planner_remarks',label:'Planner Remarks'}
+];
+const EDITABLE_KEYS = new Set(['test_level','qty','num_days','num_legs','est_start','est_completion','recommit','planner_remarks']);
+const CELL_FIELD_MAP = {qty:'ml_qty', est_start:'planner_est_start', est_completion:'planner_est_end', planner_remarks:'planner_note', test_level:'test_level'};
+
+let editingCell = null;
+
+function renderMasterlist() {
+    const wrap = document.getElementById('mlTableWrap');
+    const empty = document.getElementById('mlEmpty');
+    if (masterlistData.length === 0) {
+        wrap.classList.add('hidden');
+        empty.classList.remove('hidden');
+        return;
+    }
+    empty.classList.add('hidden');
+    wrap.classList.remove('hidden');
+
+    const head = document.getElementById('mlHead');
+    head.innerHTML = '<th class="border border-blue-500 px-2 py-2 text-left text-[10px] font-bold text-white uppercase tracking-wide whitespace-nowrap">Status</th>' +
+        ML_COLS.map(c => `<th class="border border-blue-500 px-2 py-2 text-left text-[10px] font-bold text-white uppercase tracking-wide whitespace-nowrap">${c.label}${EDITABLE_KEYS.has(c.key)?'<span class="ml-1 opacity-60 font-normal">✎</span>':''}</th>`).join('') +
+        '<th class="border border-blue-500 px-2 py-2 text-center text-[10px] font-bold text-white uppercase tracking-wide whitespace-nowrap">Link</th>';
+
+    const body = document.getElementById('mlBody');
+    body.innerHTML = masterlistData.map((row, ri) => {
+        const bg = ri % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/80 dark:bg-slate-800/50';
+        const sc = STATUS_COLORS[row.status] || 'bg-slate-100 text-slate-500 border-slate-200';
+        const sl = row.status ? row.status.charAt(0).toUpperCase() + row.status.slice(1) : '';
+        let cells = `<td class="border border-slate-200 dark:border-slate-700 px-2 py-1 whitespace-nowrap"><span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold border ${sc}">${esc(sl)}</span></td>`;
+        ML_COLS.forEach(col => {
+            const val = row[col.key] || '';
+            const isEditable = EDITABLE_KEYS.has(col.key);
+            const displayVal = col.key === 'date_received' && val ? (() => { try { return new Date(val).toLocaleDateString(); } catch { return val; } })() : val;
+            cells += `<td class="border border-slate-200 dark:border-slate-700 px-2 py-1 ${isEditable ? 'cursor-text hover:bg-blue-50 dark:hover:bg-blue-900/20' : ''}" ${isEditable ? `ondblclick="startEdit('${row.id}','${col.key}',this)"` : ''}>${esc(String(displayVal))}</td>`;
+        });
+        cells += `<td class="border border-slate-200 dark:border-slate-700 px-2 py-1 text-center"><a href="/requests/${row.id}" class="text-blue-600 hover:underline text-[10px]">View</a></td>`;
+        return `<tr class="${bg}">${cells}</tr>`;
+    }).join('');
+}
+
+function startEdit(rowId, colKey, cell) {
+    if (editingCell) return;
+    const row = masterlistData.find(r => r.id === rowId);
+    if (!row) return;
+    const original = String(row[colKey] || '');
+    editingCell = { rowId, colKey, original };
+
+    const isTextarea = colKey === 'planner_remarks';
+    const el = isTextarea ? document.createElement('textarea') : document.createElement('input');
+    el.value = original;
+    el.className = 'w-full px-1 py-0.5 border-none outline-none bg-transparent text-[11px] text-slate-900 dark:text-white' + (isTextarea ? ' resize-none min-w-[150px]' : '');
+    if (isTextarea) el.rows = 2;
+    cell.textContent = '';
+    cell.appendChild(el);
+    el.focus();
+
+    const commit = async () => {
+        const newVal = el.value;
+        editingCell = null;
+        cell.textContent = newVal;
+        if (newVal === original) return;
+        const backendKey = CELL_FIELD_MAP[colKey] || colKey;
+        const rowRef = masterlistData.find(r => r.id === rowId);
+        if (rowRef) rowRef[colKey] = newVal;
+        try {
+            await apiFetch('/api/masterlist/requests/' + rowId, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ [backendKey]: newVal })
+            });
+        } catch {
+            if (rowRef) rowRef[colKey] = original;
+            cell.textContent = original;
+        }
+    };
+
+    el.addEventListener('blur', commit, { once: true });
+    el.addEventListener('keydown', e => {
+        if (e.key === 'Escape') { editingCell = null; cell.textContent = original; }
+        if (e.key === 'Enter' && !isTextarea) { el.blur(); }
+    });
+}
+
+async function loadMasterlist() {
+    document.getElementById('mlLoading').classList.remove('hidden');
+    document.getElementById('mlError').classList.add('hidden');
+    document.getElementById('mlTableWrap').classList.add('hidden');
+    document.getElementById('mlEmpty').classList.add('hidden');
+
+    try {
+        masterlistData = await apiFetch('/api/masterlist/requests');
+        if (!Array.isArray(masterlistData)) masterlistData = [];
+        document.getElementById('mlDesc').textContent = masterlistData.length > 0
+            ? masterlistData.length + ' RELDMS request(s) · Double-click a cell to edit'
+            : 'No requests found';
+        document.getElementById('mlLoading').classList.add('hidden');
+        renderMasterlist();
+    } catch (err) {
+        document.getElementById('mlLoading').classList.add('hidden');
+        document.getElementById('mlError').textContent = err.message;
+        document.getElementById('mlError').classList.remove('hidden');
+    }
+}
+
+loadApproval();
+loadMasterlist();
+</script>
+{% endblock %}

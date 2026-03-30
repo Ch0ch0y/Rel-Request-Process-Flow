@@ -1,0 +1,230 @@
+{% extends "layout.html" %}
+
+{% block title %}Completed Requests - RELDMS{% endblock %}
+
+{% block page_content %}
+<div class="space-y-4 stagger-children" id="completed-page">
+    <!-- Header -->
+    <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-6 py-4 shadow-sm">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold text-slate-900 dark:text-white">Completed Requests</h1>
+                    <p class="text-xs text-slate-500 dark:text-slate-400" id="completed-count">All completed RELDMS requests.</p>
+                </div>
+            </div>
+            <button onclick="printAllReport()" id="printBtn" disabled
+                class="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-lg px-3.5 py-2 font-medium text-sm shadow-sm hover:shadow-md transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                Print Report
+            </button>
+        </div>
+    </div>
+
+    <!-- Search -->
+    <div class="flex flex-col sm:flex-row gap-3">
+        <form onsubmit="event.preventDefault();loadCompleted();" class="flex-1 flex gap-2">
+            <div class="flex-1 relative">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" id="searchInput" placeholder="Search by REL#, device, customer, lot..."
+                    class="w-full pl-10 pr-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 focus:bg-white dark:focus:bg-slate-700 dark:text-slate-100 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm transition-all">
+            </div>
+            <button type="submit" class="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium shadow-sm transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                Search
+            </button>
+        </form>
+    </div>
+
+    <!-- Loading -->
+    <div id="loadingState" class="flex items-center justify-center py-20">
+        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
+    </div>
+    <!-- Error -->
+    <div id="errorState" class="hidden p-4 bg-red-50 border border-red-200 rounded-lg text-red-700"></div>
+    <!-- Empty -->
+    <div id="emptyState" class="hidden text-center py-20">
+        <svg class="w-12 h-12 text-slate-300 mx-auto mb-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        <p class="text-slate-400 text-lg">No completed requests found.</p>
+        <p class="text-slate-400 text-sm mt-1">Requests will appear here once all process steps are completed.</p>
+    </div>
+    <!-- Request List -->
+    <div id="requestList" class="hidden bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-sm divide-y divide-slate-100 dark:divide-slate-700 overflow-hidden"></div>
+</div>
+
+<script>
+let completedRequests = [];
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function getToken() { const m = document.cookie.match(/access_token=([^;]+)/); return m ? m[1] : null; }
+async function apiFetch(url, opts) {
+    const token = getToken();
+    const headers = { ...(opts?.headers || {}) };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const res = await fetch(url, { ...opts, headers, credentials: 'same-origin' });
+    if (!res.ok) throw new Error('API error ' + res.status);
+    return res.json();
+}
+
+function renderList() {
+    const list = document.getElementById('requestList');
+    const empty = document.getElementById('emptyState');
+
+    if (completedRequests.length === 0) {
+        list.classList.add('hidden');
+        empty.classList.remove('hidden');
+        return;
+    }
+    empty.classList.add('hidden');
+    list.classList.remove('hidden');
+
+    list.innerHTML = completedRequests.map(req => {
+        let meta = '';
+        if (req.device_name) meta += `<span>Device: ${esc(req.device_name)}</span>`;
+        if (req.customer) meta += `<span>Customer: ${esc(req.customer)}</span>`;
+        if (req.lot_no) meta += `<span>Lot: ${esc(req.lot_no)}</span>`;
+        if (req.classification) meta += `<span>Class: ${esc(req.classification)}</span>`;
+        meta += `<span>by ${esc(req.created_by_username)}</span>`;
+
+        let noteHtml = '';
+        if (req.note) {
+            noteHtml = `<div class="mt-1.5 flex items-start gap-1.5 px-2 py-1.5 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/50 max-w-lg">
+                <svg class="w-3 h-3 text-amber-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+                <span class="text-xs text-amber-800 dark:text-amber-300 line-clamp-2">${esc(req.note)}</span>
+            </div>`;
+        }
+
+        const dots = (req.steps || []).map(s => {
+            const c = s.status === 'completed' ? 'bg-emerald-500' : s.status === 'in_progress' ? 'bg-blue-500' : 'bg-slate-300';
+            return `<div class="w-2 h-2 rounded-full ${c}" title="${esc(s.step_name || '')}"></div>`;
+        }).join('');
+
+        return `<a href="/requests/${req.id}" class="flex items-center gap-4 px-6 py-4 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/20 hover:shadow-[inset_3px_0_0_#10b981] transition-all group">
+            <div class="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0">
+                <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            </div>
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-3 mb-1">
+                    <span class="font-mono text-base font-bold text-blue-700 dark:text-blue-400 tracking-tight">${esc(req.request_number)}</span>
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border bg-emerald-100 text-emerald-700 border-emerald-200">Completed</span>
+                    ${req.automotive ? '<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200">Auto</span>' : ''}
+                </div>
+                <div class="flex items-center gap-4 text-xs text-slate-400 dark:text-slate-500">${meta}</div>
+                ${noteHtml}
+                <div class="mt-2 flex gap-1">${dots}</div>
+            </div>
+            <div class="flex items-center gap-3 flex-shrink-0">
+                ${req.deadline ? `<span class="text-xs text-slate-400">Deadline: ${esc(req.deadline)}</span>` : ''}
+                <button onclick="event.preventDefault();event.stopPropagation();printSingle('${req.id}')" title="Print Report"
+                    class="p-1.5 rounded hover:bg-slate-100 text-slate-300 hover:text-slate-600 transition-colors opacity-0 group-hover:opacity-100">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                </button>
+                <button onclick="event.preventDefault();event.stopPropagation();downloadReport('${req.id}', '${esc(req.request_number)}')" title="Download Report"
+                    class="p-1.5 rounded hover:bg-blue-50 text-slate-300 hover:text-blue-600 transition-colors opacity-0 group-hover:opacity-100">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                </button>
+                <svg class="w-4 h-4 text-slate-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+            </div>
+        </a>`;
+    }).join('');
+}
+
+async function loadCompleted() {
+    const loading = document.getElementById('loadingState');
+    const errorEl = document.getElementById('errorState');
+    const search = document.getElementById('searchInput').value.trim();
+
+    loading.classList.remove('hidden');
+    errorEl.classList.add('hidden');
+    document.getElementById('requestList').classList.add('hidden');
+    document.getElementById('emptyState').classList.add('hidden');
+
+    try {
+        let url = '/api/requests?status=completed';
+        if (search) url += '&search=' + encodeURIComponent(search);
+        completedRequests = await apiFetch(url);
+        document.getElementById('completed-count').innerHTML = `All completed RELDMS requests. <span class="ml-1 font-semibold text-emerald-600">${completedRequests.length} total</span>`;
+        document.getElementById('printBtn').disabled = completedRequests.length === 0;
+        loading.classList.add('hidden');
+        renderList();
+    } catch (err) {
+        loading.classList.add('hidden');
+        errorEl.textContent = err.message;
+        errorEl.classList.remove('hidden');
+    }
+}
+
+function generateReportHTML(req) {
+    const steps = req.steps || [];
+    const legNumbers = [...new Set(steps.map(s => s.leg || 1))].sort((a, b) => a - b);
+    const stepsHTML = legNumbers.map(leg => {
+        const legSteps = steps.filter(s => (s.leg || 1) === leg);
+        const legLabel = legNumbers.length > 1 ? '<h3 style="font-size:13px;margin:16px 0 6px;color:#374151;">LEG ' + leg + '</h3>' : '';
+        const rows = legSteps.map(s => {
+            const statusColor = s.status === 'completed' ? '#047857' : s.status === 'in_progress' ? '#1d4ed8' : '#64748b';
+            const statusBg = s.status === 'completed' ? '#d1fae5' : s.status === 'in_progress' ? '#dbeafe' : '#f1f5f9';
+            return '<tr><td>' + (s.step_number||'') + '</td><td>' + (s.step_name||'') + '</td><td><span style="padding:2px 8px;border-radius:999px;background:' + statusBg + ';color:' + statusColor + ';font-size:11px;font-weight:500;">' + (s.status||'').replace('_',' ') + '</span></td><td>' + (s.machine_no||'—') + '</td><td>' + (s.operator_id||'—') + '</td><td>' + (s.qty_in!=null?s.qty_in:'—') + '</td><td>' + (s.qty_out!=null?s.qty_out:'—') + '</td><td>' + (s.completed_at?new Date(s.completed_at).toLocaleDateString():'—') + '</td><td>' + (s.notes||'—') + '</td></tr>';
+        }).join('');
+        return legLabel + '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px;"><thead><tr><th>#</th><th>Step</th><th>Status</th><th>Machine</th><th>Operator</th><th>Qty In</th><th>Qty Out</th><th>Completed</th><th>Notes</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    }).join('');
+    
+    const fields = [
+        ['Request Number', req.request_number], ['Classification', req.classification],
+        ['Plant', req.plant], ['Device Name', req.device_name], ['Lot No.', req.lot_no],
+        ['Customer', req.customer], ['Deadline', req.deadline],
+        ['Created By', req.created_by_username],
+        ['Created At', req.created_at ? new Date(req.created_at).toLocaleString() : '—'],
+    ].filter(([, v]) => v != null && v !== '');
+    const infoRows = fields.map(([l, v]) => '<tr><td style="font-weight:600;color:#374151;width:38%;padding:5px 8px;">' + l + '</td><td style="padding:5px 8px;">' + v + '</td></tr>').join('');
+    
+    return '<html><head><title>Report – ' + (req.request_number||'') + '</title><style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:28px;color:#1e293b;}h1{font-size:20px;margin-bottom:2px;}h2{font-size:15px;margin:20px 0 8px;border-bottom:2px solid #e2e8f0;padding-bottom:4px;}.subtitle{font-size:12px;color:#64748b;margin-bottom:20px;}.badge{display:inline-block;padding:3px 10px;border-radius:999px;background:#d1fae5;color:#047857;font-size:12px;font-weight:600;}.info-table{width:100%;border-collapse:collapse;font-size:12px;background:#f8fafc;border:1px solid #e2e8f0;}table th{background:#f1f5f9;text-align:left;padding:7px 10px;border-bottom:2px solid #e2e8f0;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#475569;font-size:11px;}table td{padding:7px 10px;border-bottom:1px solid #e2e8f0;}tr:nth-child(even) td{background:#f8fafc;}.footer{margin-top:28px;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:12px;}@media print{body{padding:0;}button{display:none;}}</style></head><body><h1>RELDMS Report</h1><p class="subtitle">Generated on ' + new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit'}) + ' — <span class="badge">Completed</span></p><h2>General Information</h2><table class="info-table"><tbody>' + infoRows + '</tbody></table><h2>Process Steps</h2>' + stepsHTML + '<div class="footer">RELDMS — Amkor Technology — ' + (req.request_number||'') + '</div></body></html>';
+}
+
+function printSingle(id) {
+    const req = completedRequests.find(r => r.id === id);
+    if (!req) return;
+    const win = window.open('', '_blank');
+    win.document.write(generateReportHTML(req));
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 300);
+}
+
+async function downloadReport(id, reqNum) {
+    try {
+        const token = getToken();
+        const hdrs = {};
+        if (token) hdrs['Authorization'] = 'Bearer ' + token;
+        const res = await fetch('/api/requests/' + id + '/report', { headers: hdrs, credentials: 'same-origin' });
+        if (!res.ok) throw new Error('Download failed');
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'ReliabilityReport_' + reqNum + '.xlsx';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (err) {
+        if (window.showToast) window.showToast('Download failed: ' + err.message, 'error');
+    }
+}
+
+function printAllReport() {
+    const win = window.open('', '_blank');
+    const rows = completedRequests.map((req, i) =>
+        '<tr><td>' + (i+1) + '</td><td>' + (req.request_number||'—') + '</td><td>' + (req.device_name||'—') + '</td><td>' + (req.customer||'—') + '</td><td>' + (req.lot_no||'—') + '</td><td>' + (req.classification||'—') + '</td><td>' + (req.deadline||'—') + '</td><td><span class="badge">Completed</span></td></tr>'
+    ).join('');
+    win.document.write('<html><head><title>Completed RELDMS Records</title><style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px;color:#1e293b;}h1{font-size:20px;margin-bottom:4px;}.subtitle{font-size:12px;color:#64748b;margin-bottom:20px;}table{width:100%;border-collapse:collapse;font-size:12px;}th{background:#f1f5f9;text-align:left;padding:8px 12px;border-bottom:2px solid #e2e8f0;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#475569;}td{padding:8px 12px;border-bottom:1px solid #e2e8f0;}tr:nth-child(even){background:#f8fafc;}.badge{display:inline-block;padding:2px 8px;border-radius:999px;background:#d1fae5;color:#047857;font-size:11px;font-weight:500;}.footer{margin-top:24px;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:12px;}@media print{body{padding:0;}}</style></head><body><h1>Completed RELDMS Records</h1><p class="subtitle">Printed on ' + new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit'}) + ' &bull; Total: ' + completedRequests.length + ' request(s)</p><table><thead><tr><th>#</th><th>Request Number</th><th>Device Name</th><th>Customer</th><th>Lot No.</th><th>Classification</th><th>Deadline</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table><div class="footer">RELDMS — Amkor Technology</div></body></html>');
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 300);
+}
+
+loadCompleted();
+</script>
+{% endblock %}
