@@ -8123,15 +8123,11 @@ if __name__ == "__main__":
     # ── Load configuration from environment
     port = int(os.getenv("PORT", "8000"))
     host = os.getenv("HOST", "0.0.0.0")  # Listen on all network interfaces for LAN sharing
-    workers = int(os.getenv("WORKERS", "1"))
-    reload = os.getenv("RELOAD", "false").lower() == "true"
 
     logger.info(f"Starting server on {host}:{port}...")
     uvicorn.run(
-        "server:app",
+        app,
         host=host,
         port=port,
-        workers=workers,
-        reload=reload,
         log_level="info"
     )

@@ -9,7 +9,7 @@ services:
     region: singapore  # Closest to Amkor Philippines/Asia — change if needed
     plan: free         # Free tier (spins down after 15 min idle, wakes on request)
     buildCommand: chmod +x build.sh && ./build.sh
-    startCommand: cd backend && uvicorn server:app --host 0.0.0.0 --port $PORT
+    startCommand: cd backend && python server.py
     envVars:
       - key: JWT_SECRET
         generateValue: true     # Render auto-generates a secure random value
