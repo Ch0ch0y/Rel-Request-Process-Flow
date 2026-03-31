@@ -1,14 +1,4 @@
-﻿# Electrical Test selectable conditions
-ELECTRICAL_TEST_CONDITIONS = [
-    "P4",
-    "P1",
-    "Customer Site",
-    "Other 3rd Party",
-]
-ELECTRICAL_TEST_ITEMS = [
-    "E-Test",
-]
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Request
+﻿from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
@@ -39,19 +29,17 @@ try:
 except ImportError:
     _XLRD_AVAILABLE = False
 
-# Report generator for PowerPoint exports
-import sys as _sys
-_sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import sys
+import re as _re
+import asyncio
+import threading
+
+# Report generator for PowerPoint exports — parent dir added to path for generate_reports.py
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 try:
     from generate_reports import build_powerpoint
 except ImportError:
     build_powerpoint = None
-
-import re as _re
-import asyncio
-import threading
-import sys
-import subprocess
 
 ROOT_DIR = Path(__file__).parent
 MAINTENANCE_FLAG = ROOT_DIR / "maintenance.flag"
@@ -129,6 +117,10 @@ DB_PATH = os.environ.get('DB_PATH', str(ROOT_DIR / 'rel_database.db'))
 SECRET_KEY = os.environ.get('JWT_SECRET', 'your-secret-key-change-in-production')
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
+
+# Electrical test selectable conditions (defaults, can be overridden via settings)
+ELECTRICAL_TEST_CONDITIONS = ["P4", "P1", "Customer Site", "Other 3rd Party"]
+ELECTRICAL_TEST_ITEMS = ["E-Test"]
 
 # Create the main app
 app = FastAPI()

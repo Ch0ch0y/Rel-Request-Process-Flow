@@ -27,7 +27,7 @@ REL_BACKEND  = os.path.join(ROOT, "Rel Website", "backend")
 REL_FRONTEND = os.path.join(ROOT, "Rel Website", "frontend")
 CA_BACKEND   = os.path.join(ROOT, "ca-website",  "backend")
 CA_FRONTEND  = os.path.join(ROOT, "ca-website",  "frontend")
-REL_VENV_PY  = os.path.join(REL_BACKEND, ".venv", "Scripts", "python.exe")
+REL_VENV_PY  = os.path.join(ROOT, "Rel Website", ".venv", "Scripts", "python.exe")  # venv lives at Rel Website root
 CA_VENV_PY   = os.path.join(CA_BACKEND,  ".venv", "Scripts", "python.exe")
 ICON_PATH    = os.path.join(ROOT, "amkor.ico")
 
@@ -48,9 +48,10 @@ SERVICES = [
         "color":    "#3b82f6",
     },
     {
-        "id":    "rel_frontend",
-        "label": "REL Frontend",
-        "site":  "rel",
+        "id":       "rel_frontend",
+        "label":    "REL Frontend (Dev)",
+        "dev_only": True,
+        "site":     "rel",
         "url":   "http://localhost:3000",
         "port":  3000,
         "cmd":   lambda: "npm run dev",
@@ -73,9 +74,10 @@ SERVICES = [
         "color":    "#8b5cf6",
     },
     {
-        "id":    "ca_frontend",
-        "label": "CA  Frontend",
-        "site":  "ca",
+        "id":       "ca_frontend",
+        "label":    "CA  Frontend (Dev)",
+        "dev_only": True,
+        "site":     "ca",
         "url":   "http://localhost:3001",
         "port":  3001,
         "cmd":   lambda: "npm run dev",
@@ -164,9 +166,9 @@ class LauncherApp(tk.Tk):
 
         # Header action buttons (right → left order)
         for txt, cmd, bg in [
-            ("■  Stop All",    self._stop_all,    "#ef4444"),
-            ("▶  Start All",   self._start_all,   "#22c55e"),
-            ("⬆  Deploy All",  self._deploy_all,  "#f59e0b"),
+            ("■  Stop All",          self._stop_all,    "#ef4444"),
+            ("▶  Start Local/LAN",   self._start_local, "#22c55e"),
+            ("⬆  Deploy All (LAN)",  self._deploy_all,  "#f59e0b"),
         ]:
             tk.Button(hdr, text=txt, font=("Segoe UI", 9, "bold"),
                       bg=bg, fg="white", relief="flat",
@@ -219,17 +221,27 @@ class LauncherApp(tk.Tk):
         lan_lbl.pack(side="left")
         lan_lbl.bind("<Button-1>", lambda e, u=lan_url: webbrowser.open(u))
 
-        # Deploy button
+        # Deploy button — builds frontend then starts backend in production (no --reload)
         short = site["label"].split()[0]   # "REL" or "CA"
         deploy_btn = tk.Button(
-            shdr, text=f"⬆  Deploy {short}",
+            shdr, text=f"⬆  Deploy {short} (LAN)",
             font=("Segoe UI", 9, "bold"),
             bg="#f59e0b", fg="white", relief="flat",
             padx=10, pady=3, cursor="hand2",
             command=lambda s=site: self._deploy(s["id"]),
         )
         deploy_btn.pack(side="right", padx=4)
-        site["_deploy_btn"] = deploy_btn          # keep reference for state changes
+        site["_deploy_btn"] = deploy_btn
+
+        # Dev button — starts backend (with --reload) + frontend dev server
+        dev_btn = tk.Button(
+            shdr, text=f"▶  Dev {short}",
+            font=("Segoe UI", 9, "bold"),
+            bg="#16a34a", fg="white", relief="flat",
+            padx=10, pady=3, cursor="hand2",
+            command=lambda s=site: self._start_dev_site(s["id"]),
+        )
+        dev_btn.pack(side="right", padx=4)
 
         # ── Service rows ──────────────────────────────────────────────────────
         for svc in [s for s in SERVICES if s["site"] == site["id"]]:
@@ -392,6 +404,7 @@ class LauncherApp(tk.Tk):
                            b.config(state="normal", text=t, bg="#f59e0b"))
 
     def _deploy_all(self):
+        """Deploy all sites: build each frontend then start backend in production mode."""
         for site in SITES:
             self._deploy(site["id"])
             time.sleep(0.3)
@@ -468,9 +481,28 @@ class LauncherApp(tk.Tk):
             self._log(f"[{svc['label']}] Not running.")
 
     def _start_all(self):
+        """Start all services (backends + frontend dev servers) — full dev mode."""
         for svc in SERVICES:
             self._start(svc["id"])
             time.sleep(0.3)
+
+    def _start_local(self):
+        """Start backends only (no frontend dev servers).
+        Backends bind to 0.0.0.0 so they are accessible on both localhost
+        and the LAN. The pre-built frontend in dist/ is served automatically.
+        Use 'Deploy (LAN)' first if dist/ has not been built yet.
+        """
+        for svc in SERVICES:
+            if not svc.get("dev_only"):
+                self._start(svc["id"])
+                time.sleep(0.3)
+
+    def _start_dev_site(self, site_id: str):
+        """Start one site's backend (--reload) + frontend dev server."""
+        for svc in SERVICES:
+            if svc["site"] == site_id:
+                self._start(svc["id"])
+                time.sleep(0.3)
 
     def _stop_all(self):
         for svc in reversed(SERVICES):
