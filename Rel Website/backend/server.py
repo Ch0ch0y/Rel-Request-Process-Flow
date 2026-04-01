@@ -67,7 +67,7 @@ class _XlrdSheet:
         self._dm = datemode
 
     def _cell_value(self, row, col):
-        try:
+        try:  
             if row >= self._s.nrows or col >= self._s.ncols:
                 return None
             cell = self._s.cell(row, col)
@@ -281,6 +281,18 @@ async def init_db():
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             position TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS relmon_sheet_data (
+            site TEXT NOT NULL,
+            sheet TEXT NOT NULL,
+            rows_json TEXT NOT NULL,
+            merges_json TEXT,
+            form_json TEXT DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            updated_by TEXT,
+            PRIMARY KEY (site, sheet)
         );
     """)
     await db.commit()
@@ -7542,14 +7554,85 @@ async def get_daily_performance(
 # RELMON – Reliability Monitor Summary
 # ========================
 
+class RelMonSaveRequest(BaseModel):
+    site: str
+    sheet: str
+    rows: List[List[Optional[Any]]]
+    merges: Optional[List[Dict[str, int]]] = None
+    form_data: Dict[str, Any] = Field(default_factory=dict)
+
 # Paths to the quarterly Rel Monitor Excel files (root of project, beside backend/)
 _RELMON_FILES: dict[str, Path] = {
     "ATP1": ROOT_DIR.parent / "ATP1 Q4'2025 Rel Monitor Summary 011326.xlsx",
     "ATP3": ROOT_DIR.parent / "ATP3 Q4'2025 Rel Monitor Summary 011326.xlsx",
 }
 
+# Some users refer to ATP3 workbook content as ATP2 in the UI/process.
+_RELMON_SITE_ALIASES: dict[str, str] = {
+    "ATP2": "ATP3",
+}
+
 # Simple in-memory cache so repeated requests don't re-read the file
 _relmon_cache: dict[tuple[str, str], dict] = {}
+
+
+def _safe_relmon_json_load(raw: Optional[str], fallback: Any) -> Any:
+    if not raw:
+        return fallback
+    try:
+        return json.loads(raw)
+    except Exception:
+        return fallback
+
+
+def _coerce_relmon_cell(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return value
+
+    s = str(value).strip()
+    if s == "":
+        return None
+
+    try:
+        if "." not in s and "e" not in s.lower():
+            return int(s)
+    except Exception:
+        pass
+
+    try:
+        return float(s)
+    except Exception:
+        return s
+
+
+def _normalize_relmon_rows(rows: Any) -> tuple[list[list[Any]], int]:
+    normalized: list[list[Any]] = []
+    max_cols = 0
+
+    if not isinstance(rows, list):
+        return normalized, 0
+
+    for row in rows:
+        if isinstance(row, list):
+            values = row
+        elif isinstance(row, tuple):
+            values = list(row)
+        else:
+            values = [row]
+
+        cleaned = [_coerce_relmon_cell(v) for v in values]
+        normalized.append(cleaned)
+        if len(cleaned) > max_cols:
+            max_cols = len(cleaned)
+
+    if max_cols > 0:
+        for row in normalized:
+            if len(row) < max_cols:
+                row.extend([None] * (max_cols - len(row)))
+
+    return normalized, max_cols
 
 
 def _parse_relmon_sheet(site: str, sheet_name: str) -> dict:
@@ -7561,44 +7644,113 @@ def _parse_relmon_sheet(site: str, sheet_name: str) -> dict:
     path = _RELMON_FILES.get(site)
     if path is None or not path.exists():
         raise FileNotFoundError(f"RELMON file for site '{site}' not found")
+    wb = None
+    try:
+        wb = load_workbook(str(path), data_only=True)
+        if sheet_name not in wb.sheetnames:
+            raise ValueError(f"Sheet '{sheet_name}' not found in {site}")
 
-    wb = load_workbook(str(path), data_only=True)
-    if sheet_name not in wb.sheetnames:
-        wb.close()
-        raise ValueError(f"Sheet '{sheet_name}' not found in {site}")
+        ws = wb[sheet_name]
 
-    ws = wb[sheet_name]
+        # Collect raw cell values (None stays None, everything else becomes str or number)
+        rows: list[list] = []
+        for row in ws.iter_rows(values_only=True):
+            rows.append([
+                (v if isinstance(v, (int, float)) else (str(v) if v is not None else None))
+                for v in row
+            ])
 
-    # Collect raw cell values (None stays None, everything else becomes str or number)
-    rows: list[list] = []
-    for row in ws.iter_rows(values_only=True):
-        rows.append([
-            (v if isinstance(v, (int, float)) else (str(v) if v is not None else None))
-            for v in row
-        ])
+        # Collect merged-cell regions so the frontend can render colspan/rowspan
+        merges: list[dict] = []
+        for rng in ws.merged_cells.ranges:
+            merges.append({
+                "min_row": rng.min_row - 1,  # convert to 0-based
+                "max_row": rng.max_row - 1,
+                "min_col": rng.min_col - 1,
+                "max_col": rng.max_col - 1,
+            })
 
-    # Collect merged-cell regions so the frontend can render colspan/rowspan
-    merges: list[dict] = []
-    for rng in ws.merged_cells.ranges:
-        merges.append({
-            "min_row": rng.min_row - 1,  # convert to 0-based
-            "max_row": rng.max_row - 1,
-            "min_col": rng.min_col - 1,
-            "max_col": rng.max_col - 1,
-        })
+        result = {
+            "site": site,
+            "sheet": sheet_name,
+            "num_rows": len(rows),
+            "num_cols": ws.max_column,
+            "rows": rows,
+            "merges": merges,
+        }
+        _relmon_cache[cache_key] = result
+        return result
+    except PermissionError as e:
+        raise PermissionError(
+            f"RELMON workbook is locked by another process for site '{site}': {path.name}"
+        ) from e
+    finally:
+        if wb is not None:
+            wb.close()
 
-    wb.close()
 
-    result = {
-        "site": site,
-        "sheet": sheet_name,
-        "num_rows": len(rows),
-        "num_cols": ws.max_column,
-        "rows": rows,
-        "merges": merges,
-    }
-    _relmon_cache[cache_key] = result
-    return result
+async def _get_saved_relmon_record(site: str, sheet: str) -> Optional[aiosqlite.Row]:
+    db = await aiosqlite.connect(DB_PATH)
+    db.row_factory = aiosqlite.Row
+    try:
+        cursor = await db.execute(
+            "SELECT rows_json, merges_json, form_json, updated_at, updated_by "
+            "FROM relmon_sheet_data WHERE site = ? AND sheet = ?",
+            (site, sheet),
+        )
+        return await cursor.fetchone()
+    finally:
+        await db.close()
+
+
+def _resolve_relmon_site(site: str) -> str:
+    return _RELMON_SITE_ALIASES.get(site, site)
+
+
+def _relmon_sheet_device_type(sheet_name: str) -> str:
+    s = (sheet_name or "").strip()
+    if not s:
+        return ""
+    m = _re.match(r"^(.+?)\s*\((.+)\)$", s)
+    if m:
+        return m.group(1).strip()
+    return s
+
+
+async def _get_saved_relmon_sheet_names(site: str) -> list[str]:
+    db = await aiosqlite.connect(DB_PATH)
+    try:
+        cursor = await db.execute(
+            "SELECT DISTINCT sheet FROM relmon_sheet_data WHERE site = ? ORDER BY sheet",
+            (site,),
+        )
+        rows = await cursor.fetchall()
+        return [r[0] for r in rows if r and r[0]]
+    finally:
+        await db.close()
+
+
+async def _load_relmon_sheet_names_for_site(site: str) -> tuple[list[str], str]:
+    """Load sheet names from workbook; if locked/unavailable, fallback to saved DB names."""
+    resolved = _resolve_relmon_site(site)
+    path = _RELMON_FILES.get(resolved)
+    if path is None or not path.exists():
+        saved = await _get_saved_relmon_sheet_names(resolved)
+        return saved, "saved_db"
+
+    wb = None
+    try:
+        wb = load_workbook(str(path), data_only=True, read_only=True)
+        return list(wb.sheetnames), "workbook"
+    except PermissionError:
+        saved = await _get_saved_relmon_sheet_names(resolved)
+        return saved, "saved_db"
+    except Exception:
+        saved = await _get_saved_relmon_sheet_names(resolved)
+        return saved, "saved_db"
+    finally:
+        if wb is not None:
+            wb.close()
 
 
 @api_router.get("/relmon/sheets")
@@ -7618,19 +7770,207 @@ async def get_relmon_sheets():
     return out
 
 
+@api_router.get("/relmon/device-types")
+async def get_relmon_device_types(site: Optional[str] = None, order: str = "asc"):
+    """Return sortable RELMON device-type lists grouped like the workbook sheets.
+
+    Query params:
+    - site: ATP1 | ATP2 | ATP3 (optional; default returns ATP1 and ATP2)
+    - order: asc | desc (sort order by device type)
+    """
+    order_norm = (order or "asc").strip().lower()
+    if order_norm not in ("asc", "desc"):
+        raise HTTPException(status_code=400, detail="order must be 'asc' or 'desc'")
+
+    requested_sites = [site] if site else ["ATP1", "ATP2"]
+    response_sites: dict[str, Any] = {}
+
+    for requested in requested_sites:
+        resolved = _resolve_relmon_site(requested)
+        if resolved not in _RELMON_FILES:
+            raise HTTPException(status_code=404, detail=f"Site '{requested}' not found")
+
+        sheet_names, source = await _load_relmon_sheet_names_for_site(requested)
+
+        grouped: dict[str, list[str]] = {}
+        for s in sheet_names:
+            dev_type = _relmon_sheet_device_type(s)
+            if not dev_type:
+                continue
+            grouped.setdefault(dev_type, []).append(s)
+
+        for k in list(grouped.keys()):
+            grouped[k] = sorted(grouped[k])
+
+        reverse = order_norm == "desc"
+        sorted_types = sorted(grouped.keys(), reverse=reverse)
+        grouped_sheets = [{"device_type": t, "sheets": grouped[t]} for t in sorted_types]
+
+        response_sites[requested] = {
+            "resolved_site": resolved,
+            "source": source,
+            "count": len(sorted_types),
+            "device_types": sorted_types,
+            "grouped_sheets": grouped_sheets,
+        }
+
+    return {
+        "order": order_norm,
+        "sites": response_sites,
+    }
+
+
 @api_router.get("/relmon/data")
 async def get_relmon_data(site: str, sheet: str):
     """Return header rows, merge info, and data rows for a specific RELMON sheet."""
     if site not in _RELMON_FILES:
         raise HTTPException(status_code=404, detail=f"Site '{site}' not found")
+
+    parse_error: Optional[Exception] = None
+    payload: Optional[dict] = None
     try:
-        return _parse_relmon_sheet(site, sheet)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        payload = _parse_relmon_sheet(site, sheet)
+    except Exception as e:
+        parse_error = e
+
+    try:
+        saved = await _get_saved_relmon_record(site, sheet)
+
+        if payload is None and saved:
+            saved_rows = _safe_relmon_json_load(saved["rows_json"], [])
+            saved_merges = _safe_relmon_json_load(saved["merges_json"], [])
+            saved_form = _safe_relmon_json_load(saved["form_json"], {})
+
+            rows, max_cols = _normalize_relmon_rows(saved_rows)
+            payload = {
+                "site": site,
+                "sheet": sheet,
+                "num_rows": len(rows),
+                "num_cols": max_cols,
+                "rows": rows,
+                "merges": saved_merges if isinstance(saved_merges, list) else [],
+                "form_data": saved_form if isinstance(saved_form, dict) else {},
+                "updated_at": saved["updated_at"],
+                "updated_by": saved["updated_by"],
+                "source_unavailable": True,
+            }
+            return payload
+
+        if payload is None:
+            if isinstance(parse_error, FileNotFoundError):
+                raise HTTPException(status_code=404, detail=str(parse_error))
+            if isinstance(parse_error, ValueError):
+                raise HTTPException(status_code=404, detail=str(parse_error))
+            if isinstance(parse_error, PermissionError):
+                raise HTTPException(
+                    status_code=423,
+                    detail=(
+                        f"{parse_error}. Close the workbook in Excel and retry, "
+                        "or save once after source access is restored."
+                    ),
+                )
+            raise HTTPException(status_code=500, detail=f"Failed to read sheet: {parse_error}")
+
+        if saved:
+            saved_rows = _safe_relmon_json_load(saved["rows_json"], payload["rows"])
+            saved_merges = _safe_relmon_json_load(saved["merges_json"], payload["merges"])
+            saved_form = _safe_relmon_json_load(saved["form_json"], {})
+
+            rows, max_cols = _normalize_relmon_rows(saved_rows)
+            if rows:
+                payload["rows"] = rows
+                payload["num_rows"] = len(rows)
+                payload["num_cols"] = max_cols
+
+            if isinstance(saved_merges, list):
+                payload["merges"] = saved_merges
+
+            payload["form_data"] = saved_form if isinstance(saved_form, dict) else {}
+            payload["updated_at"] = saved["updated_at"]
+            payload["updated_by"] = saved["updated_by"]
+        else:
+            payload["form_data"] = {}
+            payload["updated_at"] = None
+            payload["updated_by"] = None
+
+        return payload
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read sheet: {e}")
+
+
+@api_router.put("/relmon/data")
+async def save_relmon_data(payload: RelMonSaveRequest, current_user: User = Depends(get_current_user)):
+    """Save editable RELMON rows and input-form data for a specific site/sheet."""
+    if payload.site not in _RELMON_FILES:
+        raise HTTPException(status_code=404, detail=f"Site '{payload.site}' not found")
+    if not payload.sheet or not payload.sheet.strip():
+        raise HTTPException(status_code=400, detail="Sheet cannot be empty")
+
+    # Best-effort source validation while allowing saves when the workbook is temporarily locked.
+    try:
+        _parse_relmon_sheet(payload.site, payload.sheet)
+    except PermissionError:
+        existing = await _get_saved_relmon_record(payload.site, payload.sheet)
+        if not existing:
+            raise HTTPException(
+                status_code=423,
+                detail="Source workbook is locked and this sheet has no saved baseline yet",
+            )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError:
+        existing = await _get_saved_relmon_record(payload.site, payload.sheet)
+        if not existing:
+            raise HTTPException(status_code=404, detail=f"Sheet '{payload.sheet}' not found in source workbook")
+
+    rows, max_cols = _normalize_relmon_rows(payload.rows)
+    if not rows or max_cols == 0:
+        raise HTTPException(status_code=400, detail="Rows cannot be empty")
+
+    merges = payload.merges if isinstance(payload.merges, list) else []
+    form_data = payload.form_data if isinstance(payload.form_data, dict) else {}
+    now = datetime.now(timezone.utc).isoformat()
+
+    db = await aiosqlite.connect(DB_PATH)
+    try:
+        await db.execute(
+            """
+            INSERT INTO relmon_sheet_data (
+                site, sheet, rows_json, merges_json, form_json, created_at, updated_at, updated_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(site, sheet) DO UPDATE SET
+                rows_json = excluded.rows_json,
+                merges_json = excluded.merges_json,
+                form_json = excluded.form_json,
+                updated_at = excluded.updated_at,
+                updated_by = excluded.updated_by
+            """,
+            (
+                payload.site,
+                payload.sheet,
+                json.dumps(rows, ensure_ascii=True),
+                json.dumps(merges, ensure_ascii=True),
+                json.dumps(form_data, ensure_ascii=True),
+                now,
+                now,
+                current_user.username,
+            ),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    return {
+        "ok": True,
+        "site": payload.site,
+        "sheet": payload.sheet,
+        "num_rows": len(rows),
+        "num_cols": max_cols,
+        "updated_at": now,
+        "updated_by": current_user.username,
+    }
 
 
 # ========================

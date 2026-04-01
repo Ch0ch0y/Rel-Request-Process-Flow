@@ -2,43 +2,163 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import api from '../api';
 import {
   Database, RefreshCw, Loader2, AlertTriangle, ChevronRight,
-  ChevronDown, Search, Download, TableProperties, X, Info
+  ChevronDown, Search, Download, Save, Plus, X, List
 } from 'lucide-react';
 
-// ─── Column-group colour tokens (matches original RELMON colour coding) ────────
+const HEADER_ROWS = 4;
+
 const GROUP_COLORS = {
-  Package:      { bg: 'bg-sky-600',    text: 'text-white', border: 'border-sky-700' },
-  Factory:      { bg: 'bg-cyan-600',   text: 'text-white', border: 'border-cyan-700' },
-  Materials:    { bg: 'bg-violet-600', text: 'text-white', border: 'border-violet-700' },
-  Precond:      { bg: 'bg-amber-500',  text: 'text-white', border: 'border-amber-600' },
-  DelamBefore:  { bg: 'bg-red-600',    text: 'text-white', border: 'border-red-700' },
-  DelamAfter:   { bg: 'bg-rose-500',   text: 'text-white', border: 'border-rose-600' },
-  MRT:          { bg: 'bg-emerald-600',text: 'text-white', border: 'border-emerald-700' },
-  Reliability:  { bg: 'bg-indigo-600', text: 'text-white', border: 'border-indigo-700' },
-  Default:      { bg: 'bg-slate-500',  text: 'text-white', border: 'border-slate-600' },
+  Package:      { bg: 'bg-sky-600', text: 'text-white' },
+  Factory:      { bg: 'bg-cyan-600', text: 'text-white' },
+  Materials:    { bg: 'bg-violet-600', text: 'text-white' },
+  Precond:      { bg: 'bg-amber-500', text: 'text-white' },
+  DelamBefore:  { bg: 'bg-red-600', text: 'text-white' },
+  DelamAfter:   { bg: 'bg-rose-500', text: 'text-white' },
+  MRT:          { bg: 'bg-emerald-600', text: 'text-white' },
+  Reliability:  { bg: 'bg-indigo-600', text: 'text-white' },
+  Default:      { bg: 'bg-slate-500', text: 'text-white' },
 };
 
-// Map Excel row-1 cell values to colour tokens
+const RELMON_TABS = [
+  { id: 'pkg_lot', label: 'Pkg and Lot Description' },
+  { id: 'materials', label: 'Materials' },
+  { id: 'rel_test', label: 'REL Test Requirements' },
+  { id: 'long_term', label: 'Long Term Test Requirements' },
+  { id: 'result', label: 'Result' },
+  { id: 'summary', label: 'Delam Summary / Special Instructions' },
+];
+
+const RELMON_FORM_SCHEMA = {
+  common: [
+    { key: 'type', label: 'Type', type: 'type-radio' },
+    { key: 'date_received', label: 'Date Received', type: 'date' },
+    { key: 'date_enrolled', label: 'Date Enrolled', type: 'date' },
+    { key: 'enrolled_by', label: 'Enrolled By' },
+    { key: 'rms_no', label: 'RMS No.' },
+    { key: 'ww', label: 'WW' },
+    { key: 'date_reported', label: 'Date Reported', type: 'date' },
+  ],
+  pkg_lot: [
+    { key: 'package_code', label: 'Package Code' },
+    { key: 'package_type', label: 'Package Type' },
+    { key: 'lead_ball_count', label: 'Lead/Ball Count' },
+    { key: 'package_size', label: 'Package Size' },
+    { key: 'package_thickness', label: 'Package Thickness' },
+    { key: 'lead_pitch', label: 'Lead Pitch' },
+    { key: 'assembly_site', label: 'Assembly Site' },
+    { key: 'customer_no', label: 'Customer No.' },
+    { key: 'customer', label: 'Customer' },
+    { key: 'device_number', label: 'Device Number' },
+    { key: 'lot_number', label: 'Lot Number' },
+    { key: 'date_code', label: 'Date Code' },
+    { key: 'unit_quantity', label: 'Unit Quantity' },
+  ],
+  materials: [
+    { key: 'die_size_mils', label: 'Die Size (mils)' },
+    { key: 'passivation', label: 'Passivation' },
+    { key: 'metallization', label: 'Metallization' },
+    { key: 'die_pad_size_mils', label: 'Die Pad Size (mils)' },
+    { key: 'lf_type', label: 'LF Type' },
+    { key: 'lf_subs_material', label: 'LF/Subs Material' },
+    { key: 'lf_subs_supplier', label: 'LF/Subs Supplier' },
+    { key: 'lf_subs_sid', label: 'LF/Subs SID #' },
+    { key: 'die_attach_material', label: 'Die Attach Material' },
+    { key: 'wire_size_type', label: 'Wire Size/Type' },
+    { key: 'die_coat', label: 'Die Coat' },
+    { key: 'emc_encap_fill_material', label: 'EMC/Encap/Fill Matl' },
+    { key: 'hs', label: 'HS' },
+  ],
+  rel_test: [
+    { key: 'mrt_level', label: 'MRT Level' },
+    { key: 'process', label: 'Process' },
+    { key: 'condition', label: 'Condition' },
+    { key: 'read_point', label: 'Read Point' },
+    { key: 'qty', label: 'Qty' },
+    { key: 'date_in', label: 'Date-In', type: 'date' },
+    { key: 'date_out', label: 'Date-Out', type: 'date' },
+    { key: 'ma', label: 'MA' },
+  ],
+  long_term: [
+    { key: 'longterm_processcode', label: 'PROCESSCODE' },
+    { key: 'longterm_condition', label: 'Condition' },
+    { key: 'longterm_read_point', label: 'Read Point' },
+    { key: 'longterm_ss', label: 'SS' },
+    { key: 'longterm_date_test_start', label: 'Date Test Start', type: 'date' },
+    { key: 'longterm_date_test_end', label: 'Date Test End', type: 'date' },
+    { key: 'longterm_mach_no', label: 'Mach No' },
+    { key: 'longterm_optr_load', label: 'OPTR (Load)' },
+    { key: 'longterm_optr_unload', label: 'OPTR (Unload)' },
+  ],
+  result: [
+    { key: 'unit_no', label: 'Unit No' },
+    { key: 'prior_mrt_t1', label: 'Prior MRT T1' },
+    { key: 'prior_mrt_t2', label: 'Prior MRT T2' },
+    { key: 'prior_mrt_t3', label: 'Prior MRT T3' },
+    { key: 'prior_mrt_t4', label: 'Prior MRT T4' },
+    { key: 'prior_mrt_t5', label: 'Prior MRT T5' },
+    { key: 'post_mrt_t1', label: 'Post MRT T1' },
+    { key: 'post_mrt_t2', label: 'Post MRT T2' },
+    { key: 'post_mrt_t3', label: 'Post MRT T3' },
+    { key: 'post_mrt_t4', label: 'Post MRT T4' },
+    { key: 'post_mrt_t5', label: 'Post MRT T5' },
+    { key: 'unit_qty', label: 'Unit Qty' },
+    { key: 'et_rej', label: 'ET Rej' },
+    { key: 'ie_crack', label: 'I/E Crack' },
+    { key: 'lt_rej', label: 'LT Rej' },
+  ],
+  summary: [
+    { key: 'delamination_summary', label: 'Delamination Summary', type: 'textarea' },
+    { key: 'remarks_special_instruction', label: 'Remarks / Special Instruction', type: 'textarea' },
+    { key: 'mrt_lt_remarks', label: 'MRT/LT Remarks', type: 'textarea' },
+  ],
+};
+
+function buildDefaultFormData() {
+  const out = { type: 'Standard' };
+  Object.values(RELMON_FORM_SCHEMA).forEach((fields) => {
+    fields.forEach((f) => {
+      if (f.key !== 'type' && out[f.key] === undefined) {
+        out[f.key] = '';
+      }
+    });
+  });
+  return out;
+}
+
+function parseSheetFamily(sheetName) {
+  const m = sheetName.match(/^(.+?)\s*\((.+)\)$/);
+  if (m) return { family: m[1].trim(), variant: m[2].trim() };
+  return { family: sheetName, variant: '' };
+}
+
+function groupSheets(sheets) {
+  const groups = {};
+  for (const s of sheets) {
+    const { family } = parseSheetFamily(s);
+    if (!groups[family]) groups[family] = [];
+    groups[family].push(s);
+  }
+  return groups;
+}
+
 function getGroupColor(cellValue) {
   if (!cellValue) return GROUP_COLORS.Default;
   const v = String(cellValue).toLowerCase();
-  if (v.includes('package'))           return GROUP_COLORS.Package;
-  if (v.includes('factory'))           return GROUP_COLORS.Factory;
-  if (v.includes('material'))          return GROUP_COLORS.Materials;
+  if (v.includes('package')) return GROUP_COLORS.Package;
+  if (v.includes('factory')) return GROUP_COLORS.Factory;
+  if (v.includes('material')) return GROUP_COLORS.Materials;
   if (v.includes('preconditioning') && v.includes('condition')) return GROUP_COLORS.Precond;
-  if (v.includes('before'))            return GROUP_COLORS.DelamBefore;
-  if (v.includes('after'))             return GROUP_COLORS.DelamAfter;
-  if (v.includes('mrt'))               return GROUP_COLORS.MRT;
-  if (v.includes('reliability'))       return GROUP_COLORS.Reliability;
+  if (v.includes('before')) return GROUP_COLORS.DelamBefore;
+  if (v.includes('after')) return GROUP_COLORS.DelamAfter;
+  if (v.includes('mrt')) return GROUP_COLORS.MRT;
+  if (v.includes('reliability')) return GROUP_COLORS.Reliability;
   return GROUP_COLORS.Default;
 }
 
-// ─── Build a 2-D color map from merge info & row-1 values ─────────────────────
-function buildColorMap(rows, merges, headerRows = 4) {
-  const map = {};           // map[row][col] = colorKey
+function buildColorMap(rows, merges, headerRows = HEADER_ROWS) {
+  const map = {};
   if (!rows || !merges) return map;
 
-  // For each merge that touches row 0 (first header row), propagate the color
   for (const m of merges) {
     if (m.min_row < headerRows) {
       const color = getGroupColor(rows[m.min_row]?.[m.min_col]);
@@ -49,30 +169,31 @@ function buildColorMap(rows, merges, headerRows = 4) {
       }
     }
   }
-  // Fill remaining header cells by inheriting from the cell above or row-0 color
+
   for (let r = 0; r < headerRows; r++) {
     const numCols = rows[0]?.length ?? 0;
     for (let c = 0; c < numCols; c++) {
       const key = `${r}_${c}`;
       if (!map[key]) {
-        // try to inherit from row above in same column
         const above = map[`${r - 1}_${c}`];
         if (above) {
           map[key] = above;
         } else {
-          // derive from row-0 scan leftward
           for (let sc = c; sc >= 0; sc--) {
             const found = map[`0_${sc}`];
-            if (found) { map[key] = found; break; }
+            if (found) {
+              map[key] = found;
+              break;
+            }
           }
         }
       }
     }
   }
+
   return map;
 }
 
-// ─── Build the set of cells that are "covered" by a merge (not the top-left) ──
 function buildCoveredSet(merges) {
   const covered = new Set();
   for (const m of merges) {
@@ -87,7 +208,6 @@ function buildCoveredSet(merges) {
   return covered;
 }
 
-// ─── Build a lookup from "top-left key" → {rowspan, colspan} ─────────────────
 function buildSpanMap(merges) {
   const spans = {};
   for (const m of merges) {
@@ -99,160 +219,198 @@ function buildSpanMap(merges) {
   return spans;
 }
 
-// ─── Parse package family from sheet name ─────────────────────────────────────
-function parseSheetFamily(sheetName) {
-  // Extract the base package name (before the parenthetical plating type)
-  const m = sheetName.match(/^(.+?)\s*\((.+)\)$/);
-  if (m) return { family: m[1].trim(), variant: m[2].trim() };
-  return { family: sheetName, variant: '' };
-}
-
-// Group sheets by family
-function groupSheets(sheets) {
-  const groups = {};
-  for (const s of sheets) {
-    const { family } = parseSheetFamily(s);
-    if (!groups[family]) groups[family] = [];
-    groups[family].push(s);
-  }
-  return groups;
-}
-
-// ─── Header Table Component ───────────────────────────────────────────────────
-const HEADER_ROWS = 4; // rows 0-3 are headers, rows 4+ are data
-
-function RelMonTable({ sheetData }) {
-  const { rows, merges } = sheetData;
-  if (!rows || rows.length === 0) return null;
-
-  const covered = buildCoveredSet(merges);
-  const spanMap = buildSpanMap(merges);
-  const colorMap = buildColorMap(rows, merges, HEADER_ROWS);
-
-  const numCols = rows[0]?.length ?? 0;
-
-  // ── render header rows (0..HEADER_ROWS-1) ────────────────────────────────
-  const headerRowEls = [];
-  for (let r = 0; r < HEADER_ROWS; r++) {
-    if (!rows[r] || rows[r].every(v => v === null)) continue; // skip fully-empty rows
-    const cells = [];
-    for (let c = 0; c < numCols; c++) {
-      const key = `${r}_${c}`;
-      if (covered.has(key)) continue;
-      const span = spanMap[key] ?? {};
-      const color = colorMap[key] ?? GROUP_COLORS.Default;
-      const val = rows[r][c];
-      cells.push(
-        <th
-          key={key}
-          rowSpan={span.rowSpan ?? 1}
-          colSpan={span.colSpan ?? 1}
-          className={`px-2 py-1 text-center text-[10px] font-semibold border border-slate-600 whitespace-pre-wrap leading-tight min-w-[60px] ${color.bg} ${color.text}`}
-        >
-          {val !== null ? String(val) : ''}
-        </th>
-      );
+function normalizeRows(rows) {
+  if (!Array.isArray(rows)) return [];
+  const cloned = rows.map((row) => (Array.isArray(row) ? [...row] : [row]));
+  const maxCols = cloned.reduce((m, row) => Math.max(m, row.length), 0);
+  return cloned.map((row) => {
+    if (row.length < maxCols) {
+      return [...row, ...new Array(maxCols - row.length).fill(null)];
     }
-    headerRowEls.push(<tr key={`hr-${r}`}>{cells}</tr>);
-  }
+    return row;
+  });
+}
 
-  // ── render data rows (HEADER_ROWS..) ─────────────────────────────────────
-  const dataRowEls = [];
-  for (let r = HEADER_ROWS; r < rows.length; r++) {
-    const row = rows[r];
-    if (!row || row.every(v => v === null)) continue; // skip blank rows
-    const cells = row.map((val, c) => (
-      <td
-        key={`${r}_${c}`}
-        className="px-2 py-[3px] text-center text-xs border border-slate-200 dark:border-slate-600 whitespace-nowrap text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-sky-50 dark:hover:bg-slate-700"
-      >
-        {val !== null ? String(val) : ''}
-      </td>
-    ));
-    dataRowEls.push(
-      <tr key={`dr-${r}`} className="even:bg-slate-50 dark:even:bg-slate-900/40">
-        {cells}
-      </tr>
-    );
-  }
-
-  if (dataRowEls.length === 0) {
+function RelMonFormField({ field, value, onChange }) {
+  if (field.type === 'type-radio') {
     return (
-      <div className="flex items-center justify-center h-40 text-slate-400 dark:text-slate-500 text-sm">
-        No data rows available for this sheet.
+      <div className="col-span-2 rounded-lg border border-slate-200 dark:border-slate-700 p-2">
+        <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1.5">{field.label}</p>
+        <div className="flex items-center gap-4 text-sm">
+          <label className="inline-flex items-center gap-2 text-slate-700 dark:text-slate-200">
+            <input
+              type="radio"
+              checked={value === 'Standard'}
+              onChange={() => onChange('type', 'Standard')}
+            />
+            Standard
+          </label>
+          <label className="inline-flex items-center gap-2 text-slate-700 dark:text-slate-200">
+            <input
+              type="radio"
+              checked={value === 'Customer Specific'}
+              onChange={() => onChange('type', 'Customer Specific')}
+            />
+            Customer Specific
+          </label>
+        </div>
       </div>
     );
   }
 
+  if (field.type === 'textarea') {
+    return (
+      <label className="flex flex-col gap-1 col-span-2 lg:col-span-1">
+        <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">{field.label}</span>
+        <textarea
+          rows={4}
+          value={value ?? ''}
+          onChange={(e) => onChange(field.key, e.target.value)}
+          className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-xs text-slate-700 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-400"
+        />
+      </label>
+    );
+  }
+
   return (
-    <div className="overflow-auto max-h-[calc(100vh-18rem)] border border-slate-300 dark:border-slate-600 rounded-lg shadow-inner">
-      <table className="border-collapse text-xs" style={{ minWidth: `${numCols * 60}px` }}>
-        <thead className="sticky top-0 z-10">{headerRowEls}</thead>
-        <tbody>{dataRowEls}</tbody>
-      </table>
+    <label className="flex flex-col gap-1">
+      <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">{field.label}</span>
+      <input
+        type={field.type === 'date' ? 'date' : 'text'}
+        value={value ?? ''}
+        onChange={(e) => onChange(field.key, e.target.value)}
+        className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-xs text-slate-700 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-400"
+      />
+    </label>
+  );
+}
+
+function EditableRelMonTable({ rows, merges, onCellChange, onAddRow, onAddColumn }) {
+  if (!rows || rows.length === 0) return null;
+
+  const safeRows = normalizeRows(rows);
+  const covered = buildCoveredSet(merges || []);
+  const spanMap = buildSpanMap(merges || []);
+  const colorMap = buildColorMap(safeRows, merges || []);
+  const numCols = safeRows[0]?.length ?? 0;
+
+  return (
+    <div className="flex-1 min-h-0 flex flex-col gap-2">
+      <div className="flex items-center gap-2 text-xs">
+        <button
+          onClick={onAddRow}
+          className="inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
+        >
+          <Plus className="w-3.5 h-3.5" /> Add Row
+        </button>
+        <button
+          onClick={onAddColumn}
+          className="inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
+        >
+          <Plus className="w-3.5 h-3.5" /> Add Column
+        </button>
+      </div>
+
+      <div className="overflow-auto max-h-[calc(100vh-25rem)] border border-slate-300 dark:border-slate-600 rounded-lg shadow-inner bg-white dark:bg-slate-900">
+        <table className="border-collapse text-xs" style={{ minWidth: `${numCols * 88}px` }}>
+          <tbody>
+            {safeRows.map((row, r) => {
+              const cells = [];
+              for (let c = 0; c < numCols; c++) {
+                const key = `${r}_${c}`;
+                if (covered.has(key)) continue;
+
+                const span = spanMap[key] ?? {};
+                const isHeader = r < HEADER_ROWS;
+                const color = colorMap[key] ?? GROUP_COLORS.Default;
+                const val = row[c];
+
+                if (isHeader) {
+                  cells.push(
+                    <th
+                      key={key}
+                      rowSpan={span.rowSpan ?? 1}
+                      colSpan={span.colSpan ?? 1}
+                      className={`border border-slate-600 min-w-[80px] px-1 py-1 align-middle ${color.bg} ${color.text}`}
+                    >
+                      <textarea
+                        rows={1}
+                        value={val ?? ''}
+                        onChange={(e) => onCellChange(r, c, e.target.value)}
+                        className="w-full resize-y bg-transparent text-center text-[10px] font-semibold leading-tight outline-none"
+                      />
+                    </th>
+                  );
+                } else {
+                  cells.push(
+                    <td
+                      key={key}
+                      rowSpan={span.rowSpan ?? 1}
+                      colSpan={span.colSpan ?? 1}
+                      className="border border-slate-200 dark:border-slate-700 min-w-[80px] px-1 py-1 bg-white dark:bg-slate-800"
+                    >
+                      <input
+                        value={val ?? ''}
+                        onChange={(e) => onCellChange(r, c, e.target.value)}
+                        className="w-full bg-transparent text-center text-xs text-slate-700 dark:text-slate-100 outline-none"
+                      />
+                    </td>
+                  );
+                }
+              }
+
+              return <tr key={`row-${r}`} className="even:bg-slate-50/50 dark:even:bg-slate-900/30">{cells}</tr>;
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
 
-// ─── Sheet Info Banner ────────────────────────────────────────────────────────
-function SheetInfoBanner({ site, sheetName, sheetData }) {
-  if (!sheetData) return null;
-  const dataRows = (sheetData.rows?.slice(HEADER_ROWS) ?? []).filter(r => r?.some(v => v !== null));
-  const { family, variant } = parseSheetFamily(sheetName);
-  return (
-    <div className="flex items-center gap-4 flex-wrap text-xs text-slate-500 dark:text-slate-400 mb-2 px-1">
-      <span className="flex items-center gap-1">
-        <TableProperties className="w-3.5 h-3.5" />
-        <span className="font-medium text-slate-700 dark:text-slate-200">{family}</span>
-        {variant && (
-          <span className="ml-1 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-medium">
-            {variant}
-          </span>
-        )}
-      </span>
-      <span>Factory: <strong>{site}</strong></span>
-      <span>Data rows: <strong>{dataRows.length}</strong></span>
-      <span>Columns: <strong>{sheetData.num_cols}</strong></span>
-    </div>
-  );
-}
-
-// ─── Main Page Component ──────────────────────────────────────────────────────
 export default function RelMon() {
-  const [sites, setSites] = useState({});          // { ATP1: [...sheetNames], ATP3: [...] }
+  const [sites, setSites] = useState({});
   const [activeSite, setActiveSite] = useState('ATP1');
   const [activeSheet, setActiveSheet] = useState(null);
-  const [sheetData, setSheetData] = useState(null);
+  const [activeTab, setActiveTab] = useState('pkg_lot');
+  const [rows, setRows] = useState([]);
+  const [merges, setMerges] = useState([]);
+  const [formData, setFormData] = useState(buildDefaultFormData());
+  const [meta, setMeta] = useState({ num_rows: 0, num_cols: 0, updated_at: null, updated_by: null });
   const [loadingSheets, setLoadingSheets] = useState(true);
   const [loadingData, setLoadingData] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
   const [expandedFamilies, setExpandedFamilies] = useState({});
+  const [reloadTick, setReloadTick] = useState(0);
+  const [showDeviceTypeModal, setShowDeviceTypeModal] = useState(false);
+  const [deviceTypeLoading, setDeviceTypeLoading] = useState(false);
+  const [deviceTypeError, setDeviceTypeError] = useState(null);
+  const [deviceTypeOrder, setDeviceTypeOrder] = useState('asc');
+  const [deviceTypeData, setDeviceTypeData] = useState(null);
   const abortRef = useRef(null);
 
-  // ── Fetch available sites / sheets ─────────────────────────────────────
   useEffect(() => {
     setLoadingSheets(true);
     setError(null);
-    api.get('/api/relmon/sheets')
-      .then(res => {
-        setSites(res.data);
-        // Auto-select first available sheet
-        const firstSite = Object.keys(res.data)[0] ?? 'ATP1';
+    api.get('/relmon/sheets')
+      .then((res) => {
+        setSites(res);
+        const firstSite = Object.keys(res)[0] ?? 'ATP1';
         setActiveSite(firstSite);
-        const firstSheet = res.data[firstSite]?.[0] ?? null;
+        const firstSheet = res[firstSite]?.[0] ?? null;
         setActiveSheet(firstSheet);
-        // Expand the first family by default
         if (firstSheet) {
           const { family } = parseSheetFamily(firstSheet);
           setExpandedFamilies({ [family]: true });
         }
       })
-      .catch(e => setError('Failed to load sheet list: ' + (e?.response?.data?.detail ?? e.message)))
+      .catch((e) => setError(`Failed to load sheet list: ${e?.message ?? 'Unknown error'}`))
       .finally(() => setLoadingSheets(false));
   }, []);
 
-  // ── Fetch sheet data whenever site/sheet changes ────────────────────────
   useEffect(() => {
     if (!activeSheet) return;
     if (abortRef.current) abortRef.current.abort();
@@ -260,20 +418,30 @@ export default function RelMon() {
     abortRef.current = ctrl;
 
     setLoadingData(true);
-    setSheetData(null);
     setError(null);
 
-    api.get('/api/relmon/data', { params: { site: activeSite, sheet: activeSheet }, signal: ctrl.signal })
-      .then(res => setSheetData(res.data))
-      .catch(e => {
+    api.get(`/relmon/data?site=${encodeURIComponent(activeSite)}&sheet=${encodeURIComponent(activeSheet)}`)
+      .then((res) => {
+        setRows(normalizeRows(res.rows ?? []));
+        setMerges(Array.isArray(res.merges) ? res.merges : []);
+        setFormData({ ...buildDefaultFormData(), ...(res.form_data ?? {}) });
+        setMeta({
+          num_rows: res.num_rows ?? 0,
+          num_cols: res.num_cols ?? 0,
+          updated_at: res.updated_at ?? null,
+          updated_by: res.updated_by ?? null,
+        });
+        setDirty(false);
+      })
+      .catch((e) => {
         if (e.name !== 'CanceledError' && e.code !== 'ERR_CANCELED') {
-          setError('Failed to load sheet data: ' + (e?.response?.data?.detail ?? e.message));
+          setError(`Failed to load sheet data: ${e?.message ?? 'Unknown error'}`);
         }
       })
       .finally(() => setLoadingData(false));
 
     return () => ctrl.abort();
-  }, [activeSite, activeSheet]);
+  }, [activeSite, activeSheet, reloadTick]);
 
   const handleSiteChange = useCallback((site) => {
     setActiveSite(site);
@@ -286,27 +454,103 @@ export default function RelMon() {
     }
   }, [sites]);
 
+  const handleFormChange = useCallback((key, value) => {
+    setFormData((prev) => ({ ...prev, [key]: value }));
+    setDirty(true);
+  }, []);
+
+  const handleCellChange = useCallback((r, c, value) => {
+    setRows((prev) => {
+      const next = normalizeRows(prev);
+      while (next.length <= r) {
+        next.push(new Array(next[0]?.length ?? c + 1).fill(null));
+      }
+
+      const currentCols = next[0]?.length ?? 0;
+      if (c >= currentCols) {
+        const targetCols = c + 1;
+        for (let i = 0; i < next.length; i++) {
+          const row = [...next[i]];
+          if (row.length < targetCols) {
+            row.push(...new Array(targetCols - row.length).fill(null));
+          }
+          next[i] = row;
+        }
+      }
+
+      next[r] = [...next[r]];
+      next[r][c] = value;
+      return next;
+    });
+    setDirty(true);
+  }, []);
+
+  const handleAddRow = useCallback(() => {
+    setRows((prev) => {
+      const normalized = normalizeRows(prev);
+      const cols = normalized[0]?.length ?? 1;
+      return [...normalized, new Array(cols).fill(null)];
+    });
+    setDirty(true);
+  }, []);
+
+  const handleAddColumn = useCallback(() => {
+    setRows((prev) => {
+      const normalized = normalizeRows(prev);
+      if (normalized.length === 0) return [[null]];
+      return normalized.map((row) => [...row, null]);
+    });
+    setDirty(true);
+  }, []);
+
+  const handleSave = useCallback(() => {
+    if (!activeSheet || saving) return;
+    setSaving(true);
+    setError(null);
+
+    api.put('/relmon/data', {
+      site: activeSite,
+      sheet: activeSheet,
+      rows,
+      merges,
+      form_data: formData,
+    })
+      .then((res) => {
+        setMeta((prev) => ({
+          ...prev,
+          updated_at: res.updated_at ?? prev.updated_at,
+          updated_by: res.updated_by ?? prev.updated_by,
+          num_rows: res.num_rows ?? rows.length,
+          num_cols: res.num_cols ?? (rows[0]?.length ?? 0),
+        }));
+        setDirty(false);
+      })
+      .catch((e) => {
+        setError(`Failed to save RELMON data: ${e?.message ?? 'Unknown error'}`);
+      })
+      .finally(() => setSaving(false));
+  }, [activeSheet, activeSite, formData, merges, rows, saving]);
+
   const currentSheets = sites[activeSite] ?? [];
   const filteredSheets = search
-    ? currentSheets.filter(s => s.toLowerCase().includes(search.toLowerCase()))
+    ? currentSheets.filter((s) => s.toLowerCase().includes(search.toLowerCase()))
     : currentSheets;
-
   const grouped = groupSheets(filteredSheets);
   const families = Object.keys(grouped).sort();
 
-  const toggleFamily = (fam) =>
-    setExpandedFamilies(prev => ({ ...prev, [fam]: !prev[fam] }));
+  const toggleFamily = (fam) => {
+    setExpandedFamilies((prev) => ({ ...prev, [fam]: !prev[fam] }));
+  };
 
-  // Export visible sheet as CSV
   const handleExportCSV = () => {
-    if (!sheetData?.rows) return;
-    const csvRows = sheetData.rows
-      .filter(r => r?.some(v => v !== null))
-      .map(r => r.map(v => {
-        if (v === null) return '';
+    if (!rows?.length) return;
+    const csvRows = rows
+      .map((r) => r.map((v) => {
+        if (v === null || v === undefined) return '';
         const s = String(v).replace(/\n/g, ' ');
         return s.includes(',') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
       }).join(','));
+
     const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -316,40 +560,49 @@ export default function RelMon() {
     URL.revokeObjectURL(url);
   };
 
+  const loadDeviceTypes = useCallback((order = 'asc') => {
+    setDeviceTypeLoading(true);
+    setDeviceTypeError(null);
+    api.get(`/relmon/device-types?site=${encodeURIComponent(activeSite)}&order=${encodeURIComponent(order)}`)
+      .then((res) => {
+        setDeviceTypeData(res);
+        setDeviceTypeOrder(order);
+      })
+      .catch((e) => {
+        setDeviceTypeError(`Failed to load device types: ${e?.message ?? 'Unknown error'}`);
+      })
+      .finally(() => setDeviceTypeLoading(false));
+  }, [activeSite]);
+
+  const openDeviceTypeModal = useCallback(() => {
+    setShowDeviceTypeModal(true);
+    loadDeviceTypes(deviceTypeOrder);
+  }, [deviceTypeOrder, loadDeviceTypes]);
+
+  const closeDeviceTypeModal = useCallback(() => {
+    setShowDeviceTypeModal(false);
+  }, []);
+
+  const handleSelectSheetFromModal = useCallback((sheetName, familyName) => {
+    setSearch('');
+    setExpandedFamilies({ [familyName]: true });
+    setActiveSheet(sheetName);
+    setShowDeviceTypeModal(false);
+  }, []);
+
+  const { family, variant } = parseSheetFamily(activeSheet || '');
+  const activeTabFields = RELMON_FORM_SCHEMA[activeTab] ?? [];
+  const siteDeviceTypeInfo = deviceTypeData?.sites?.[activeSite];
+
   return (
     <div className="flex flex-col h-full min-h-0 bg-slate-50 dark:bg-slate-900">
-
-      {/* ── Masthead (replicates "ATP RELIABILITY MONITOR DATABASE" header) ── */}
       <div
         className="flex-shrink-0 relative overflow-hidden"
         style={{
           background: 'linear-gradient(135deg, #1d4ed8 0%, #2563eb 30%, #38bdf8 70%, #7dd3fc 100%)',
-          minHeight: '72px',
+          minHeight: '76px',
         }}
       >
-        {/* Cloud decoration */}
-        <div className="absolute inset-0 pointer-events-none select-none">
-          {[
-            { top: '10%', left: '5%',  w: 120, h: 40, op: 0.12 },
-            { top: '30%', left: '18%', w: 90,  h: 30, op: 0.10 },
-            { top: '15%', left: '55%', w: 140, h: 45, op: 0.10 },
-            { top: '40%', left: '70%', w: 100, h: 35, op: 0.12 },
-            { top: '5%',  left: '80%', w: 80,  h: 28, op: 0.08 },
-          ].map((c, i) => (
-            <div
-              key={i}
-              style={{
-                position: 'absolute', top: c.top, left: c.left,
-                width: c.w, height: c.h,
-                background: 'white',
-                borderRadius: '50%',
-                opacity: c.op,
-                filter: 'blur(8px)',
-              }}
-            />
-          ))}
-        </div>
-
         <div className="relative z-10 flex items-center justify-between px-6 h-full py-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center border border-white/30">
@@ -360,14 +613,13 @@ export default function RelMon() {
                 ATP Reliability Monitor Database
               </h1>
               <p className="text-sky-100 text-xs font-medium mt-0.5">
-                Q4 2025 Summary Report &nbsp;·&nbsp; {activeSite}
+                Editable Mode · {activeSite}{activeSheet ? ` · ${activeSheet}` : ''}
               </p>
             </div>
           </div>
 
-          {/* Site selector */}
           <div className="flex items-center gap-2">
-            {Object.keys(sites).map(site => (
+            {Object.keys(sites).map((site) => (
               <button
                 key={site}
                 onClick={() => handleSiteChange(site)}
@@ -384,20 +636,16 @@ export default function RelMon() {
         </div>
       </div>
 
-      {/* ── Body: sidebar + main content ─────────────────────────────────── */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
-
-        {/* ── Left Sidebar: Package Type Navigator ────────────────────── */}
         <aside className="w-56 flex-shrink-0 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col">
-          {/* Search */}
           <div className="p-2 border-b border-slate-200 dark:border-slate-700">
             <div className="relative">
               <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
               <input
                 type="text"
                 value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Search package…"
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search package..."
                 className="w-full pl-7 pr-6 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/50 text-xs text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
               />
               {search && (
@@ -406,6 +654,14 @@ export default function RelMon() {
                 </button>
               )}
             </div>
+
+            <button
+              onClick={openDeviceTypeModal}
+              className="w-full mt-2 inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-blue-300 dark:border-blue-500/50 bg-blue-50 dark:bg-blue-900/20 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/35 transition-colors"
+            >
+              <List className="w-3.5 h-3.5" />
+              View All Device Type
+            </button>
           </div>
 
           {loadingSheets ? (
@@ -416,13 +672,12 @@ export default function RelMon() {
             <nav className="flex-1 overflow-y-auto py-1">
               {families.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center mt-4">No packages found</p>
-              ) : families.map(fam => {
+              ) : families.map((fam) => {
                 const sheets = grouped[fam] ?? [];
                 const isExpanded = expandedFamilies[fam] ?? false;
                 const hasActive = sheets.includes(activeSheet);
                 return (
                   <div key={fam}>
-                    {/* Family header */}
                     <button
                       onClick={() => toggleFamily(fam)}
                       className={`w-full flex items-center justify-between px-3 py-1.5 text-left text-xs font-semibold transition-colors ${
@@ -437,9 +692,8 @@ export default function RelMon() {
                         : <ChevronRight className="w-3.5 h-3.5 flex-shrink-0" />}
                     </button>
 
-                    {/* Variant items */}
-                    {isExpanded && sheets.map(s => {
-                      const { variant } = parseSheetFamily(s);
+                    {isExpanded && sheets.map((s) => {
+                      const parsed = parseSheetFamily(s);
                       const isActive = s === activeSheet;
                       return (
                         <button
@@ -452,7 +706,7 @@ export default function RelMon() {
                           }`}
                         >
                           <span className="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0 opacity-60" />
-                          <span className="truncate">{variant || s}</span>
+                          <span className="truncate">{parsed.variant || s}</span>
                         </button>
                       );
                     })}
@@ -462,24 +716,23 @@ export default function RelMon() {
             </nav>
           )}
 
-          {/* Footer stats */}
           <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-700 text-[10px] text-slate-400 dark:text-slate-500">
             {currentSheets.length} sheets available
           </div>
         </aside>
 
-        {/* ── Main Content ────────────────────────────────────────────── */}
         <main className="flex-1 min-w-0 flex flex-col p-4 gap-3 overflow-hidden">
-
-          {/* Toolbar */}
           <div className="flex items-center justify-between flex-wrap gap-2 flex-shrink-0">
             <div>
               {activeSheet ? (
                 <div>
                   <h2 className="text-base font-bold text-slate-800 dark:text-white leading-tight">
-                    {activeSheet}
+                    {family}{variant ? ` (${variant})` : ''}
                   </h2>
-                  <SheetInfoBanner site={activeSite} sheetName={activeSheet} sheetData={sheetData} />
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Rows: {rows.length} · Columns: {rows[0]?.length ?? 0}
+                    {meta.updated_at ? ` · Last save: ${new Date(meta.updated_at).toLocaleString()}${meta.updated_by ? ` by ${meta.updated_by}` : ''}` : ''}
+                  </p>
                 </div>
               ) : (
                 <p className="text-sm text-slate-500 dark:text-slate-400">Select a package type from the sidebar</p>
@@ -487,34 +740,38 @@ export default function RelMon() {
             </div>
 
             <div className="flex items-center gap-2">
-              {sheetData && (
-                <button
-                  onClick={handleExportCSV}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Export CSV
-                </button>
-              )}
-              {activeSheet && (
-                <button
-                  onClick={() => {
-                    const k = `${activeSite}__${activeSheet}`;
-                    delete (window.__relmon_cache ?? {})[k];
-                    setSheetData(null);
-                    // re-trigger effect via dummy state
-                    setActiveSheet(s => s);
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  Refresh
-                </button>
-              )}
+              <button
+                onClick={handleExportCSV}
+                disabled={!rows.length || loadingData}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Export CSV
+              </button>
+
+              <button
+                onClick={() => setReloadTick((v) => v + 1)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Reload
+              </button>
+
+              <button
+                onClick={handleSave}
+                disabled={!activeSheet || loadingData || saving}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
+                  dirty
+                    ? 'bg-blue-600 border-blue-600 text-white hover:bg-blue-700'
+                    : 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700'
+                } disabled:opacity-50`}
+              >
+                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                {saving ? 'Saving...' : dirty ? 'Save Changes' : 'Saved'}
+              </button>
             </div>
           </div>
 
-          {/* Error */}
           {error && (
             <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg text-sm text-red-700 dark:text-red-300 flex-shrink-0">
               <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
@@ -522,48 +779,159 @@ export default function RelMon() {
             </div>
           )}
 
-          {/* Loading spinner */}
           {loadingData && (
             <div className="flex-1 flex flex-col items-center justify-center gap-3 text-slate-400">
               <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-              <p className="text-sm">Loading {activeSheet}…</p>
+              <p className="text-sm">Loading editable RELMON data...</p>
             </div>
           )}
 
-          {/* Empty state */}
-          {!loadingData && !sheetData && !error && !loadingSheets && (
+          {!loadingData && activeSheet && (
+            <>
+              <section className="flex-shrink-0 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
+                  {RELMON_FORM_SCHEMA.common.map((field) => (
+                    <RelMonFormField
+                      key={field.key}
+                      field={field}
+                      value={formData[field.key]}
+                      onChange={handleFormChange}
+                    />
+                  ))}
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {RELMON_TABS.map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveTab(tab.id)}
+                      className={`px-2.5 py-1 rounded text-xs border transition-colors ${
+                        activeTab === tab.id
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-slate-100 dark:bg-slate-700/70 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {activeTabFields.map((field) => (
+                    <RelMonFormField
+                      key={field.key}
+                      field={field}
+                      value={formData[field.key]}
+                      onChange={handleFormChange}
+                    />
+                  ))}
+                </div>
+              </section>
+
+              <EditableRelMonTable
+                rows={rows}
+                merges={merges}
+                onCellChange={handleCellChange}
+                onAddRow={handleAddRow}
+                onAddColumn={handleAddColumn}
+              />
+            </>
+          )}
+
+          {!loadingData && !activeSheet && !error && !loadingSheets && (
             <div className="flex-1 flex flex-col items-center justify-center gap-3 text-slate-400 dark:text-slate-500">
               <Database className="w-12 h-12 opacity-30" />
-              <p className="text-sm">Select a package type from the sidebar to view data</p>
-            </div>
-          )}
-
-          {/* Data Table */}
-          {!loadingData && sheetData && (
-            <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-              {/* Column group legend */}
-              <div className="flex flex-wrap gap-1.5 mb-2 flex-shrink-0">
-                {[
-                  { label: 'Package',               ...GROUP_COLORS.Package },
-                  { label: 'Factory',                ...GROUP_COLORS.Factory },
-                  { label: 'Materials',              ...GROUP_COLORS.Materials },
-                  { label: 'Preconditioning',        ...GROUP_COLORS.Precond },
-                  { label: 'Delamination (Before)',  ...GROUP_COLORS.DelamBefore },
-                  { label: 'Delamination (After)',   ...GROUP_COLORS.DelamAfter },
-                  { label: 'MRT Results',            ...GROUP_COLORS.MRT },
-                  { label: 'Reliability Results',    ...GROUP_COLORS.Reliability },
-                ].map(g => (
-                  <span key={g.label} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold ${g.bg} ${g.text}`}>
-                    {g.label}
-                  </span>
-                ))}
-              </div>
-
-              <RelMonTable sheetData={sheetData} />
+              <p className="text-sm">Select a package type from the sidebar to start editing RELMON</p>
             </div>
           )}
         </main>
       </div>
+
+      {showDeviceTypeModal && (
+        <div className="fixed inset-0 z-40 bg-slate-900/55 backdrop-blur-[1px] flex items-center justify-center p-4">
+          <div className="w-full max-w-3xl rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-2xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">All Device Type · {activeSite}</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {siteDeviceTypeInfo?.source === 'workbook' ? 'Source: Workbook' : siteDeviceTypeInfo?.source ? 'Source: Saved data' : 'Load device types for this site'}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => loadDeviceTypes('asc')}
+                  className={`px-2 py-1 rounded text-xs border ${deviceTypeOrder === 'asc'
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-600'}`}
+                >
+                  Sort A-Z
+                </button>
+                <button
+                  onClick={() => loadDeviceTypes('desc')}
+                  className={`px-2 py-1 rounded text-xs border ${deviceTypeOrder === 'desc'
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-600'}`}
+                >
+                  Sort Z-A
+                </button>
+                <button
+                  onClick={closeDeviceTypeModal}
+                  className="p-1.5 rounded border border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                  aria-label="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 max-h-[70vh] overflow-y-auto">
+              {deviceTypeLoading && (
+                <div className="flex items-center justify-center py-10 text-slate-500 dark:text-slate-400">
+                  <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                  Loading device types...
+                </div>
+              )}
+
+              {!deviceTypeLoading && deviceTypeError && (
+                <div className="rounded-lg border border-red-200 dark:border-red-700 bg-red-50 dark:bg-red-900/20 text-sm text-red-700 dark:text-red-300 px-3 py-2">
+                  {deviceTypeError}
+                </div>
+              )}
+
+              {!deviceTypeLoading && !deviceTypeError && !siteDeviceTypeInfo && (
+                <p className="text-sm text-slate-500 dark:text-slate-400">No device type data found for this site.</p>
+              )}
+
+              {!deviceTypeLoading && !deviceTypeError && siteDeviceTypeInfo && (
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {siteDeviceTypeInfo.count} device types available
+                  </p>
+
+                  {(siteDeviceTypeInfo.grouped_sheets || []).map((group) => (
+                    <div key={group.device_type} className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/30 p-3">
+                      <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-2">{group.device_type}</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(group.sheets || []).map((sheet) => (
+                          <button
+                            key={sheet}
+                            onClick={() => handleSelectSheetFromModal(sheet, group.device_type)}
+                            className="px-2 py-1 rounded-md text-xs border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:border-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
+                            title={`Open ${sheet}`}
+                          >
+                            {sheet}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
