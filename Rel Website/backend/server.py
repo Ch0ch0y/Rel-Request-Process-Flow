@@ -7539,6 +7539,101 @@ async def get_daily_performance(
 
 
 # ========================
+# RELMON – Reliability Monitor Summary
+# ========================
+
+# Paths to the quarterly Rel Monitor Excel files (root of project, beside backend/)
+_RELMON_FILES: dict[str, Path] = {
+    "ATP1": ROOT_DIR.parent / "ATP1 Q4'2025 Rel Monitor Summary 011326.xlsx",
+    "ATP3": ROOT_DIR.parent / "ATP3 Q4'2025 Rel Monitor Summary 011326.xlsx",
+}
+
+# Simple in-memory cache so repeated requests don't re-read the file
+_relmon_cache: dict[tuple[str, str], dict] = {}
+
+
+def _parse_relmon_sheet(site: str, sheet_name: str) -> dict:
+    """Parse a single sheet from the RELMON Excel file and return structured data."""
+    cache_key = (site, sheet_name)
+    if cache_key in _relmon_cache:
+        return _relmon_cache[cache_key]
+
+    path = _RELMON_FILES.get(site)
+    if path is None or not path.exists():
+        raise FileNotFoundError(f"RELMON file for site '{site}' not found")
+
+    wb = load_workbook(str(path), data_only=True)
+    if sheet_name not in wb.sheetnames:
+        wb.close()
+        raise ValueError(f"Sheet '{sheet_name}' not found in {site}")
+
+    ws = wb[sheet_name]
+
+    # Collect raw cell values (None stays None, everything else becomes str or number)
+    rows: list[list] = []
+    for row in ws.iter_rows(values_only=True):
+        rows.append([
+            (v if isinstance(v, (int, float)) else (str(v) if v is not None else None))
+            for v in row
+        ])
+
+    # Collect merged-cell regions so the frontend can render colspan/rowspan
+    merges: list[dict] = []
+    for rng in ws.merged_cells.ranges:
+        merges.append({
+            "min_row": rng.min_row - 1,  # convert to 0-based
+            "max_row": rng.max_row - 1,
+            "min_col": rng.min_col - 1,
+            "max_col": rng.max_col - 1,
+        })
+
+    wb.close()
+
+    result = {
+        "site": site,
+        "sheet": sheet_name,
+        "num_rows": len(rows),
+        "num_cols": ws.max_column,
+        "rows": rows,
+        "merges": merges,
+    }
+    _relmon_cache[cache_key] = result
+    return result
+
+
+@api_router.get("/relmon/sheets")
+async def get_relmon_sheets():
+    """Return the available sites and their sheet names."""
+    out: dict[str, list[str]] = {}
+    for site, path in _RELMON_FILES.items():
+        if path.exists():
+            try:
+                wb = load_workbook(str(path), data_only=True, read_only=True)
+                out[site] = list(wb.sheetnames)
+                wb.close()
+            except Exception:
+                out[site] = []
+        else:
+            out[site] = []
+    return out
+
+
+@api_router.get("/relmon/data")
+async def get_relmon_data(site: str, sheet: str):
+    """Return header rows, merge info, and data rows for a specific RELMON sheet."""
+    if site not in _RELMON_FILES:
+        raise HTTPException(status_code=404, detail=f"Site '{site}' not found")
+    try:
+        return _parse_relmon_sheet(site, sheet)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read sheet: {e}")
+
+
+# ========================
 # App Setup
 # ========================
 app.include_router(api_router)

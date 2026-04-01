@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import {
   LayoutDashboard, ClipboardList, Settings, Users, LogOut, X, CheckCircle2, FileText, Archive, ListFilter, MonitorDot,
-  Sun, Moon, ShieldCheck, ChevronRight, Layers, Microscope, ExternalLink, PackageOpen, BarChart3
+  Sun, Moon, ShieldCheck, ChevronRight, Layers, Microscope, ExternalLink, PackageOpen, BarChart3, Database
 } from 'lucide-react';
 import AmkorLogo from '../assets/amkor-logo.svg';
 
@@ -20,6 +20,7 @@ const allNavItems = [
   { to: '/approval', icon: ShieldCheck, label: 'Approval Queue', guestAllowed: false, roles: ['Admin', 'Planner'] },
   { to: '/loading-unloading', icon: PackageOpen, label: 'Loading / Unloading', guestAllowed: true, roles: ['Technician', 'Admin', 'Reliability Engineer', 'Planner'] },
   { to: '/performance', icon: BarChart3, label: 'Performance Monitor', guestAllowed: false, roles: ['Admin', 'Reliability Engineer', 'Planner'] },
+  { to: '/relmon', icon: Database, label: 'RELMON', guestAllowed: false, roles: ['Admin', 'Reliability Engineer', 'Planner'] },
   {
     to: '/_record-monitor', icon: Layers, label: 'Record Monitor', guestAllowed: false, noNav: true,
     subItems: [

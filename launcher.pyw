@@ -17,9 +17,65 @@ from tkinter import scrolledtext
 import subprocess
 import threading
 import os
+import shutil
 import time
 import socket
 import webbrowser
+
+# ── Node.js / npm resolver ────────────────────────────────────────────────────
+def _find_node_dir() -> str | None:
+    """
+    Return the directory that contains npm.cmd / node.exe so it can be
+    prepended to PATH before spawning frontend subprocesses.
+
+    Search order:
+      1. shutil.which  (already on PATH — fastest, covers most machines)
+      2. Common Windows install locations (Program Files, nvm, scoop, etc.)
+      3. APPDATA\\npm   (global npm symlinks)
+    """
+    # 1 — already on PATH?
+    npm_in_path = shutil.which("npm") or shutil.which("npm.cmd")
+    if npm_in_path:
+        return os.path.dirname(npm_in_path)
+
+    # 2 — common fixed install paths
+    candidates = [
+        r"C:\Program Files\nodejs",
+        r"C:\Program Files (x86)\nodejs",
+        os.path.expandvars(r"%ProgramFiles%\nodejs"),
+        os.path.expandvars(r"%ProgramFiles(x86)%\nodejs"),
+        # nvm-windows default slot
+        os.path.expandvars(r"%APPDATA%\nvm"),
+        # Scoop
+        os.path.expandvars(r"%USERPROFILE%\scoop\apps\nodejs\current"),
+        os.path.expandvars(r"%USERPROFILE%\scoop\apps\nodejs-lts\current"),
+        # Chocolatey
+        r"C:\ProgramData\chocolatey\bin",
+        # winget
+        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Packages\OpenJS.NodeJS"),
+    ]
+    for d in candidates:
+        if d and os.path.isfile(os.path.join(d, "npm.cmd")):
+            return d
+
+    # 3 — %APPDATA%\npm houses npm.cmd on some setups
+    appdata_npm = os.path.expandvars(r"%APPDATA%\npm")
+    if os.path.isfile(os.path.join(appdata_npm, "npm.cmd")):
+        return appdata_npm
+
+    return None  # cannot find Node.js
+
+
+def _npm_env() -> dict:
+    """Return an env dict with Node.js directory prepended to PATH (if found)."""
+    env = os.environ.copy()
+    node_dir = _find_node_dir()
+    if node_dir:
+        env["PATH"] = node_dir + os.pathsep + env.get("PATH", "")
+    return env
+
+
+NODE_DIR = _find_node_dir()   # resolved once at startup
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 ROOT         = os.path.dirname(os.path.abspath(__file__))
@@ -140,6 +196,12 @@ class LauncherApp(tk.Tk):
         self._lan_ip    = _get_lan_ip()
 
         self._build_ui()
+        if NODE_DIR:
+            self.after(0, self._log, f"[Launcher] Node.js path resolved: {NODE_DIR}")
+        else:
+            self.after(0, self._log,
+                       "[Launcher] WARNING: Node.js/npm path not found. "
+                       "Frontend deploy/dev will fail until Node.js is installed or added to PATH.")
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._poll_status()
 
@@ -312,8 +374,21 @@ class LauncherApp(tk.Tk):
         be_id = site["backend_id"]
         be_svc = next(s for s in SERVICES if s["id"] == be_id)
         fe_cwd = site["frontend_cwd"]()
+        dist_index = os.path.join(fe_cwd, "dist", "index.html")
 
         try:
+            can_build_frontend = bool(NODE_DIR)
+            if not can_build_frontend:
+                if os.path.exists(dist_index):
+                    self.after(0, self._log,
+                               f"[Deploy {label}] npm not found; using existing frontend dist build.")
+                else:
+                    self.after(0, self._log,
+                               f"[Deploy {label}] npm not found and no dist build exists.")
+                    self.after(0, self._log,
+                               f"[Deploy {label}] Install Node.js LTS, then deploy again.")
+                    return
+
             # 1 — stop dev frontend
             fe_proc = self.processes.get(fe_id)
             if fe_proc and fe_proc.poll() is None:
@@ -325,37 +400,42 @@ class LauncherApp(tk.Tk):
                     fe_proc.kill()
                 self.processes.pop(fe_id, None)
 
-            # 2 — install node deps if missing
-            if not os.path.exists(os.path.join(fe_cwd, "node_modules")):
-                self.after(0, self._log, f"[Deploy {label}] Installing frontend deps (npm install)…")
-                r = subprocess.run(
-                    "npm install", cwd=fe_cwd, shell=True,
+            if can_build_frontend:
+                # 2 — install node deps if missing
+                if not os.path.exists(os.path.join(fe_cwd, "node_modules")):
+                    self.after(0, self._log, f"[Deploy {label}] Installing frontend deps (npm install)…")
+                    r = subprocess.run(
+                        "npm install", cwd=fe_cwd, shell=True,
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                        env=_npm_env(),
+                    )
+                    if r.returncode != 0:
+                        self.after(0, self._log,
+                                   f"[Deploy {label}] npm install FAILED:\n"
+                                   + r.stdout.decode("utf-8", errors="replace"))
+                        return
+
+                # 3 — build frontend
+                self.after(0, self._log, f"[Deploy {label}] Building frontend (npm run build)…")
+                build_proc = subprocess.Popen(
+                    "npm run build", cwd=fe_cwd, shell=True,
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     creationflags=subprocess.CREATE_NO_WINDOW,
+                    env=_npm_env(),
                 )
-                if r.returncode != 0:
+                for raw in build_proc.stdout:
+                    line = raw.decode("utf-8", errors="replace").rstrip()
+                    if line:
+                        self.after(0, self._log, f"[Deploy {label}]   {line}")
+                build_proc.wait()
+                if build_proc.returncode != 0:
                     self.after(0, self._log,
-                               f"[Deploy {label}] npm install FAILED:\n"
-                               + r.stdout.decode("utf-8", errors="replace"))
+                               f"[Deploy {label}] BUILD FAILED (exit {build_proc.returncode})")
+                    self.after(0, self._log,
+                               f"[Deploy {label}] npm PATH used: {NODE_DIR if NODE_DIR else 'NOT FOUND'}")
                     return
-
-            # 3 — build frontend
-            self.after(0, self._log, f"[Deploy {label}] Building frontend (npm run build)…")
-            build_proc = subprocess.Popen(
-                "npm run build", cwd=fe_cwd, shell=True,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-            for raw in build_proc.stdout:
-                line = raw.decode("utf-8", errors="replace").rstrip()
-                if line:
-                    self.after(0, self._log, f"[Deploy {label}]   {line}")
-            build_proc.wait()
-            if build_proc.returncode != 0:
-                self.after(0, self._log,
-                           f"[Deploy {label}] BUILD FAILED (exit {build_proc.returncode})")
-                return
-            self.after(0, self._log, f"[Deploy {label}] Frontend build complete ✓")
+                self.after(0, self._log, f"[Deploy {label}] Frontend build complete ✓")
 
             # 4 — stop existing backend
             be_proc = self.processes.get(be_id)
@@ -422,8 +502,14 @@ class LauncherApp(tk.Tk):
             threading.Thread(target=self._setup_ca_venv, daemon=True).start()
             return
 
+        if svc.get("shell") and not NODE_DIR:
+            self._log(f"[{svc['label']}] npm not found. Install Node.js LTS and reopen launcher.")
+            return
+
         self._log(f"[{svc['label']}] Starting…")
         try:
+            # Frontend dev services use npm — ensure Node.js is on PATH
+            extra_env = _npm_env() if svc.get("shell") else None
             proc = subprocess.Popen(
                 svc["cmd"](),
                 cwd=svc["cwd"](),
@@ -431,6 +517,7 @@ class LauncherApp(tk.Tk):
                 stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW,
                 shell=svc.get("shell", False),
+                env=extra_env,
             )
             self.processes[svc_id] = proc
             threading.Thread(

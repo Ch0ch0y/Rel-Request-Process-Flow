@@ -20,6 +20,7 @@ import RetentionMonitor from './pages/RetentionMonitor';
 import ApprovalPage from './pages/ApprovalPage';
 import LoadingUnloading from './pages/LoadingUnloading';
 import PerformanceMonitor from './pages/PerformanceMonitor';
+import RelMon from './pages/RelMon';
 import UserGuide, { hasUserDismissedGuide } from './components/UserGuide';
 
 const GUEST_ALLOWED_PATHS = ['/', '/completed'];
@@ -189,6 +190,7 @@ function AppRoutes() {
             <Route path="approval" element={<ProtectedRoute><ApprovalPage /></ProtectedRoute>} />
             <Route path="loading-unloading" element={<ProtectedRoute guestAllowed><LoadingUnloading /></ProtectedRoute>} />
             <Route path="performance" element={<ProtectedRoute><PerformanceMonitor /></ProtectedRoute>} />
+            <Route path="relmon" element={<ProtectedRoute><RelMon /></ProtectedRoute>} />
           </Route>
         </Routes>
       </RouteTransition>
