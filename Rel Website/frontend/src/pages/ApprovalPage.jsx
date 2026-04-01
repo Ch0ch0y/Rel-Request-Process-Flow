@@ -63,6 +63,7 @@ export default function ApprovalPage() {
   const [masterlist, setMasterlist] = useState([]);
   const [mlLoading, setMlLoading] = useState(true);
   const [mlError, setMlError] = useState('');
+  const [testItems, setTestItems] = useState([]);
 
   // Inline cell editing state
   const [editingCell, setEditingCell] = useState({ rowId: null, colKey: null, value: '', original: '' });
@@ -87,7 +88,11 @@ export default function ApprovalPage() {
       .finally(() => setMlLoading(false));
   };
 
-  useEffect(() => { load(); loadMasterlist(); }, []);
+  useEffect(() => {
+    load();
+    loadMasterlist();
+    api.get('/test-items').then(data => { if (Array.isArray(data)) setTestItems(data); }).catch(() => {});
+  }, []);
 
   const handleAction = async (id, action) => {
     setActionLoading(prev => ({ ...prev, [id]: action }));
@@ -343,6 +348,27 @@ export default function ApprovalPage() {
                                 onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); cancelCellEdit(); } }}
                                 className="w-full px-2 py-1 border-none outline-none bg-transparent text-[11px] text-slate-900 dark:text-white resize-none min-w-[150px]"
                               />
+                            ) : col.key === 'test_level' ? (
+                              <>
+                                <datalist id="ml-test-level-list">
+                                  {testItems.map(item => <option key={item} value={item} />)}
+                                </datalist>
+                                <input
+                                  autoFocus
+                                  type="search"
+                                  list="ml-test-level-list"
+                                  autoComplete="off"
+                                  placeholder="Type to search…"
+                                  value={editingCell.value}
+                                  onChange={e => setEditingCell(prev => ({ ...prev, value: e.target.value }))}
+                                  onBlur={() => commitCell(row.id, col.key, editingCell.value, editingCell.original)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
+                                    if (e.key === 'Escape') { e.preventDefault(); cancelCellEdit(); }
+                                  }}
+                                  className="w-full px-2 py-1 border-none outline-none bg-transparent text-[11px] text-slate-900 dark:text-white min-w-[160px]"
+                                />
+                              </>
                             ) : (
                               <input
                                 autoFocus

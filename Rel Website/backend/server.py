@@ -67,7 +67,7 @@ class _XlrdSheet:
         self._dm = datemode
 
     def _cell_value(self, row, col):
-        try:  
+        try:    
             if row >= self._s.nrows or col >= self._s.ncols:
                 return None
             cell = self._s.cell(row, col)
@@ -7548,6 +7548,43 @@ async def get_daily_performance(
         return result
     finally:
         await db.close()
+
+
+# ========================
+# Test Items – Test Level autocomplete list
+# ========================
+
+_TEST_ITEMS_FILE = ROOT_DIR.parent / "Test Items.xlsx"
+_test_items_cache: list[str] = []
+
+def _load_test_items() -> list[str]:
+    global _test_items_cache
+    if _test_items_cache:
+        return _test_items_cache
+    if not _TEST_ITEMS_FILE.exists():
+        return []
+    try:
+        wb = load_workbook(str(_TEST_ITEMS_FILE), data_only=True, read_only=True)
+        ws = wb.active
+        seen: set[str] = set()
+        result: list[str] = []
+        for row in ws.iter_rows(values_only=True):
+            v = row[0] if row else None
+            if v is not None:
+                s = str(v).strip()
+                if s and s.upper() != "TEST LEVEL" and s not in seen:
+                    seen.add(s)
+                    result.append(s)
+        wb.close()
+        _test_items_cache = result
+        return result
+    except Exception:
+        return []
+
+@api_router.get("/test-items")
+async def get_test_items():
+    """Return the list of valid Test Level values from Test Items.xlsx."""
+    return _load_test_items()
 
 
 # ========================
