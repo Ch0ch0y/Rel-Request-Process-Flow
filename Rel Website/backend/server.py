@@ -7064,7 +7064,8 @@ def _ml_compute_lc_bc(ball_pitch, ball_count, lead_pitch, lead_count) -> str:
 
 @api_router.get("/masterlist/requests")
 async def get_masterlist_requests(current_user: User = Depends(get_current_user)):
-    """Return all requests formatted as masterlist rows for the planning monitor."""
+    """Return all requests formatted as masterlist rows for the planning monitor.
+    Test Level is auto-computed from stress-test step conditions when not manually set."""
     db = await get_db()
     try:
         cursor = await db.execute(
@@ -7072,40 +7073,58 @@ async def get_masterlist_requests(current_user: User = Depends(get_current_user)
             "r.date_ltc, r.created_at, r.purpose, r.total_ss, "
             "r.planner_est_start, r.planner_est_end, r.planner_note, "
             "r.ww, r.lc_bc, r.ml_qty, r.num_days, r.num_legs, r.recommit, r.status, "
-            "(SELECT ps.step_name FROM process_steps ps "
-            " WHERE ps.request_id = r.id AND ps.leg = 1 AND ps.step_number = r.current_step "
-            " LIMIT 1) as current_step_name, "
             "r.approved_at, r.ball_pitch, r.ball_count, r.lead_pitch, r.lead_count, r.test_level "
             "FROM requests r ORDER BY r.created_at DESC"
         )
         rows = await cursor.fetchall()
+
+        # Batch-load all stress-test step conditions for all requests in one query
+        steps_cursor = await db.execute(
+            "SELECT request_id, step_name, custom_fields "
+            "FROM process_steps ORDER BY request_id, leg, step_number"
+        )
+        all_steps = await steps_cursor.fetchall()
+
+        # Group steps by request_id
+        from collections import defaultdict
+        req_steps: dict = defaultdict(list)
+        for s in all_steps:
+            req_steps[s[0]].append((s[1], s[2]))  # (step_name, custom_fields_json)
+
         result = []
         for r in rows:
-            # r[20]=current_step_name  r[21]=approved_at  r[22]=ball_pitch
-            # r[23]=ball_count  r[24]=lead_pitch  r[25]=lead_count  r[26]=test_level
-            approved_at = r[21] or ""
-            # Resolved date used for display (date_received column)
+            # r[0]=id  r[1]=request_number  r[2]=classification  r[3]=customer
+            # r[4]=pkg_info  r[5]=lot_no  r[6]=date_ltc  r[7]=created_at
+            # r[8]=purpose  r[9]=total_ss  r[10]=planner_est_start  r[11]=planner_est_end
+            # r[12]=planner_note  r[13]=ww  r[14]=lc_bc  r[15]=ml_qty  r[16]=num_days
+            # r[17]=num_legs  r[18]=recommit  r[19]=status  r[20]=approved_at
+            # r[21]=ball_pitch  r[22]=ball_count  r[23]=lead_pitch  r[24]=lead_count
+            # r[25]=test_level
+            approved_at = r[20] or ""
             date_received = approved_at or r[6] or r[7] or ""
 
-            # WW: use stored value; if empty, auto-derive from available dates
-            # Try approved_at → date_ltc → created_at, using first that parses
+            # WW: stored → auto-derived from dates
             stored_ww = r[13] or ""
             if stored_ww:
                 ww = stored_ww
             else:
                 ww = ""
-                for _d in filter(None, [r[21], r[6], r[7]]):
+                for _d in filter(None, [r[20], r[6], r[7]]):
                     _w = _ml_compute_ww(str(_d))
                     if _w:
                         ww = _w
                         break
 
-            # L/C B/C: use stored value; if empty, auto-derive from ball/lead fields
+            # L/C B/C: stored → auto-derived from ball/lead fields
             stored_lc_bc = r[14] or ""
-            lc_bc = stored_lc_bc if stored_lc_bc else _ml_compute_lc_bc(r[22], r[23], r[24], r[25])
+            lc_bc = stored_lc_bc if stored_lc_bc else _ml_compute_lc_bc(r[21], r[22], r[23], r[24])
 
-            # Test Level: use stored value; if empty, fall back to current step name
-            test_level = r[26] or r[20] or ""
+            # Test Level: stored → auto-computed from stress-test steps (never falls back to step name)
+            stored_test_level = r[25] or ""
+            if stored_test_level:
+                test_level = stored_test_level
+            else:
+                test_level = _compute_test_level_from_steps(req_steps.get(r[0], []))
 
             result.append({
                 "id": r[0],
@@ -7585,6 +7604,178 @@ def _load_test_items() -> list[str]:
 async def get_test_items():
     """Return the list of valid Test Level values from Test Items.xlsx."""
     return _load_test_items()
+
+
+def _match_test_condition(condition: str, test_items: list) -> str:
+    """Map a raw test_condition / test_item string to the best match in Test Items.xlsx.
+    Returns the matched item name, or empty string if no match found."""
+    if not condition or not test_items:
+        return ""
+    cu = condition.upper().strip().replace("\u00b0C", "C").replace("\u00b0", "")
+
+    # ── Temperature Cycle: "TC C -65/+150 500X", "TC B 700X", etc. ──────
+    tc_m = _re.search(r"\bTC\s*([A-Z])\b", cu)
+    if tc_m:
+        letter = tc_m.group(1)
+        prefix = f"TC{letter}"
+        cnt_m = _re.search(r"(\d+)\s*(?:X\b|CYC\b|CYCLE|HRS?\b)", cu)
+        if cnt_m:
+            n = int(cnt_m.group(1))
+            cands = []
+            for item in test_items:
+                iu = item.upper()
+                if not iu.startswith(prefix):
+                    continue
+                nm = _re.search(r"(\d+)", iu)
+                if nm:
+                    cands.append((item, int(nm.group(1))))
+            if cands:
+                best = min(cands, key=lambda x: abs(x[1] - n))
+                if best[1] > 0 and min(n, best[1]) / max(n, best[1]) >= 0.1:
+                    return best[0]
+
+    # ── HTS (High Temperature Storage) ──────────────────────────────────
+    if "HTS" in cu or "HIGH TEMP" in cu:
+        temp_m = _re.search(r"(\d{2,3})C", cu)
+        hrs_m = _re.search(r"(\d+)\s*(?:HRS?\b|HOUR)", cu)
+        cands = [i for i in test_items if i.upper().startswith("HTS")]
+        if hrs_m and cands:
+            hrs = int(hrs_m.group(1))
+            temp = temp_m.group(1) if temp_m else "150"
+            temp_cands = [i for i in cands if f"{temp}C" in i.upper()]
+            search = temp_cands if temp_cands else cands
+            best = min(search, key=lambda x: (
+                abs(int(m.group(1)) - hrs) if (m := _re.search(r"(\d+)HRS", x.upper())) else 9999
+            ))
+            return best
+        if cands:
+            return cands[0]
+
+    # ── bHAST / HAST ─────────────────────────────────────────────────────
+    if "HAST" in cu:
+        hrs_m = _re.search(r"(\d+)\s*(?:HRS?\b|HOUR)", cu)
+        prefix = "BHAST" if ("BHAST" in cu or "B-HAST" in cu or "B HAST" in cu) else "HAST"
+        cands = [i for i in test_items if i.upper().startswith(prefix)]
+        if not cands and prefix == "BHAST":
+            cands = [i for i in test_items if "BHAST" in i.upper() or "B-HAST" in i.upper()]
+        if not cands:
+            cands = [i for i in test_items if "HAST" in i.upper()]
+        if hrs_m and cands:
+            hrs = int(hrs_m.group(1))
+            best = min(cands, key=lambda x: (
+                abs(int(m.group(1)) - hrs) if (m := _re.search(r"(\d+)", x)) else 9999
+            ))
+            return best
+        if cands:
+            return cands[0]
+
+    # ── T&H Soak / Thermal-Humidity ──────────────────────────────────────
+    if any(x in cu for x in ["T&H", "TH SOAK", "T H SOAK", "T/H", "TEMP HUMID", "T& H", "THB"]):
+        cond_m = _re.search(r"(\d+)/(\d+)", cu)
+        hrs_m = _re.search(r"[-](\d{3})\b", cu) or _re.search(r"(\d{3,4})\s*(?:HRS?\b)", cu)
+        cands = [i for i in test_items if "T&H" in i.upper() and "SOAK" in i.upper()]
+        if not cands:
+            cands = [i for i in test_items if "T&H" in i.upper()]
+        if hrs_m and cands:
+            hrs = int(hrs_m.group(1))
+            if cond_m:
+                cond_str = f"{cond_m.group(1)}/{cond_m.group(2)}"
+                exact = [i for i in cands if cond_str in i and str(hrs) in i]
+                if exact:
+                    return exact[0]
+            best = min(cands, key=lambda x: (
+                abs(int(m.group(1)) - hrs) if (m := _re.search(r"(\d+)\s*HRS", x.upper())) else 9999
+            ))
+            return best
+        if cands:
+            return cands[0]
+
+    # ── Bare humidity condition "85/85-168" or "30/60-192" ───────────────
+    bare_m = _re.match(r"^(\d+)/(\d+)[-](\d+)$", cu)
+    if bare_m:
+        t_val, rh_val, hrs = bare_m.group(1), bare_m.group(2), bare_m.group(3)
+        cond_str = f"{t_val}/{rh_val}"
+        cands = [i for i in test_items if "T&H" in i.upper() and "SOAK" in i.upper()]
+        if cands:
+            exact = [i for i in cands if cond_str in i and hrs in i]
+            if exact:
+                return exact[0]
+            best = min(cands, key=lambda x: (
+                abs(int(m.group(1)) - int(hrs)) if (m := _re.search(r"(\d+)\s*HRS", x.upper())) else 9999
+            ))
+            return best
+
+    # ── PCT (Pressure Cooker Test) ────────────────────────────────────────
+    if "PCT" in cu:
+        cands = [i for i in test_items if i.upper().startswith("PCT")]
+        if cands:
+            hrs_m = _re.search(r"(\d+)\s*(?:HRS?\b|HOUR)", cu)
+            if hrs_m:
+                hrs = int(hrs_m.group(1))
+                best = min(cands, key=lambda x: (
+                    abs(int(m.group(1)) - hrs) if (m := _re.search(r"(\d+)", x)) else 9999
+                ))
+                return best
+            return cands[0]
+
+    # ── Preconditioning / MSL ─────────────────────────────────────────────
+    if any(x in cu for x in ["PRECON", "L1", "L2", "L3", "MOISTURE", "MRT", "MSL"]):
+        level_m = _re.search(r"L\s*([123])", cu)
+        level = level_m.group(1) if level_m else None
+        if level:
+            cands = [i for i in test_items if f"PRECON L{level}" in i.upper()]
+            if cands:
+                return cands[0]
+            cands2 = [i for i in test_items if i.upper() == f"L{level} 260"]
+            if cands2:
+                return cands2[0]
+
+    return ""
+
+
+# Stress-test step name keywords (any of these in the step_name → look at custom_fields)
+_STRESS_STEP_KEYWORDS = frozenset([
+    "reliability test", "hts", "high temperature storage", "high temp storage",
+    "hast", "hast unbiased", "bhast", "temperature cycle",
+    "t/c a", "t/c b", "t/c c", "t/c h",
+    "t&h soak", "th soak", "t & h soak", "t/h soak", "thb soak", "thb",
+    "moisture resistance", "moisture resistance test",
+    "whisker test", "thermal shock", "thermal storage",
+    "elfr", "htol", "pct", "rel test",
+    "preconditioning", "precon",
+])
+
+
+def _compute_test_level_from_steps(steps: list) -> str:
+    """Given list of (step_name, custom_fields_json) for a request,
+    return comma-joined unique matching Test Items."""
+    items = _load_test_items()
+    if not items:
+        return ""
+
+    matched: list[str] = []
+    seen: set[str] = set()
+
+    for step_name, cf_raw in steps:
+        sn_lower = (step_name or "").lower().strip()
+        if not any(kw in sn_lower for kw in _STRESS_STEP_KEYWORDS):
+            continue
+        try:
+            cf = json.loads(cf_raw) if cf_raw else {}
+        except Exception:
+            cf = {}
+
+        # Try test_condition first, then test_item, then step_name itself
+        for source in [cf.get("test_condition", ""), cf.get("test_item", ""), step_name]:
+            if not source:
+                continue
+            hit = _match_test_condition(source, items)
+            if hit and hit not in seen:
+                seen.add(hit)
+                matched.append(hit)
+                break  # one match per step
+
+    return ", ".join(matched)
 
 
 # ========================
