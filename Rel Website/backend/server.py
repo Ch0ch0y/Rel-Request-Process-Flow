@@ -7983,18 +7983,22 @@ async def _load_relmon_sheet_names_for_site(site: str) -> tuple[list[str], str]:
 
 @api_router.get("/relmon/sheets")
 async def get_relmon_sheets():
-    """Return the available sites and their sheet names."""
+    """Return the available sites and their sheet names (workbook + any DB-only custom sheets)."""
     out: dict[str, list[str]] = {}
     for site, path in _RELMON_FILES.items():
         if path.exists():
             try:
                 wb = load_workbook(str(path), data_only=True, read_only=True)
-                out[site] = list(wb.sheetnames)
+                workbook_sheets = list(wb.sheetnames)
                 wb.close()
             except Exception:
-                out[site] = []
+                workbook_sheets = []
         else:
-            out[site] = []
+            workbook_sheets = []
+        # Merge in any DB-saved custom sheets not present in the workbook
+        saved_sheets = await _get_saved_relmon_sheet_names(site)
+        extra = [s for s in saved_sheets if s not in workbook_sheets]
+        out[site] = workbook_sheets + extra
     return out
 
 
@@ -8136,7 +8140,8 @@ async def save_relmon_data(payload: RelMonSaveRequest, current_user: User = Depe
     if not payload.sheet or not payload.sheet.strip():
         raise HTTPException(status_code=400, detail="Sheet cannot be empty")
 
-    # Best-effort source validation while allowing saves when the workbook is temporarily locked.
+    # Best-effort source validation while allowing saves when the workbook is temporarily locked
+    # or when saving a custom (DB-only) sheet not present in the workbook.
     try:
         _parse_relmon_sheet(payload.site, payload.sheet)
     except PermissionError:
@@ -8149,16 +8154,17 @@ async def save_relmon_data(payload: RelMonSaveRequest, current_user: User = Depe
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError:
-        existing = await _get_saved_relmon_record(payload.site, payload.sheet)
-        if not existing:
-            raise HTTPException(status_code=404, detail=f"Sheet '{payload.sheet}' not found in source workbook")
+        # Sheet not in workbook – allowed for user-added custom sheets
+        pass
 
     rows, max_cols = _normalize_relmon_rows(payload.rows)
-    if not rows or max_cols == 0:
-        raise HTTPException(status_code=400, detail="Rows cannot be empty")
+    form_data = payload.form_data if isinstance(payload.form_data, dict) else {}
+    # Allow saving with empty grid rows as long as there is form data (custom/lightweight sheets)
+    has_content = (rows and max_cols > 0) or any(v for v in form_data.values() if v not in (None, ""))
+    if not has_content:
+        raise HTTPException(status_code=400, detail="Nothing to save: rows and form data are both empty")
 
     merges = payload.merges if isinstance(payload.merges, list) else []
-    form_data = payload.form_data if isinstance(payload.form_data, dict) else {}
     now = datetime.now(timezone.utc).isoformat()
 
     db = await aiosqlite.connect(DB_PATH)
