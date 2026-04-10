@@ -4,7 +4,8 @@ import api from '../api';
 import {
   PackageOpen, RefreshCw, Bell, BellRing, Clock, CheckCircle2,
   AlertTriangle, ChevronRight, Loader2, Search, X, Filter,
-  Activity, Thermometer, Waves, Flame, Wind, Droplets, Box, Download, History
+  Activity, Thermometer, Waves, Flame, Wind, Droplets, Box, Download, History,
+  CalendarClock,
 } from 'lucide-react';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -25,6 +26,7 @@ const TABS = [
   { key: 'all',         label: 'All' },
   { key: 'in_progress', label: 'In Progress' },
   { key: 'completed',   label: 'Completed' },
+  { key: 'scheduled',   label: 'Scheduled' },
 ];
 
 // Upcoming = end within 48 h; Overdue = started and end already passed and status still in_progress
@@ -99,6 +101,15 @@ function AlertBadge({ classification }) {
   );
 }
 
+function ScheduledBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-700">
+      <CalendarClock className="w-3 h-3" />
+      Scheduled
+    </span>
+  );
+}
+
 function SummaryCard({ label, value, color, icon: Icon, sub }) {
   return (
     <div className={`rounded-xl border p-4 shadow-sm ${color}`}>
@@ -131,6 +142,8 @@ export default function LoadingUnloading() {
   const [historyRows, setHistoryRows]     = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [machineSearch, setMachineSearch] = useState('');
+  const [scheduledRows, setScheduledRows]   = useState([]);
+  const [scheduledLoading, setScheduledLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -183,6 +196,24 @@ export default function LoadingUnloading() {
     if (viewMode === 'history') loadHistory();
   }, [viewMode, loadHistory]);
 
+  const loadScheduled = useCallback(async () => {
+    setScheduledLoading(true);
+    try {
+      const data = await api.getLoadingUnloadingScheduled();
+      setScheduledRows(Array.isArray(data) ? data : []);
+    } catch {
+      // silently fail
+    } finally {
+      setScheduledLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadScheduled(); }, [loadScheduled]);
+  useEffect(() => {
+    const id2 = setInterval(loadScheduled, 120_000);
+    return () => clearInterval(id2);
+  }, [loadScheduled]);
+
   // ── Derived data ──────────────────────────────────────────────────────
   const enriched = rows.map(r => ({ ...r, alert: classifyStep(r) }));
 
@@ -191,6 +222,24 @@ export default function LoadingUnloading() {
   const upcomingCount = alerts.filter(r => r.alert === 'upcoming').length;
   const activeCount   = enriched.filter(r => r.status === 'in_progress').length;
   const doneCount     = enriched.filter(r => r.status === 'completed').length;
+
+  const scheduledCount = scheduledRows.length;
+
+  const filteredScheduled = scheduledRows.filter(r => {
+    if (stepFilter !== 'all' && r.step_name?.toLowerCase() !== stepFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return (
+        (r.request_number || '').toLowerCase().includes(q) ||
+        (r.device_name    || '').toLowerCase().includes(q) ||
+        (r.customer       || '').toLowerCase().includes(q) ||
+        (r.lot_no         || '').toLowerCase().includes(q) ||
+        (r.step_name      || '').toLowerCase().includes(q) ||
+        (r.test_item      || '').toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
 
   const filtered = enriched.filter(r => {
     if (tab !== 'all' && r.status !== tab) return false;
@@ -367,7 +416,7 @@ export default function LoadingUnloading() {
       )}
 
       {/* ── Summary Cards ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
         <SummaryCard
           label="Active"
           value={activeCount}
@@ -395,6 +444,13 @@ export default function LoadingUnloading() {
           sub="finished steps"
           icon={CheckCircle2}
           color="bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700"
+        />
+        <SummaryCard
+          label="Scheduled"
+          value={scheduledCount}
+          sub="pending steps"
+          icon={CalendarClock}
+          color={scheduledCount > 0 ? 'bg-purple-600 text-white border-purple-700 shadow-md shadow-purple-600/20' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'}
         />
       </div>
 
@@ -441,19 +497,18 @@ export default function LoadingUnloading() {
                 <p className="text-sm font-medium">No history records found</p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
-                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">Request #</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">Device / Customer</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">Step</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">Machine</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">Rack</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">Employee</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">Start</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">End</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">Status</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Request #</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Device / Customer</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Step</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Machine</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Rack</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Employee</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Start</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">End</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Status</th>
                     <th className="px-4 py-3"></th>
                   </tr>
                 </thead>
@@ -492,7 +547,6 @@ export default function LoadingUnloading() {
                   ))}
                 </tbody>
               </table>
-              </div>
             )}
           </div>
           {!historyLoading && historyRows.length > 0 && (
@@ -557,7 +611,75 @@ export default function LoadingUnloading() {
 
         {/* ── Table ── */}
         <div className="overflow-x-auto">
-          {loading ? (
+          {tab === 'scheduled' ? (
+            scheduledLoading ? (
+              <div className="flex items-center justify-center py-20 gap-2 text-slate-400 dark:text-slate-500">
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span className="text-sm">Loading scheduled steps…</span>
+              </div>
+            ) : filteredScheduled.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-slate-400 dark:text-slate-500">
+                <CalendarClock className="w-10 h-10 mb-3 opacity-30" />
+                <p className="text-sm font-medium">No scheduled stress test steps found</p>
+                <p className="text-xs mt-1 opacity-70">Pending steps from active RELDMS requests will appear here</p>
+                {(search || stepFilter !== 'all') && (
+                  <button onClick={() => { setSearch(''); setStepFilter('all'); }} className="mt-2 text-xs text-blue-500 hover:underline">Clear filters</button>
+                )}
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Request #</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Device / Customer</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Leg</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Step</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Test Item / Condition</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Request Status</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Status</th>
+                    <th className="px-4 py-3"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                  {filteredScheduled.map(r => (
+                    <tr key={`${r.request_id}_s${r.step_number}_l${r.leg}`} className="group hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <Link to={`/requests/${r.request_id}`} className="font-semibold text-blue-600 dark:text-blue-400 hover:underline">{r.request_number}</Link>
+                        {r.lot_no && <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{r.lot_no}</p>}
+                      </td>
+                      <td className="px-4 py-3">
+                        <p className="font-medium text-slate-800 dark:text-slate-200 max-w-[160px] truncate" title={r.device_name}>{r.device_name || '—'}</p>
+                        {r.customer && <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 truncate max-w-[160px]">{r.customer}</p>}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-600 dark:text-slate-400">Leg {r.leg || 1}</td>
+                      <td className="px-4 py-3 whitespace-nowrap"><StepBadge stepName={r.step_name} /></td>
+                      <td className="px-4 py-3">
+                        {r.test_item && <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{r.test_item}</p>}
+                        {r.test_condition && <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 max-w-[180px] truncate" title={r.test_condition}>{r.test_condition}</p>}
+                        {!r.test_item && !r.test_condition && <span className="text-slate-400 dark:text-slate-600">—</span>}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${
+                          r.req_status === 'testing'  ? 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-700' :
+                          r.req_status === 'approval' ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-700' :
+                          r.req_status === 'review'   ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700' :
+                          'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600'
+                        }`}>
+                          {r.req_status ? r.req_status.charAt(0).toUpperCase() + r.req_status.slice(1) : '—'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap"><ScheduledBadge /></td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <Link to={`/requests/${r.request_id}`} className="opacity-0 group-hover:opacity-100 inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline transition-opacity">
+                          View <ChevronRight className="w-3 h-3" />
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )
+          ) : loading ? (
             <div className="flex items-center justify-center py-20 gap-2 text-slate-400 dark:text-slate-500">
               <Loader2 className="w-5 h-5 animate-spin" />
               <span className="text-sm">Loading…</span>
@@ -578,19 +700,18 @@ export default function LoadingUnloading() {
               )}
             </div>
           ) : (
-            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
-                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">Request #</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">Device / Customer</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">Step</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">Test Item / Condition</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">Machine</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">Employee</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">Start of Process</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">End of Process</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">Status</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Request #</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Device / Customer</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Step</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Test Item / Condition</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Machine</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Employee</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Start of Process</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">End of Process</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Status</th>
                   <th className="px-4 py-3"></th>
                 </tr>
               </thead>
@@ -676,18 +797,28 @@ export default function LoadingUnloading() {
                 ))}
               </tbody>
             </table>
-            </div>
           )}
         </div>
 
         {/* Footer row count */}
-        {!loading && filtered.length > 0 && (
-          <div className="px-4 py-2.5 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30">
-            <p className="text-xs text-slate-400 dark:text-slate-500">
-              {filtered.length} record{filtered.length !== 1 ? 's' : ''}
-              {(search || stepFilter !== 'all' || tab !== 'all') && ` (filtered from ${enriched.length})`}
-            </p>
-          </div>
+        {tab === 'scheduled' ? (
+          !scheduledLoading && filteredScheduled.length > 0 && (
+            <div className="px-4 py-2.5 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30">
+              <p className="text-xs text-slate-400 dark:text-slate-500">
+                {filteredScheduled.length} scheduled step{filteredScheduled.length !== 1 ? 's' : ''}
+                {scheduledRows.length > filteredScheduled.length && ` (filtered from ${scheduledRows.length})`}
+              </p>
+            </div>
+          )
+        ) : (
+          !loading && filtered.length > 0 && (
+            <div className="px-4 py-2.5 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30">
+              <p className="text-xs text-slate-400 dark:text-slate-500">
+                {filtered.length} record{filtered.length !== 1 ? 's' : ''}
+                {(search || stepFilter !== 'all' || tab !== 'all') && ` (filtered from ${enriched.length})`}
+              </p>
+            </div>
+          )
         )}
       </div>
       )}

@@ -18,6 +18,7 @@ import subprocess
 import threading
 import os
 import shutil
+import signal
 import time
 import socket
 import webbrowser
@@ -228,9 +229,10 @@ class LauncherApp(tk.Tk):
 
         # Header action buttons (right → left order)
         for txt, cmd, bg in [
-            ("■  Stop All",          self._stop_all,    "#ef4444"),
-            ("▶  Start Local/LAN",   self._start_local, "#22c55e"),
-            ("⬆  Deploy All (LAN)",  self._deploy_all,  "#f59e0b"),
+            ("■  Stop All",          self._stop_all,       "#ef4444"),
+            ("↻  Restart All",       self._restart_all,    "#f59e0b"),
+            ("▶  Start Local/LAN",   self._start_local,    "#22c55e"),
+            ("⬆  Deploy All (LAN)",  self._deploy_all,     "#3b82f6"),
         ]:
             tk.Button(hdr, text=txt, font=("Segoe UI", 9, "bold"),
                       bg=bg, fg="white", relief="flat",
@@ -335,6 +337,12 @@ class LauncherApp(tk.Tk):
                                  command=lambda s=svc: self._stop(s["id"]))
             btn_stop.pack(side="right", padx=2)
 
+            btn_restart = tk.Button(row, text="↻", font=("Segoe UI", 9, "bold"),
+                                    bg="#374151", fg="#f59e0b", relief="flat",
+                                    padx=8, pady=2, cursor="hand2",
+                                    command=lambda s=svc: self._restart(s["id"]))
+            btn_restart.pack(side="right", padx=2)
+
             btn_start = tk.Button(row, text="▶", font=("Segoe UI", 9, "bold"),
                                   bg="#374151", fg="#22c55e", relief="flat",
                                   padx=8, pady=2, cursor="hand2",
@@ -344,6 +352,7 @@ class LauncherApp(tk.Tk):
             self.rows[svc["id"]] = {
                 "dot": dot, "url_lbl": url_lbl,
                 "btn_start": btn_start, "btn_stop": btn_stop,
+                "btn_restart": btn_restart,
             }
 
     # ── Deploy ────────────────────────────────────────────────────────────────
@@ -437,17 +446,10 @@ class LauncherApp(tk.Tk):
                     return
                 self.after(0, self._log, f"[Deploy {label}] Frontend build complete ✓")
 
-            # 4 — stop existing backend
-            be_proc = self.processes.get(be_id)
-            if be_proc and be_proc.poll() is None:
-                self.after(0, self._log, f"[Deploy {label}] Restarting backend…")
-                be_proc.terminate()
-                try:
-                    be_proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    be_proc.kill()
-                self.processes.pop(be_id, None)
-                time.sleep(1)   # brief pause to free the port
+            # 4 — stop existing backend (tracked + port-based kill)
+            self.after(0, self._log, f"[Deploy {label}] Stopping backend…")
+            self._stop(be_id)
+            time.sleep(1)   # brief pause to free the port
 
             # 5 — start backend in production mode (no --reload)
             prod_cmd = be_svc.get("prod_cmd", be_svc["cmd"])
@@ -553,19 +555,66 @@ class LauncherApp(tk.Tk):
         self.after(0, self._log, "[CA  Backend] Setup complete — starting…")
         self.after(100, lambda: self._start("ca_backend"))
 
+    def _kill_port(self, port: int) -> int:
+        """Kill ALL processes listening on `port`. Returns count killed."""
+        killed = 0
+        try:
+            r = subprocess.run(
+                ["netstat", "-ano"],
+                capture_output=True, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            pids = set()
+            for line in r.stdout.splitlines():
+                if f":{port} " in line and "LISTENING" in line:
+                    parts = line.split()
+                    try:
+                        pid = int(parts[-1])
+                        if pid > 0:
+                            pids.add(pid)
+                    except (ValueError, IndexError):
+                        pass
+            for pid in pids:
+                try:
+                    subprocess.run(
+                        ["taskkill", "/PID", str(pid), "/F", "/T"],
+                        capture_output=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                    )
+                    killed += 1
+                except Exception:
+                    pass
+        except Exception as exc:
+            self._log(f"[Launcher] Port kill error: {exc}")
+        return killed
+
     def _stop(self, svc_id: str):
         svc  = next(s for s in SERVICES if s["id"] == svc_id)
+        port = svc.get("port")
         proc = self.processes.get(svc_id)
+
+        # 1 — terminate tracked subprocess
         if proc and proc.poll() is None:
-            self._log(f"[{svc['label']}] Stopping…")
+            self._log(f"[{svc['label']}] Stopping tracked process…")
             proc.terminate()
             try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 proc.kill()
-            self.processes.pop(svc_id, None)
+        self.processes.pop(svc_id, None)
+
+        # 2 — kill anything still on the port (zombie / externally-started servers)
+        if port:
+            n = self._kill_port(port)
+            if n:
+                self._log(f"[{svc['label']}] Killed {n} process(es) on port {port}.")
+                time.sleep(0.5)  # let OS release the port
+            else:
+                if not (proc and proc.poll() is not None):
+                    self._log(f"[{svc['label']}] Nothing running on port {port}.")
         else:
-            self._log(f"[{svc['label']}] Not running.")
+            if not proc:
+                self._log(f"[{svc['label']}] Not running.")
 
     def _start_all(self):
         """Start all services (backends + frontend dev servers) — full dev mode."""
@@ -591,9 +640,34 @@ class LauncherApp(tk.Tk):
                 self._start(svc["id"])
                 time.sleep(0.3)
 
+    def _restart(self, svc_id: str):
+        """Stop (force-killing the port) then start a service."""
+        svc = next(s for s in SERVICES if s["id"] == svc_id)
+        self._log(f"[{svc['label']}] Restarting…")
+        threading.Thread(target=self._restart_worker, args=(svc_id,), daemon=True).start()
+
+    def _restart_worker(self, svc_id: str):
+        self._stop(svc_id)
+        time.sleep(1)  # allow port to be released
+        self.after(0, lambda: self._start(svc_id))
+
     def _stop_all(self):
         for svc in reversed(SERVICES):
             self._stop(svc["id"])
+
+    def _restart_all(self):
+        """Stop all (force-killing ports) then start backends."""
+        self._log("[Launcher] Restarting all services…")
+        threading.Thread(target=self._restart_all_worker, daemon=True).start()
+
+    def _restart_all_worker(self):
+        for svc in reversed(SERVICES):
+            self._stop(svc["id"])
+        time.sleep(1)
+        for svc in SERVICES:
+            if not svc.get("dev_only"):
+                self.after(0, lambda s=svc: self._start(s["id"]))
+                time.sleep(0.5)
 
     # ── Logging helpers ───────────────────────────────────────────────────────
     def _log(self, msg: str):
@@ -611,14 +685,32 @@ class LauncherApp(tk.Tk):
             pass
 
     # ── Status polling ────────────────────────────────────────────────────────
+    def _is_port_open(self, port: int) -> bool:
+        """Quick check if something is listening on port."""
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.3)
+                return s.connect_ex(("127.0.0.1", port)) == 0
+        except Exception:
+            return False
+
     def _poll_status(self):
         for svc in SERVICES:
             proc    = self.processes.get(svc["id"])
-            running = proc is not None and proc.poll() is None
-            self.rows[svc["id"]]["dot"].config(
-                fg="#22c55e" if running else "#475569"
-            )
-        self.after(1500, self._poll_status)
+            tracked = proc is not None and proc.poll() is None
+            port    = svc.get("port")
+            port_up = self._is_port_open(port) if port else False
+            running = tracked or port_up
+
+            # colour: green = tracked, yellow = external/zombie, grey = stopped
+            if tracked:
+                color = "#22c55e"
+            elif port_up:
+                color = "#facc15"   # yellow — something on port but not ours
+            else:
+                color = "#475569"
+            self.rows[svc["id"]]["dot"].config(fg=color)
+        self.after(2000, self._poll_status)
 
     # ── Window close ─────────────────────────────────────────────────────────
     def _on_close(self):

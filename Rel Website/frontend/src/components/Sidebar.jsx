@@ -4,22 +4,24 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import {
   LayoutDashboard, ClipboardList, Settings, Users, LogOut, X, CheckCircle2, FileText, Archive, ListFilter, MonitorDot,
-  Sun, Moon, ShieldCheck, ChevronRight, Layers, Microscope, ExternalLink, PackageOpen, BarChart3, Database
+  Sun, Moon, ShieldCheck, ChevronRight, Layers, Microscope, ExternalLink, PackageOpen, BarChart3, Database, TableProperties,
+  ScanSearch,
 } from 'lucide-react';
 import AmkorLogo from '../assets/amkor-logo.svg';
 
 const allNavItems = [
   { to: '/', icon: LayoutDashboard, label: 'Home', end: true, guestAllowed: true },
   {
-    to: '/requests', icon: ClipboardList, label: 'All Requests', guestAllowed: true,
+    to: '/my-requests', icon: FileText, label: 'My Requests', guestAllowed: false,
     subItems: [
-      { to: '/my-requests', icon: FileText, label: 'My Requests', guestAllowed: false },
+      { to: '/requests', icon: ClipboardList, label: 'All Requests', guestAllowed: true },
       { to: '/completed', icon: CheckCircle2, label: 'All Requests Completed', guestAllowed: true },
     ]
   },
   { to: '/approval', icon: ShieldCheck, label: 'Approval Queue', guestAllowed: false, roles: ['Admin', 'Planner'] },
+  { to: '/masterlist', icon: TableProperties, label: 'Masterlist', guestAllowed: false, roles: ['Admin', 'Planner'] },
   { to: '/loading-unloading', icon: PackageOpen, label: 'Loading / Unloading', guestAllowed: true, roles: ['Technician', 'Admin', 'Reliability Engineer', 'Planner'] },
-  { to: '/performance', icon: BarChart3, label: 'Performance Monitor', guestAllowed: false, roles: ['Admin', 'Reliability Engineer', 'Planner'] },
+  { to: '/process-monitoring', icon: ScanSearch, label: 'Process Monitoring', guestAllowed: false },
   { to: '/relmon', icon: Database, label: 'RELMON', guestAllowed: false },
   {
     to: '/_record-monitor', icon: Layers, label: 'Record Monitor', guestAllowed: false, noNav: true,
@@ -27,6 +29,7 @@ const allNavItems = [
       { to: '/request-filter', icon: ListFilter, label: 'Request Filter', guestAllowed: false, roles: ['Admin', 'Reliability Engineer'] },
       { to: '/backup-viewer', icon: Archive, label: 'Backup Viewer', guestAllowed: false },
       { to: '/retention-monitor', icon: Archive, label: 'Retention Monitor', guestAllowed: false, roles: ['Admin', 'Reliability Engineer'] },
+      { to: '/performance', icon: BarChart3, label: 'Performance Monitor', guestAllowed: false, roles: ['Admin', 'Reliability Engineer', 'Planner'] },
     ]
   },
   {

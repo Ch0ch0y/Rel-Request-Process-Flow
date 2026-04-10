@@ -298,6 +298,32 @@ code, pre, .font-mono {
   to   { opacity: 1; transform: scale(1); }
 }
 
+/* ─── Dashboard Mode Switch Transitions ──────────── */
+@keyframes dashSlideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(40px) perspective(900px) rotateY(-5deg) scale(0.97);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) perspective(900px) rotateY(0deg) scale(1);
+    filter: blur(0);
+  }
+}
+@keyframes dashSlideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-40px) perspective(900px) rotateY(5deg) scale(0.97);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) perspective(900px) rotateY(0deg) scale(1);
+    filter: blur(0);
+  }
+}
+
 /* ─── Mobile Responsive Utilities ─────────────────── */
 
 /* Responsive typography */

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import api from '../api';
 import {
   Database, RefreshCw, Loader2, AlertTriangle, ChevronRight,
-  ChevronDown, Search, Download, Save, Plus, X, List
+  ChevronDown, Search, Download, Save, Plus, X, List, ClipboardList, Trash2, Maximize2
 } from 'lucide-react';
 
 const HEADER_ROWS = 4;
@@ -12,6 +12,7 @@ const GROUP_COLORS = {
   Factory:      { bg: 'bg-cyan-600', text: 'text-white' },
   Materials:    { bg: 'bg-violet-600', text: 'text-white' },
   Precond:      { bg: 'bg-amber-500', text: 'text-white' },
+  Reflow:       { bg: 'bg-orange-500', text: 'text-white' },
   DelamBefore:  { bg: 'bg-red-600', text: 'text-white' },
   DelamAfter:   { bg: 'bg-rose-500', text: 'text-white' },
   MRT:          { bg: 'bg-emerald-600', text: 'text-white' },
@@ -147,9 +148,11 @@ function getGroupColor(cellValue) {
   if (v.includes('package')) return GROUP_COLORS.Package;
   if (v.includes('factory')) return GROUP_COLORS.Factory;
   if (v.includes('material')) return GROUP_COLORS.Materials;
-  if (v.includes('preconditioning') && v.includes('condition')) return GROUP_COLORS.Precond;
-  if (v.includes('before')) return GROUP_COLORS.DelamBefore;
-  if (v.includes('after')) return GROUP_COLORS.DelamAfter;
+  // Check delamination before/after FIRST — 'preconditioning' contains 'condition' as substring
+  if (v.includes('delamination') && v.includes('before')) return GROUP_COLORS.DelamBefore;
+  if (v.includes('delamination') && v.includes('after')) return GROUP_COLORS.DelamAfter;
+  if (v.includes('preconditioning')) return GROUP_COLORS.Precond;
+  if (v.includes('reflow')) return GROUP_COLORS.Reflow;
   if (v.includes('mrt')) return GROUP_COLORS.MRT;
   if (v.includes('reliability')) return GROUP_COLORS.Reliability;
   return GROUP_COLORS.Default;
@@ -159,10 +162,12 @@ function buildColorMap(rows, merges, headerRows = HEADER_ROWS) {
   const map = {};
   if (!rows || !merges) return map;
 
+  // Only row-0 (top-level group header) merges get direct color assignment.
+  // Sub-header rows (2-3) inherit color via the fallback propagation below.
   for (const m of merges) {
-    if (m.min_row < headerRows) {
-      const color = getGroupColor(rows[m.min_row]?.[m.min_col]);
-      for (let r = m.min_row; r <= m.max_row; r++) {
+    if (m.min_row === 0) {
+      const color = getGroupColor(rows[0]?.[m.min_col]);
+      for (let r = m.min_row; r <= Math.min(m.max_row, headerRows - 1); r++) {
         for (let c = m.min_col; c <= m.max_col; c++) {
           map[`${r}_${c}`] = color;
         }
@@ -368,9 +373,316 @@ function EditableRelMonTable({ rows, merges, onCellChange, onAddRow, onAddColumn
   );
 }
 
+// ─── Request Overview ─────────────────────────────────────────────────────────
+
+const STATUS_BADGE = {
+  testing:     'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+  completed:   'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+  in_progress: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+  discontinued:'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
+};
+
+function StatusBadge({ status }) {
+  const cls = STATUS_BADGE[status] ?? 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300';
+  return (
+    <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold ${cls}`}>
+      {status || '—'}
+    </span>
+  );
+}
+
+function RequestOverviewTable({ requests, loading, error, onSelectSheet }) {
+  if (loading) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-3 text-slate-400">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+        <p className="text-sm">Loading RMS requests…</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg text-sm text-red-700 dark:text-red-300">
+        <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+        <span>{error}</span>
+      </div>
+    );
+  }
+
+  if (!requests || requests.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-3 text-slate-400 dark:text-slate-500">
+        <ClipboardList className="w-12 h-12 opacity-30" />
+        <p className="text-sm">No RMS requests in RELMON yet.</p>
+        <p className="text-xs text-slate-400">RMS requests appear here automatically once created.</p>
+      </div>
+    );
+  }
+
+  // Group by matched_device_type (inferred from pkg_info) or device_type fallback
+  const groups = {};
+  const groupOrder = [];
+  for (const req of requests) {
+    const key = req.matched_device_type || req.device_type || '(Unmatched)';
+    if (!groups[key]) {
+      groups[key] = [];
+      groupOrder.push(key);
+    }
+    groups[key].push(req);
+  }
+
+  // Sort groups: ATP3 types first then ATP1, then unmatched
+  groupOrder.sort((a, b) => {
+    const siteA = groups[a][0]?.inferred_site || '';
+    const siteB = groups[b][0]?.inferred_site || '';
+    if (siteA !== siteB) return siteA.localeCompare(siteB);
+    return a.localeCompare(b);
+  });
+
+  // 2 prefix cols (#, Request No.) + 53 RELMON template cols + 2 suffix (Status, RELMON Sheet) = 57
+  const TOTAL_COLS = 57;
+  let globalRow = 0;
+
+  // Header colour helpers
+  const pkgH  = 'bg-sky-700 text-white';
+  const factH = 'bg-cyan-700 text-white';
+  const matH  = 'bg-violet-700 text-white';
+  const precH = 'bg-amber-600 text-white';
+  const reflH = 'bg-orange-600 text-white';
+  const delbH = 'bg-red-700 text-white';
+  const delaH = 'bg-rose-600 text-white';
+  const mrtH  = 'bg-emerald-700 text-white';
+  const relH  = 'bg-indigo-700 text-white';
+  const defH  = 'bg-sky-800 text-white';
+
+  const ThB = 'border border-slate-600 px-1 py-0.5 text-center text-[10px] font-semibold whitespace-nowrap';
+  const TdB = 'border border-slate-700 px-1 py-1 text-center text-[10px] whitespace-nowrap';
+
+  const tableRows = groupOrder.flatMap((deviceType) => {
+    const groupRows = groups[deviceType];
+    const header = (
+      <tr key={`grp-${deviceType}`}>
+        <td
+          colSpan={TOTAL_COLS}
+          className="bg-sky-900/80 dark:bg-sky-950 text-sky-100 font-bold px-3 py-1.5 text-xs border border-sky-800"
+        >
+          Device Type: {deviceType}
+          {groups[deviceType][0]?.inferred_site && (
+            <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold ${groups[deviceType][0].inferred_site === 'ATP1' ? 'bg-violet-700 text-violet-100' : 'bg-emerald-700 text-emerald-100'}`}>
+              {groups[deviceType][0].inferred_site}
+            </span>
+          )}
+        </td>
+      </tr>
+    );
+    const dataRows = groupRows.map((req) => {
+      globalRow += 1;
+      const leadBall = req.lead_count ?? req.ball_count ?? '';
+      const inferredSite = req.inferred_site;
+      const empty = <td className={TdB} />;
+      return (
+        <tr
+          key={req.request_number}
+          className="even:bg-slate-800/30 hover:bg-blue-900/20"
+        >
+          {/* Prefix: # and Request No. */}
+          <td className={`${TdB} text-slate-400 select-none`}>{globalRow}</td>
+          <td className={TdB}>
+            <button
+              onClick={() => onSelectSheet && onSelectSheet(req.request_number, inferredSite, req.matched_device_type)}
+              className="font-mono font-semibold text-blue-400 hover:underline cursor-pointer"
+              title="Open RELMON sheet"
+            >{req.request_number}</button>
+          </td>
+
+          {/* Package: Device Type | L/C | Body SIZE (mm) */}
+          <td className={`${TdB} font-medium text-slate-200`}>{req.matched_device_type || ''}</td>
+          <td className={TdB}>{leadBall || ''}</td>
+          <td className={TdB}>{req.package_size || ''}</td>
+
+          {/* Factory: Date Code | Mfg Site */}
+          <td className={TdB}>{''}</td>
+          <td className={TdB}>{req.plant || ''}</td>
+
+          {/* Materials: Die Size (3) */}
+          {empty}{empty}{empty}
+          {/* L/F Size (3) */}
+          {empty}{empty}{empty}
+          {/* L/F Type (3) */}
+          {empty}{empty}{empty}
+          {/* Stamp/Etch | Matl | Wire Au | Die Coat | Mold Compound | Die Attach | H/S | Plating */}
+          {empty}{empty}{empty}{empty}{empty}{empty}{empty}{empty}
+
+          {/* Preconditioning Test Condition */}
+          {empty}
+          {/* Reflow Temp */}
+          {empty}
+
+          {/* Delamination Before: 5 types × (#, avg%) = 10 cells */}
+          {empty}{empty}{empty}{empty}{empty}{empty}{empty}{empty}{empty}{empty}
+
+          {/* Delamination After: 5 types × (#, avg%) = 10 cells */}
+          {empty}{empty}{empty}{empty}{empty}{empty}{empty}{empty}{empty}{empty}
+
+          {/* MRT Results: #/Fail | SS | Result */}
+          {empty}{empty}{empty}
+
+          {/* Reliability Results: Rel Test | degC/R.H.% | # of hrs/cyc | "hrs"/"cyc" | # Fail | SS */}
+          {empty}{empty}{empty}{empty}{empty}{empty}
+
+          {/* Suffix: Status | RELMON Sheet */}
+          <td className={TdB}><StatusBadge status={req.status} /></td>
+          <td className={TdB}>
+            {onSelectSheet && (
+              <button
+                onClick={() => onSelectSheet(req.request_number, inferredSite, req.matched_device_type)}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors"
+                title="Open RELMON sheet for this request"
+              >
+                Open
+              </button>
+            )}
+          </td>
+        </tr>
+      );
+    });
+    return [header, ...dataRows];
+  });
+
+  return (
+    <div className="flex-1 min-h-0 overflow-auto border border-slate-700 rounded-lg shadow-inner">
+      <table className="text-xs border-collapse" style={{ minWidth: '3200px' }}>
+        <thead className="sticky top-0 z-10">
+
+          {/* ── Row 1: Group headers ── */}
+          <tr>
+            <th rowSpan={3} className={`${ThB} ${defH}`}>#</th>
+            <th rowSpan={3} className={`${ThB} ${defH}`}>Request No.</th>
+            {/* Package group: cols 0-2 */}
+            <th colSpan={3} className={`${ThB} ${pkgH}`}>Package</th>
+            {/* Factory group: cols 3-4 */}
+            <th colSpan={2} className={`${ThB} ${factH}`}>Factory</th>
+            {/* Materials group: cols 5-21 = 17 */}
+            <th colSpan={17} className={`${ThB} ${matH}`}>Materials</th>
+            {/* Preconditioning Test Condition: col 22 – spans all 3 header rows */}
+            <th rowSpan={3} className={`${ThB} ${precH}`}>Preconditioning<br/>Test Condition</th>
+            {/* Reflow Temp: col 23 – spans all 3 header rows */}
+            <th rowSpan={3} className={`${ThB} ${reflH}`}>Reflow<br/>Temp</th>
+            {/* Delamination Before: cols 24-33 = 10 */}
+            <th colSpan={10} className={`${ThB} ${delbH}`}>Delamination (%)<br/>Before Preconditioning</th>
+            {/* Delamination After: cols 34-43 = 10 */}
+            <th colSpan={10} className={`${ThB} ${delaH}`}>Delamination (%)<br/>After Preconditioning</th>
+            {/* MRT Results: cols 44-46 = 3 */}
+            <th colSpan={3} className={`${ThB} ${mrtH}`}>MRT Results</th>
+            {/* Reliability Results: cols 47-52 = 6 */}
+            <th colSpan={6} className={`${ThB} ${relH}`}>Reliability Results</th>
+            {/* Suffix */}
+            <th rowSpan={3} className={`${ThB} ${defH}`}>Status</th>
+            <th rowSpan={3} className={`${ThB} ${defH}`}>RELMON Sheet</th>
+          </tr>
+
+          {/* ── Row 2: Sub-headers ── */}
+          <tr>
+            {/* Package sub-headers (rowSpan=2 into row 3) */}
+            <th rowSpan={2} className={`${ThB} ${pkgH}`}>Device<br/>Type</th>
+            <th rowSpan={2} className={`${ThB} ${pkgH}`}>L/C</th>
+            <th rowSpan={2} className={`${ThB} ${pkgH}`}>Body SIZE<br/>(mm)</th>
+            {/* Factory sub-headers */}
+            <th rowSpan={2} className={`${ThB} ${factH}`}>Date<br/>Code</th>
+            <th rowSpan={2} className={`${ThB} ${factH}`}>Mfg<br/>Site</th>
+            {/* Materials sub-headers */}
+            <th colSpan={3} className={`${ThB} ${matH}`}>Die Size</th>
+            <th colSpan={3} className={`${ThB} ${matH}`}>L/F Size</th>
+            <th colSpan={3} className={`${ThB} ${matH}`}>L/F Type</th>
+            <th rowSpan={2} className={`${ThB} ${matH}`}>Stamp<br/>or Etch</th>
+            <th rowSpan={2} className={`${ThB} ${matH}`}>Matl</th>
+            <th className={`${ThB} ${matH}`}>Wire</th>
+            <th rowSpan={2} className={`${ThB} ${matH}`}>Die<br/>Coat</th>
+            <th rowSpan={2} className={`${ThB} ${matH}`}>Mold<br/>Compound</th>
+            <th rowSpan={2} className={`${ThB} ${matH}`}>Die<br/>Attach</th>
+            <th rowSpan={2} className={`${ThB} ${matH}`}>H/S</th>
+            <th rowSpan={2} className={`${ThB} ${matH}`}>Plating<br/>Composition</th>
+            {/* Delamination Before: Type I–V each colSpan=2 */}
+            <th colSpan={2} className={`${ThB} ${delbH}`}>Type I</th>
+            <th colSpan={2} className={`${ThB} ${delbH}`}>Type II</th>
+            <th colSpan={2} className={`${ThB} ${delbH}`}>Type III</th>
+            <th colSpan={2} className={`${ThB} ${delbH}`}>Type IV</th>
+            <th colSpan={2} className={`${ThB} ${delbH}`}>Type V</th>
+            {/* Delamination After: Type I–V each colSpan=2 */}
+            <th colSpan={2} className={`${ThB} ${delaH}`}>Type I</th>
+            <th colSpan={2} className={`${ThB} ${delaH}`}>Type II</th>
+            <th colSpan={2} className={`${ThB} ${delaH}`}>Type III</th>
+            <th colSpan={2} className={`${ThB} ${delaH}`}>Type IV</th>
+            <th colSpan={2} className={`${ThB} ${delaH}`}>Type V</th>
+            {/* MRT Results sub-headers */}
+            <th className={`${ThB} ${mrtH}`}>#</th>
+            <th rowSpan={2} className={`${ThB} ${mrtH}`}>SS</th>
+            <th rowSpan={2} className={`${ThB} ${mrtH}`}>Result</th>
+            {/* Reliability Results sub-headers */}
+            <th rowSpan={2} className={`${ThB} ${relH}`}>Rel<br/>Test</th>
+            <th className={`${ThB} ${relH}`}>degC/</th>
+            <th className={`${ThB} ${relH}`}># of</th>
+            <th className={`${ThB} ${relH}`}>"hrs"<br/>or</th>
+            <th className={`${ThB} ${relH}`}>#</th>
+            <th rowSpan={2} className={`${ThB} ${relH}`}>SS</th>
+          </tr>
+
+          {/* ── Row 3: Sub-sub-headers ── */}
+          <tr>
+            {/* Die Size: (mil) × (mil) */}
+            <th className={`${ThB} ${matH}`}>(mil)</th>
+            <th className={`${ThB} ${matH}`}>×</th>
+            <th className={`${ThB} ${matH}`}>(mil)</th>
+            {/* L/F Size: (mil) × (mil) */}
+            <th className={`${ThB} ${matH}`}>(mil)</th>
+            <th className={`${ThB} ${matH}`}>×</th>
+            <th className={`${ThB} ${matH}`}>(mil)</th>
+            {/* L/F Type: VHDLF / HDLF spans 3 cols */}
+            <th colSpan={3} className={`${ThB} ${matH}`}>VHDLF / HDLF</th>
+            {/* Wire Au(mil) */}
+            <th className={`${ThB} ${matH}`}>Au(mil)</th>
+            {/* Delamination Before sub-sub: # | avg % × 5 types */}
+            <th className={`${ThB} ${delbH}`}>#</th><th className={`${ThB} ${delbH}`}>avg %</th>
+            <th className={`${ThB} ${delbH}`}>#</th><th className={`${ThB} ${delbH}`}>avg %</th>
+            <th className={`${ThB} ${delbH}`}>#</th><th className={`${ThB} ${delbH}`}>avg %</th>
+            <th className={`${ThB} ${delbH}`}>#</th><th className={`${ThB} ${delbH}`}>avg %</th>
+            <th className={`${ThB} ${delbH}`}>#</th><th className={`${ThB} ${delbH}`}>avg %</th>
+            {/* Delamination After sub-sub: # | avg % × 5 types */}
+            <th className={`${ThB} ${delaH}`}>#</th><th className={`${ThB} ${delaH}`}>avg %</th>
+            <th className={`${ThB} ${delaH}`}>#</th><th className={`${ThB} ${delaH}`}>avg %</th>
+            <th className={`${ThB} ${delaH}`}>#</th><th className={`${ThB} ${delaH}`}>avg %</th>
+            <th className={`${ThB} ${delaH}`}>#</th><th className={`${ThB} ${delaH}`}>avg %</th>
+            <th className={`${ThB} ${delaH}`}>#</th><th className={`${ThB} ${delaH}`}>avg %</th>
+            {/* MRT: # → Fail */}
+            <th className={`${ThB} ${mrtH}`}>Fail</th>
+            {/* Reliability sub-sub */}
+            <th className={`${ThB} ${relH}`}>R.H.%</th>
+            <th className={`${ThB} ${relH}`}>hrs/cyc</th>
+            <th className={`${ThB} ${relH}`}>"cyc"</th>
+            <th className={`${ThB} ${relH}`}>Fail</th>
+          </tr>
+
+        </thead>
+        <tbody>{tableRows}</tbody>
+      </table>
+    </div>
+  );
+}
+
+// ─── Main Component ────────────────────────────────────────────────────────────
+
 export default function RelMon() {
   const [sites, setSites] = useState({});
   const [activeSite, setActiveSite] = useState('ATP1');
+  // 'sheets' = Excel-based RELMON view | 'requests' = RMS request overview (default)
+  const [viewMode, setViewMode] = useState('requests');
+  const [requestList, setRequestList] = useState([]);
+  const [reqListLoading, setReqListLoading] = useState(false);
+  const [reqListError, setReqListError] = useState(null);
+  const [reqSearch, setReqSearch] = useState('');
+  const [clearingData, setClearingData] = useState(false);
+  const [reqFullView, setReqFullView] = useState(false);
   const [activeSheet, setActiveSheet] = useState(null);
   const [activeTab, setActiveTab] = useState('pkg_lot');
   const [rows, setRows] = useState([]);
@@ -392,10 +704,53 @@ export default function RelMon() {
   const [deviceTypeData, setDeviceTypeData] = useState(null);
   const abortRef = useRef(null);
 
+  // ── Request Overview ──────────────────────────────────────────────────────
+  const loadRequestList = useCallback(() => {
+    setReqListLoading(true);
+    setReqListError(null);
+    api.get('/relmon/request-list')
+      .then((res) => setRequestList(res.requests ?? []))
+      .catch((e) => setReqListError(`Failed to load requests: ${e?.message ?? 'Unknown error'}`))
+      .finally(() => setReqListLoading(false));
+  }, []);
+
+  // Auto-load on mount, re-run when switching into Request Overview mode,
+  // and auto-refresh every 30 s while in that mode.
+  useEffect(() => {
+    if (viewMode !== 'requests') return;
+    loadRequestList();
+    const timer = setInterval(loadRequestList, 30_000);
+    return () => clearInterval(timer);
+  }, [viewMode, loadRequestList]);
+
+  // Filter the request list client-side when user types in the search box
+  const filteredRequestList = reqSearch
+    ? requestList.filter((r) =>
+        [r.request_number, r.device_type, r.pkg_info, r.customer, r.plant, r.lot_no, r.device_name]
+          .some((v) => v && String(v).toLowerCase().includes(reqSearch.toLowerCase()))
+      )
+    : requestList;
+
+  const handleClearSavedData = useCallback(async () => {
+    if (!window.confirm(
+      `This will permanently delete all locally-saved RELMON edits for site "${activeSite}".\n` +
+      'The source Excel workbook is NOT affected. Continue?'
+    )) return;
+    setClearingData(true);
+    try {
+      await api.delete(`/relmon/saved-data?site=${encodeURIComponent(activeSite)}`);
+      setReloadTick((v) => v + 1);
+    } catch (e) {
+      setError(`Failed to clear saved data: ${e?.message ?? 'Unknown error'}`);
+    } finally {
+      setClearingData(false);
+    }
+  }, [activeSite]);
+
   useEffect(() => {
     setLoadingSheets(true);
     setError(null);
-    api.get('/relmon/sheets')
+    api.get('/relmon/request-sheets')
       .then((res) => {
         setSites(res);
         const firstSite = Object.keys(res)[0] ?? 'ATP1';
@@ -420,7 +775,8 @@ export default function RelMon() {
     setLoadingData(true);
     setError(null);
 
-    api.get(`/relmon/data?site=${encodeURIComponent(activeSite)}&sheet=${encodeURIComponent(activeSheet)}`)
+    const _reqNo = parseSheetFamily(activeSheet).variant || activeSheet;
+    api.get(`/relmon/request-sheet-data?site=${encodeURIComponent(activeSite)}&req_no=${encodeURIComponent(_reqNo)}`)
       .then((res) => {
         setRows(normalizeRows(res.rows ?? []));
         setMerges(Array.isArray(res.merges) ? res.merges : []);
@@ -510,7 +866,7 @@ export default function RelMon() {
 
     api.put('/relmon/data', {
       site: activeSite,
-      sheet: activeSheet,
+      sheet: parseSheetFamily(activeSheet).variant || activeSheet,
       rows,
       merges,
       form_data: formData,
@@ -613,12 +969,41 @@ export default function RelMon() {
                 ATP Reliability Monitor Database
               </h1>
               <p className="text-sky-100 text-xs font-medium mt-0.5">
-                Editable Mode · {activeSite}{activeSheet ? ` · ${activeSheet}` : ''}
+                {viewMode === 'requests'
+                  ? `RMS Request Overview · All Statuses · Sorted by Device Type · ${requestList.length} request${requestList.length !== 1 ? 's' : ''}`
+                  : `Editable Mode · ${activeSite}${activeSheet ? ` · ${activeSheet}` : ''}`}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
+            {/* View-mode toggle */}
+            <div className="flex items-center rounded-lg overflow-hidden border border-white/30 mr-2">
+              <button
+                onClick={() => setViewMode('sheets')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold transition-all ${
+                  viewMode === 'sheets'
+                    ? 'bg-white text-blue-700'
+                    : 'bg-white/15 text-white hover:bg-white/25'
+                }`}
+              >
+                <Database className="w-3.5 h-3.5" />
+                Sheets
+              </button>
+              <button
+                onClick={() => setViewMode('requests')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold transition-all border-l border-white/30 ${
+                  viewMode === 'requests'
+                    ? 'bg-white text-blue-700'
+                    : 'bg-white/15 text-white hover:bg-white/25'
+                }`}
+              >
+                <ClipboardList className="w-3.5 h-3.5" />
+                Request Overview
+              </button>
+            </div>
+
+            {/* Site selectors */}
             {Object.keys(sites).map((site) => (
               <button
                 key={site}
@@ -637,6 +1022,144 @@ export default function RelMon() {
       </div>
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
+
+        {/* ── Request Overview mode ─────────────────────────────────────── */}
+        {viewMode === 'requests' && (
+          <div className="flex-1 flex flex-col p-4 gap-3 overflow-hidden">
+            {/* Toolbar */}
+            <div className="flex items-center justify-between flex-wrap gap-2 flex-shrink-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
+                  RMS Requests — All Statuses, Sorted by Device Type
+                </p>
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  ({filteredRequestList.length} / {requestList.length} entries)
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {/* Search */}
+                <div className="relative">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                  <input
+                    type="text"
+                    value={reqSearch}
+                    onChange={(e) => setReqSearch(e.target.value)}
+                    placeholder="Search requests…"
+                    className="pl-7 pr-6 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-400 w-48"
+                  />
+                  {reqSearch && (
+                    <button onClick={() => setReqSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+                <button
+                  onClick={loadRequestList}
+                  disabled={reqListLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+                >
+                  {reqListLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  Sync
+                </button>
+                <button
+                  onClick={handleClearSavedData}
+                  disabled={clearingData}
+                  title="Clear all locally-saved RELMON sheet edits for this site"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-300 dark:border-rose-700 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors disabled:opacity-50"
+                >
+                  {clearingData ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                  Clear Saved RELMON Data
+                </button>
+                <button
+                  onClick={() => setReqFullView(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-blue-300 dark:border-blue-600 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                >
+                  <Maximize2 className="w-3.5 h-3.5" />
+                  Full View
+                </button>
+              </div>
+            </div>
+
+            {reqFullView && (
+              <div className="fixed inset-0 z-[9999] flex flex-col bg-white dark:bg-slate-900">
+                <div className="flex items-center justify-between px-6 py-3 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex-shrink-0">
+                  <div className="flex items-center gap-2">
+                    <ClipboardList className="w-5 h-5 text-blue-500 dark:text-blue-400" />
+                    <h2 className="font-bold text-slate-900 dark:text-white text-base">RMS Request Overview — Full View</h2>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">({filteredRequestList.length} / {requestList.length} entries)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={loadRequestList}
+                      disabled={reqListLoading}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+                    >
+                      {reqListLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                      Sync
+                    </button>
+                    <button
+                      onClick={() => setReqFullView(false)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      Exit Full View
+                    </button>
+                  </div>
+                </div>
+                <div className="flex-1 min-h-0 overflow-auto p-4">
+                  <RequestOverviewTable
+                    requests={filteredRequestList}
+                    loading={reqListLoading}
+                    error={!reqListLoading ? reqListError : null}
+                    onSelectSheet={(reqNo, site, matchedDevType) => {
+                      setReqFullView(false);
+                      const targetSite = site || activeSite;
+                      const allSheets = sites[targetSite] ?? [];
+                      const constructedName = matchedDevType ? `${matchedDevType} (${reqNo})` : null;
+                      const foundInList = allSheets.find((s) => s.includes(`(${reqNo})`));
+                      const sheetName = foundInList || constructedName || reqNo;
+                      const { family } = parseSheetFamily(sheetName);
+                      setActiveSite(targetSite);
+                      setActiveSheet(sheetName);
+                      setExpandedFamilies({ [family]: true });
+                      setViewMode('sheets');
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {reqListError && (
+              <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg text-sm text-red-700 dark:text-red-300 flex-shrink-0">
+                <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                <span>{reqListError}</span>
+              </div>
+            )}
+
+            <RequestOverviewTable
+              requests={filteredRequestList}
+              loading={reqListLoading}
+              error={!reqListLoading ? reqListError : null}
+              onSelectSheet={(reqNo, site, matchedDevType) => {
+                const targetSite = site || activeSite;
+                // Construct sheet name directly from known device type + req number
+                const constructedName = matchedDevType ? `${matchedDevType} (${reqNo})` : null;
+                // Also try to find in sites list as fallback
+                const allSheets = sites[targetSite] ?? [];
+                const foundInList = allSheets.find((s) => s.includes(`(${reqNo})`));
+                const sheetName = foundInList || constructedName || reqNo;
+                const { family } = parseSheetFamily(sheetName);
+                setActiveSite(targetSite);
+                setActiveSheet(sheetName);
+                setExpandedFamilies({ [family]: true });
+                setViewMode('sheets');
+              }}
+            />
+          </div>
+        )}
+
+        {/* ── Sheets (Excel-based) mode ─────────────────────────────────── */}
+        {viewMode === 'sheets' && (<>
         <aside className="w-56 flex-shrink-0 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col">
           <div className="p-2 border-b border-slate-200 dark:border-slate-700">
             <div className="relative">
@@ -845,6 +1368,7 @@ export default function RelMon() {
             </div>
           )}
         </main>
+        </>) } {/* end viewMode === 'sheets' */}
       </div>
 
       {showDeviceTypeModal && (

@@ -897,6 +897,11 @@ class AppSettings(BaseModel):
     tech_auth_code: str = "735522"
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+class ProcessPresetCreate(BaseModel):
+    label: str
+    description: Optional[str] = ""
+    steps: List[str]
+
 class SettingsUpdate(BaseModel):
     model_config = ConfigDict(extra="ignore")
     app_name: Optional[str] = None
@@ -2006,11 +2011,18 @@ async def create_request(
         if not request_number:
             year = datetime.now(timezone.utc).year
             prefix = request_type
+            pfx_len = len(f"{prefix}{year}") + 1
+            like_pat = f"{prefix}{year}%"
             # Lock row set to avoid parallel allocation collisions (SQLite immediate transaction)
             await db.execute("BEGIN IMMEDIATE")
+            # Check both request_number and original_rr_number (imported records store REL# there)
             cursor = await db.execute(
-                "SELECT MAX(CAST(SUBSTR(request_number, ?) AS INTEGER)) FROM requests WHERE request_number LIKE ?",
-                (len(f"{prefix}{year}") + 1, f"{prefix}{year}%")
+                "SELECT MAX(m) FROM ("
+                "  SELECT MAX(CAST(SUBSTR(request_number, ?) AS INTEGER)) AS m FROM requests WHERE request_number LIKE ?"
+                "  UNION ALL"
+                "  SELECT MAX(CAST(SUBSTR(original_rr_number, ?) AS INTEGER)) AS m FROM requests WHERE original_rr_number LIKE ?"
+                ")",
+                (pfx_len, like_pat, pfx_len, like_pat)
             )
             max_row = await cursor.fetchone()
             request_number = f"{prefix}{year}{(max_row[0] or 0) + 1:05d}"
@@ -2175,7 +2187,128 @@ async def get_requests(
     finally:
         await db.close()
 
-@api_router.get("/requests/{request_id}", response_model=RelRequest)
+
+# ── Process Monitoring endpoint ──────────────────────────────────────────────
+@api_router.get("/process-monitoring")
+async def get_process_monitoring(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Return all active requests with aggregated step statistics for the process
+    monitoring dashboard. Active = status NOT in completed / discontinued.
+    """
+    EXCLUDE_STATUSES = ('completed', 'discontinued')
+    excl_placeholders = ','.join('?' * len(EXCLUDE_STATUSES))
+
+    db = await get_db()
+    try:
+        # ── Fetch active requests (everything except completed / discontinued) ─
+        cursor = await db.execute(
+            f"""SELECT id, request_number, device_name, customer, lot_no,
+                       status, num_legs, created_at, updated_at,
+                       plant, classification, deadline, originator
+                FROM requests WHERE status NOT IN ({excl_placeholders})
+                ORDER BY updated_at DESC""",
+            EXCLUDE_STATUSES
+        )
+        req_rows = await cursor.fetchall()
+
+        if not req_rows:
+            return []
+
+        req_ids = [r[0] for r in req_rows]
+        id_placeholders = ','.join('?' * len(req_ids))
+
+        # ── Fetch step stats per request ─────────────────────────────────────
+        cursor = await db.execute(
+            f"""SELECT request_id, leg, status, COUNT(*) as cnt
+                FROM process_steps
+                WHERE request_id IN ({id_placeholders})
+                GROUP BY request_id, leg, status""",
+            req_ids
+        )
+        step_stat_rows = await cursor.fetchall()
+
+        # Build per-request stats map
+        from collections import defaultdict
+        stats: dict = defaultdict(lambda: {'total': 0, 'pending': 0, 'in_progress': 0,
+                                            'completed': 0, 'legs': set()})
+        for rs_id, leg, step_status, cnt in step_stat_rows:
+            stats[rs_id]['total'] += cnt
+            stats[rs_id]['legs'].add(leg)
+            key = step_status if step_status in ('pending', 'in_progress', 'completed') else 'pending'
+            stats[rs_id][key] += cnt
+
+        # ── Fetch all steps with operator info ──────────────────────────────
+        cursor = await db.execute(
+            f"""SELECT ps.request_id, ps.id, ps.leg, ps.step_number, ps.step_name,
+                       ps.status, ps.started_at, ps.completed_at,
+                       ps.machine_no, ps.rack_no, ps.operator_id, ps.tray_no,
+                       ps.qty_in, ps.qty_out, ps.notes, ps.custom_fields,
+                       e.name AS operator_name
+                FROM process_steps ps
+                LEFT JOIN employees e ON ps.operator_id = e.id
+                WHERE ps.request_id IN ({id_placeholders})
+                ORDER BY ps.request_id, ps.leg, ps.step_number""",
+            req_ids
+        )
+        step_rows = await cursor.fetchall()
+
+        # Group steps by request_id
+        steps_map: dict = defaultdict(list)
+        for row in step_rows:
+            steps_map[row[0]].append({
+                'id':             row[1],
+                'leg':            row[2],
+                'step_number':    row[3],
+                'step_name':      row[4],
+                'status':         row[5],
+                'started_at':     row[6],
+                'completed_at':   row[7],
+                'machine_no':     row[8],
+                'rack_no':        row[9],
+                'operator_id':    row[10],
+                'tray_no':        row[11],
+                'qty_in':         row[12],
+                'qty_out':        row[13],
+                'notes':          row[14],
+                'custom_fields':  json.loads(row[15]) if row[15] else {},
+                'operator_name':  row[16],
+            })
+
+        # ── Build response ───────────────────────────────────────────────────
+        result = []
+        for r in req_rows:
+            rs_id = r[0]
+            s = stats[rs_id]
+            result.append({
+                'id':             rs_id,
+                'request_number': r[1],
+                'device_name':    r[2],
+                'customer':       r[3],
+                'lot_no':         r[4],
+                'status':         r[5],
+                'num_legs':       r[6],
+                'created_at':     r[7],
+                'updated_at':     r[8],
+                'plant':          r[9],
+                'classification': r[10],
+                'deadline':       r[11],
+                'originator':     r[12],
+                'steps_total':    s['total'],
+                'steps_pending':  s['pending'],
+                'steps_in_progress': s['in_progress'],
+                'steps_completed':   s['completed'],
+                'num_active_legs':   len(s['legs']),
+                'steps':          steps_map[rs_id],
+            })
+
+        return result
+    finally:
+        await db.close()
+
+
+@api_router.get("/requests/{request_id}")
 async def get_request(request_id: str, current_user: User = Depends(get_current_user)):
     db = await get_db()
     try:
@@ -3059,6 +3192,626 @@ async def download_request_report(
     )
 
 
+# ── LTC Report ────────────────────────────────────────────────────────────────
+_LTC_TEMPLATE_PATH = Path(__file__).parent / "templates" / "REL LTC Template.xlsx"
+
+def _generate_ltc_excel(req: dict) -> bytes:  # noqa: C901
+    """Generate a filled LTC Excel matching the standard Reliability Test Request Sheet format.
+
+    Structure:
+      Rows  1-25 : Header section (from template, filled with request data)
+      Rows 26+   : Test Matrix rows (3 per lot: MRT, Precon, RelWithPrecon)
+      blank row  : separator
+      Page 1 row : 'Page 1 of N' indicator
+      Traveller  : One section per leg (RR header + title + col-headers + steps + blank)
+                   Page indicators inserted every 2 legs.
+      Footer     : Confirmed by / Revision History rows from last leg
+
+    Only as many traveller sections as there are real legs are written.
+    All template rows beyond the last written row are deleted, so a 1-leg
+    request produces a compact sheet with no empty traveller stubs.
+    """
+    import zipfile as _zipfile
+    import re as _re
+    from collections import defaultdict as _dd
+
+    if not _LTC_TEMPLATE_PATH.exists():
+        raise FileNotFoundError(
+            "LTC template not found. Please place 'REL LTC Template.xlsx' in backend/templates/."
+        )
+
+    wb = load_workbook(str(_LTC_TEMPLATE_PATH))
+    ws = wb["Sheet1"]
+
+    from datetime import date as _date
+    from openpyxl.cell.cell import MergedCell as _MergedCell
+    from openpyxl.styles import (
+        Font as _Font, PatternFill as _PFill,
+        Alignment as _Align, Border as _Border, Side as _Side,
+    )
+    import re as _reX
+    import math as _math
+
+    today = _date.today()
+
+    # ── style primitives ────────────────────────────────────────────────────────
+    _NONE_SIDE  = _Side(style=None)
+    _THIN_SIDE  = _Side(style='thin')
+    _MED_SIDE   = _Side(style='medium')
+    _BLACK_FILL = _PFill(patternType='solid', fgColor='FFA6A6A6')
+    _NO_FILL    = _PFill(fill_type=None)
+
+    def _bdr(l=None, r=None, t=None, b=None):
+        """Return a Border object. Use 'thin' or 'medium' for each side."""
+        def _s(v): return _Side(style=v) if v else _NONE_SIDE
+        return _Border(left=_s(l), right=_s(r), top=_s(t), bottom=_s(b))
+
+    _F_BLK     = _Font(name='Arial', size=11, color='FF000000')
+    _F_BBLK    = _Font(name='Arial', size=11, bold=True, color='FF000000')
+    _F_RED     = _Font(name='Arial', size=11, color='FFC00000')
+    _F_WHT_B11 = _Font(name='Arial', size=11, bold=True, color='FFFFFFFF')
+    _F_WHT_B12 = _Font(name='Arial', size=12, bold=True, color='FFFFFFFF')
+
+    _A_VC   = _Align(vertical='center')
+    _A_CC   = _Align(horizontal='center', vertical='center')
+    _A_LVC  = _Align(horizontal='left',   vertical='center')
+    _A_VCW  = _Align(vertical='center',   wrap_text=True)
+    _A_CCW  = _Align(horizontal='center', vertical='center', wrap_text=True)
+    _A_LVCW = _Align(horizontal='left',   vertical='center', wrap_text=True)
+    _A_CVCW = _Align(horizontal='center', vertical='center', wrap_text=True)
+
+    def _sc(r, c, font=None, fill=None, align=None, border=None, fmt=None):
+        """Apply style to cell (r,c) without touching its value."""
+        cell = ws.cell(row=r, column=c)
+        if isinstance(cell, _MergedCell):
+            return
+        if font   is not None: cell.font      = font
+        if fill   is not None: cell.fill      = fill
+        if align  is not None: cell.alignment = align
+        if border is not None: cell.border    = border
+        if fmt    is not None: cell.number_format = fmt
+
+    def _wv(r, c, value):
+        """Write value to (r,c). Safe for MergedCell."""
+        if value is None or (isinstance(value, str) and value.strip() == ''):
+            return
+        cell = ws.cell(row=r, column=c)
+        if not isinstance(cell, _MergedCell):
+            cell.value = value
+
+    def _ws_ref(ref: str, value):
+        if value is None or (isinstance(value, str) and value.strip() == ''):
+            return
+        cell = ws[ref]
+        if not isinstance(cell, _MergedCell):
+            cell.value = value
+
+    # ── Apply test-matrix row style (rows 26+) ─────────────────────────────────
+    def _style_matrix_row(r):
+        _TALL = _bdr('thin','thin','thin','thin')
+        _sc(r, 2, font=_F_RED,  fill=_NO_FILL, align=_A_CC,  border=_TALL)
+        for c in range(3, 21):
+            _sc(r, c, font=_F_BLK, fill=_NO_FILL, align=_A_VC, border=_TALL)
+
+    # ── Apply traveller RR-separator row style ─────────────────────────────────
+    def _style_rr_row(r):
+        _sc(r, 2,  font=_F_BLK)
+        _sc(r, 4,  font=_F_BLK)
+        _sc(r, 20, font=_F_BLK, border=_bdr(r='thin', t='thin', b='medium'))
+        ws.row_dimensions[r].height = 30
+
+    # ── Apply traveller title row style (LEG N bar, black fill) ────────────────
+    def _style_title_row(r):
+        _sc(r, 2,  font=_F_WHT_B12, fill=_BLACK_FILL, align=_A_LVC,
+                   border=_bdr('medium', None, 'medium', 'medium'))
+        for c in range(3, 20):
+            _sc(r, c, font=_F_WHT_B12, fill=_BLACK_FILL, align=_A_VC,
+                      border=_bdr(None, None, 'medium', 'medium'))
+        _sc(r, 20, font=_F_WHT_B12, fill=_BLACK_FILL, align=_A_VC,
+                   border=_bdr(None, 'medium', 'medium', 'medium'))
+        ws.row_dimensions[r].height = 30
+
+    # ── Apply column-headers row style (black fill, white bold) ────────────────
+    def _style_colhdr_row(r):
+        # base: black fill, white bold, top+bottom medium across all cols
+        _sc(r, 2,  font=_F_WHT_B11, fill=_BLACK_FILL, align=_A_VC,
+                   border=_bdr('medium', None,   'medium', 'medium'))
+        _sc(r, 3,  font=_F_WHT_B11, fill=_BLACK_FILL, align=_A_VC,
+                   border=_bdr(None,    None,    'medium', 'medium'))
+        _sc(r, 4,  font=_F_WHT_B11, fill=_BLACK_FILL, align=_A_VC,
+                   border=_bdr('thin',  None,    'medium', 'medium'))
+        for c in range(5, 8):
+            _sc(r, c, font=_F_WHT_B11, fill=_BLACK_FILL, align=_A_VC,
+                      border=_bdr(None, None, 'medium', 'medium'))
+        _sc(r, 8,  font=_F_WHT_B11, fill=_BLACK_FILL, align=_A_CCW,
+                   border=_bdr('thin', 'thin',  'medium', 'medium'))
+        _sc(r, 9,  font=_F_WHT_B11, fill=_BLACK_FILL, align=_A_CC,
+                   border=_bdr('thin', 'thin',  'medium', 'medium'))
+        _sc(r, 12, font=_F_WHT_B11, fill=_BLACK_FILL, align=_A_CC,
+                   border=_bdr('thin', 'thin',  'medium', 'medium'))
+        _sc(r, 15, font=_F_WHT_B11, fill=_BLACK_FILL, align=_A_CCW,
+                   border=_bdr('thin', 'thin',  'medium', 'medium'))
+        _sc(r, 17, font=_F_WHT_B11, fill=_BLACK_FILL, align=_A_CCW,
+                   border=_bdr('thin', 'thin',  'medium', 'medium'))
+        _sc(r, 19, font=_F_WHT_B11, fill=_BLACK_FILL, align=_A_CCW,
+                   border=_bdr('thin', 'thin',  'medium', 'medium'))
+        _sc(r, 20, font=_F_WHT_B11, fill=_BLACK_FILL, align=_A_CCW,
+                   border=_bdr('thin', 'medium','medium', 'medium'))
+        ws.row_dimensions[r].height = 30
+
+    # ── Apply step row style ───────────────────────────────────────────────────
+    def _style_step_row(r, first: bool = False, bold: bool = False):
+        fn = _F_BBLK if bold else _F_BLK
+        t  = 'medium' if first else 'thin'
+        # C2 : outer left wall
+        _sc(r, 2,  fn, None, _A_VC,   _bdr('medium', None,   t,      'thin'))
+        # C3 : separator between B/C
+        _sc(r, 3,  fn, None, _A_VC,   _bdr(None,    'thin',  t,      'thin'))
+        # C4–C7 : Test Condition span (D:G)
+        _sc(r, 4,  fn, None, _A_VC,   _bdr('thin',   None,   t,      'thin'))
+        _sc(r, 5,  fn, None, _A_VC,   _bdr(None,     None,   t,      'thin'))
+        _sc(r, 6,  fn, None, _A_VC,   _bdr(None,     None,   t,      'thin'))
+        _sc(r, 7,  fn, None, _A_VC,   _bdr(None,    'thin',  t,      'thin'))
+        # C8 : QTY IN
+        _sc(r, 8,  fn, None, _A_CC,   _bdr('thin',  'thin',  t,      'thin'))
+        # C9–C11 : Date/Time IN (merged header)
+        _sc(r, 9,  fn, None, _A_VC,   _bdr('thin',   None,   t,      'thin'))
+        _sc(r, 10, fn, None, _A_VC,   _bdr(None,     None,   t,      'thin'))
+        _sc(r, 11, fn, None, _A_VC,   _bdr(None,    'thin',  t,      'thin'))
+        # C12–C14 : Date/Time OUT (merged header)
+        _sc(r, 12, fn, None, _A_VC,   _bdr('thin',   None,   t,      'thin'))
+        _sc(r, 13, fn, None, _A_VC,   _bdr(None,     None,   t,      'thin'))
+        _sc(r, 14, fn, None, _A_VC,   _bdr(None,    'thin',  t,      'thin'))
+        # C15–C16 : Operator (merged header)
+        _sc(r, 15, fn, None, _A_VC,   _bdr('thin',   None,   t,      'thin'))
+        _sc(r, 16, fn, None, _A_VC,   _bdr(None,    'thin',  t,      'thin'))
+        # C17–C18 : Machine No. (merged header)
+        _sc(r, 17, fn, None, _A_VC,   _bdr('thin',   None,   t,      'thin'))
+        _sc(r, 18, fn, None, _A_VC,   _bdr(None,    'thin',  t,      'thin'))
+        # C19 : QTY Out
+        _sc(r, 19, fn, None, _A_VC,   _bdr('thin',  'thin',  t,      'thin'))
+        # C20 : outer right wall
+        _sc(r, 20, fn, None, _A_VC,   _bdr('thin',  'medium',t,      'thin'))
+        ws.row_dimensions[r].height = 30
+
+    # ── header section (rows 1-25, template positions) ─────────────────────────
+    req_num    = req.get("request_number", "") or ""
+    # Automated Rel Number (same as displayed in the Rel Request Header)
+    auto_rel   = req.get("original_rr_number") or req_num
+    logging.info(f"LTC F8 debug: request_number={req_num!r}, original_rr_number={req.get('original_rr_number')!r}, auto_rel={auto_rel!r}")
+
+    _ws_ref("D8", req_num if req.get("original_rr_number") else "")
+    # F8 = Automated Rel Number from Rel Request Header — always overwrite template value
+    cell_f8 = ws["F8"]
+    if not isinstance(cell_f8, _MergedCell):
+        cell_f8.value = auto_rel or ""
+        logging.info(f"LTC F8 written: {auto_rel!r}")
+    # P3 is formula =F8, so it auto-reflects the new F8 value
+
+    classification_str = req.get("classification", "") or ""
+    # Strip the auto REL# suffix appended after '|' so only the clean class shows in D9
+    clean_class = classification_str.split('|')[0].strip() if '|' in classification_str else classification_str
+    _ws_ref("D9",  clean_class or classification_str)
+
+    _ws_ref("O8",  req.get("product_hierarchy", ""))
+    _ws_ref("O9",  req.get("pdl", ""))
+    _ws_ref("D10", req.get("originator", ""))
+    body_x = req.get("body_size_x")
+    _ws_ref("O10", str(body_x) if body_x is not None else "")
+    _ws_ref("D11", req.get("plant", ""))
+    body_y = req.get("body_size_y")
+    _ws_ref("O11", str(body_y) if body_y is not None else "")
+    _ws_ref("D12", req.get("device_name", ""))
+    pkg_thick = req.get("package_thickness")
+    _ws_ref("O12", str(pkg_thick) if pkg_thick is not None else "")
+    _ws_ref("D13", req.get("lot_no", ""))
+    ball_pitch = req.get("ball_pitch")
+    _ws_ref("O13", str(ball_pitch) if ball_pitch is not None else "")
+    customer_val = (req.get("customer", "") or "").strip()
+    _ws_ref("D14", customer_val)
+    _ws_ref("O14", req.get("ball_count", ""))
+    _ws_ref("D15", req.get("pkg_info", ""))
+    lead_pitch = req.get("lead_pitch")
+    _ws_ref("O15", str(lead_pitch) if lead_pitch is not None else "")
+    _ws_ref("D16", "Yes" if req.get("automotive") else "No")
+    lead_count_val = req.get("lead_count")
+    if lead_count_val is not None:
+        try:
+            lead_count_val = int(float(str(lead_count_val)))
+        except (ValueError, TypeError):
+            pass
+    _ws_ref("O16", lead_count_val)
+
+    date_ltc_str = req.get("date_ltc")
+    date_ltc_val: _date = today
+    if date_ltc_str:
+        try:
+            date_ltc_val = _date.fromisoformat(str(date_ltc_str)[:10])
+        except Exception:
+            pass
+    ws["D17"].value = date_ltc_val
+
+    total_ss = str(req.get("total_ss", "") or "")
+    _ws_ref("O17", total_ss)
+    _ws_ref("D18", req.get("purpose", ""))
+
+    # Engineer Special Instruction: split at first newline → B21 / B22
+    eng_instr = req.get("engineer_special_instruction", "") or ""
+    eng_lines  = eng_instr.split("\n", 1)
+    _ws_ref("B21", eng_lines[0].strip())
+    if len(eng_lines) > 1 and eng_lines[1].strip():
+        _ws_ref("B22", eng_lines[1].strip())
+
+    # ── wipe rows 26+ (values + merged ranges) so we write cleanly ────────────
+    for mr in list(ws.merged_cells.ranges):
+        if mr.min_row >= 26:
+            ws.unmerge_cells(str(mr))
+    for row_cells in ws.iter_rows(min_row=26):
+        for cell in row_cells:
+            if not isinstance(cell, _MergedCell):
+                cell.value = None
+
+    # ── build step index ──────────────────────────────────────────────────────
+    req_num  = req.get("request_number", "")
+    steps_raw = req.get("steps", [])
+    steps_all = sorted(steps_raw, key=lambda s: (s.get("leg", 1), s.get("step_number", 0)))
+
+    legs: dict = _dd(list)
+    for step in steps_all:
+        legs[step.get("leg", 1)].append(step)
+    leg_nums = sorted(legs.keys())
+
+    def _tc(step) -> str:
+        return ((step.get("custom_fields") or {}).get("test_condition") or "")
+
+    def _default_tc(step_name: str) -> str:
+        """Return a sensible default Test Condition for well-known step types."""
+        n = (step_name or "").lower().strip()
+        if n in ("inspection", "incoming inspection"):
+            return "Note if units are in Jedec tray, Canister, TNR, etc."
+        if n == "visual":
+            return "X40"
+        if n in ("serialize samples", "serialize sample"):
+            ts = str(total_ss).strip()
+            return (f"Mark units from 1 to {ts} for SAT identification"
+                    if ts else "Mark units from 1 to (TOTAL SS) for SAT identification")
+        if n in ("o/s", "open/short"):
+            return "Open/Short"
+        if n == "sat":
+            return "T&C Scan"
+        return ""
+
+    def _tc_d(step) -> str:
+        """Return saved test_condition; fall back to step-type default when blank."""
+        saved = _tc(step)
+        return saved if saved else _default_tc(step.get("step_name", ""))
+
+    def _is_rr_step(s) -> bool:
+        return bool(_reX.match(r'^(RR\d+|REL\d+)', s.get("step_name", "")))
+
+    _FOOTER_NAMES = {"Confirmed by", "Spec No.", "Revision History:", "rev#", "0"}
+
+    def _is_footer_step(s) -> bool:
+        n = s.get("step_name", "")
+        return n in _FOOTER_NAMES or n.startswith("Spec No")
+
+    lot_no_str = (req.get("lot_no", "") or "").replace(";", ",")
+    lots = [lo.strip() for lo in lot_no_str.split(",") if lo.strip()]
+    if not lots:
+        lots = [lot_no_str.strip()] if lot_no_str.strip() else [""]
+
+    def _find_step(step_list, *keywords):
+        for kw in keywords:
+            for s in step_list:
+                if kw.lower() in s.get("step_name", "").lower():
+                    return s
+        return None
+
+    # ── TEST MATRIX ────────────────────────────────────────────────────────────
+    row = 26
+    for lot_idx, lot_n in enumerate(lots):
+        lot_label  = f"Lot {lot_idx + 1}"
+        odd_leg_n  = lot_idx * 2 + 1
+        even_leg_n = lot_idx * 2 + 2
+
+        odd_normal  = [s for s in legs.get(odd_leg_n,  []) if not _is_rr_step(s) and not _is_footer_step(s)]
+        even_normal = [s for s in legs.get(even_leg_n, []) if not _is_rr_step(s) and not _is_footer_step(s)]
+
+        if odd_normal:
+            tnh  = _find_step(odd_normal, "T&H")
+            refl = _find_step(odd_normal, "Reflow")
+            _wv(row, 2,  str(odd_leg_n))
+            _wv(row, 3,  lot_n)
+            _wv(row, 4,  lot_label)
+            _wv(row, 6,  "MRT")
+            _wv(row, 8,  "L3")
+            _wv(row, 10, _tc(tnh)  if tnh  else "")
+            _wv(row, 13, _tc(refl) if refl else "")
+            _wv(row, 18, "X")
+            _wv(row, 20, total_ss)
+            _style_matrix_row(row)
+            row += 1
+
+        if even_normal:
+            tnh_e  = _find_step(even_normal, "T&H")
+            refl_e = _find_step(even_normal, "Reflow")
+            tc_s   = _find_step(even_normal, "T/C B", "T/C C", "T/C")
+            _wv(row, 2,  str(even_leg_n))
+            _wv(row, 3,  lot_n)
+            _wv(row, 4,  lot_label)
+            _wv(row, 6,  "Precon")
+            _wv(row, 8,  "L3")
+            _wv(row, 10, _tc(tnh_e)  if tnh_e  else "")
+            _wv(row, 13, _tc(refl_e) if refl_e else "")
+            _wv(row, 17, "X")
+            _wv(row, 18, "X")
+            _wv(row, 20, total_ss)
+            _style_matrix_row(row)
+            row += 1
+
+            if tc_s:
+                _wv(row, 2,  str(even_leg_n))
+                _wv(row, 3,  lot_n)
+                _wv(row, 4,  lot_label)
+                _wv(row, 6,  "RelWithPrecon")
+                _wv(row, 8,  tc_s.get("step_name", "T/C B"))
+                _wv(row, 10, _tc(tc_s))
+                _wv(row, 13, "1000X")
+                _wv(row, 17, "X")
+                _wv(row, 18, "X")
+                _wv(row, 20, total_ss)
+                _style_matrix_row(row)
+                row += 1
+
+    # ── blank + Page 1 indicator ───────────────────────────────────────────────
+    traveller_legs = [n for n in leg_nums
+                      if any(not _is_rr_step(s) and not _is_footer_step(s) for s in legs[n])]
+    total_pages = 1 + max(1, _math.ceil(len(traveller_legs) / 2))
+
+    row += 1   # blank separator (row 35-equivalent)
+    _wv(row, 20, f"Page 1 of {total_pages}")
+    row += 1   # Page 1 indicator row
+
+    # ── TRAVELLER SECTIONS ─────────────────────────────────────────────────────
+    page_num   = 1
+    legs_done  = 0
+    all_footer_steps: list = []
+
+    for leg_num in traveller_legs:
+        leg_steps = legs[leg_num]
+        normal  = [s for s in leg_steps if not _is_rr_step(s) and not _is_footer_step(s)]
+        footer  = [s for s in leg_steps if _is_footer_step(s)]
+        all_footer_steps.extend(footer)
+        if not normal:
+            continue
+
+        # ── RR / RRS separator header row ────────────────────────────────────
+        _wv(row, 2, req_num)
+        _wv(row, 4, auto_rel)
+        _style_rr_row(row)
+        row += 1
+
+        # ── Title row: "Rel Test Traveller - REL"  LEG N ─────────────────────
+        _wv(row, 2, "Rel Test Traveller - REL")
+        _wv(row, 5, f"LEG {leg_num}")
+        _style_title_row(row)
+        row += 1
+
+        # ── Column headers row (merged: I:K, L:N, O:P, Q:R) ──────────────────
+        _wv(row, 2,  "Test Item")
+        _wv(row, 4,  "Test Condition")
+        _wv(row, 8,  "QTY IN")
+        _wv(row, 9,  "Date / Time IN")
+        _wv(row, 12, "Date / Time OUT")
+        _wv(row, 15, " Operator")
+        _wv(row, 17, "Machine No.")
+        _wv(row, 19, "QTY Out\nResult")
+        _wv(row, 20, "Tray No.")
+        ws.merge_cells(start_row=row, start_column=9,  end_row=row, end_column=11)
+        ws.merge_cells(start_row=row, start_column=12, end_row=row, end_column=14)
+        ws.merge_cells(start_row=row, start_column=15, end_row=row, end_column=16)
+        ws.merge_cells(start_row=row, start_column=17, end_row=row, end_column=18)
+        _style_colhdr_row(row)
+        row += 1
+
+        # ── Step rows ─────────────────────────────────────────────────────────
+        first_visual = True
+        after_tc     = False
+
+        for step_idx, step in enumerate(normal):
+            sname  = step.get("step_name", "")
+            tc_val = _tc_d(step)
+            is_first_step = (step_idx == 0)
+            is_bold = ("T&H" in sname or "T/C" in sname)
+
+            _wv(row, 2, sname)
+            _wv(row, 4, tc_val)
+            _style_step_row(row, first=is_first_step, bold=is_bold)
+
+            # Annotations
+            if sname == "Visual" and first_visual:
+                _wv(row, 5, "(Check Top Mark)")
+                first_visual = False
+            elif "T&H" in sname:
+                _wv(row, 5, "(L3)")
+            elif sname == "Reflow":
+                _wv(row, 5, "1st")
+                _wv(row, 6, "2nd")
+                _wv(row, 7, "3rd")
+            elif "T/C" in sname:
+                _wv(row, 6, "1000X")
+                after_tc = True
+            elif sname == "SAT" and after_tc:
+                ws.cell(row=row, column=11).value         = date_ltc_val
+                ws.cell(row=row, column=11).number_format = 'DD-MMM-YY'
+                after_tc = False
+
+            # D:G merge for Inspection / Serialize Samples rows
+            if sname in ("Inspection", "Serialize Samples"):
+                ws.merge_cells(start_row=row, start_column=4, end_row=row, end_column=7)
+                ws.cell(row, 4).alignment = _A_LVCW
+                ws.cell(row, 4).border    = _bdr('thin', 'thin', 'medium' if is_first_step else 'thin', 'thin')
+
+            row += 1
+
+        legs_done += 1
+
+        # ── blank separator after each traveller section ──────────────────────
+        row += 1
+
+        # ── page indicator every 2 legs ───────────────────────────────────────
+        if legs_done % 2 == 0 and legs_done < len(traveller_legs):
+            page_num += 1
+            _wv(row, 20, f"Page {page_num} of {total_pages}")
+            row += 1
+
+    # ── document footer (Confirmed by, Spec No., Revision History, etc.) ──────
+    if all_footer_steps:
+        for step in all_footer_steps:
+            sname  = step.get("step_name", "")
+            tc_val = _tc(step)
+            _wv(row, 2, sname)
+            if tc_val:
+                _wv(row, 4, tc_val)
+            _sc(row, 2, font=_F_BLK, align=_A_VC)
+            _sc(row, 4, font=_F_BLK, align=_A_VC)
+            row += 1
+
+    # ── final page indicator ──────────────────────────────────────────────────
+    _wv(row, 20, f"Page {total_pages} of {total_pages}")
+    last_content_row = row
+
+    # ── delete all template rows beyond what we actually wrote ─────────────────
+    # This ensures 1-leg requests produce a compact sheet with no ghost rows.
+    if ws.max_row > last_content_row:
+        ws.delete_rows(last_content_row + 1, ws.max_row - last_content_row)
+
+    # ── save via openpyxl ──────────────────────────────────────────────────────
+    openpyxl_buf = io.BytesIO()
+    wb.save(openpyxl_buf)
+    openpyxl_buf.seek(0)
+
+    with _zipfile.ZipFile(openpyxl_buf, 'r') as gen_zip:
+        gen_names = set(gen_zip.namelist())
+        sheet_xml = gen_zip.read('xl/worksheets/sheet1.xml')
+        # openpyxl writes <drawing xmlns:r="..." r:id="rId1"/> but the
+        # original sheet1.xml.rels maps rId2=drawing, rId1=printerSettings.
+        # Patch to rId2 while keeping the inline xmlns:r declaration.
+        _R_NS = b'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+        sheet_xml = _re.sub(
+            rb'<drawing\b[^>]*/>',
+            b'<drawing ' + _R_NS + b' r:id="rId2"/>',
+            sheet_xml
+        )
+        shared_strings = (
+            gen_zip.read('xl/sharedStrings.xml')
+            if 'xl/sharedStrings.xml' in gen_names
+            else None
+        )
+        # CRITICAL: openpyxl adds new xf entries to styles.xml when writing
+        # to cells. sheet1.xml s= indices reference the openpyxl styles list.
+        # If we keep the original styles.xml (fewer entries) Excel crashes with
+        # IndexError (cell style index out of range → "file format invalid").
+        styles_xml = (
+            gen_zip.read('xl/styles.xml')
+            if 'xl/styles.xml' in gen_names
+            else None
+        )
+
+    # rebuild ZIP from original template
+    output = io.BytesIO()
+    with _zipfile.ZipFile(str(_LTC_TEMPLATE_PATH), 'r') as tpl_zip, \
+         _zipfile.ZipFile(output, 'w', _zipfile.ZIP_DEFLATED) as out_zip:
+        for name in tpl_zip.namelist():
+            if name == 'xl/worksheets/sheet1.xml':
+                out_zip.writestr(name, sheet_xml)
+            elif name == 'xl/sharedStrings.xml':
+                if shared_strings is not None:
+                    # Use openpyxl's updated sharedStrings
+                    out_zip.writestr(name, shared_strings)
+                else:
+                    # openpyxl uses inline strings — drop stale template
+                    # sharedStrings to avoid Excel showing old cached values
+                    pass
+            elif name == 'xl/styles.xml' and styles_xml is not None:
+                # Use openpyxl's styles.xml — it has extra xf entries that
+                # sheet1.xml's s= attributes reference.  Keeping the original
+                # (fewer entries) causes IndexError / "file format invalid".
+                out_zip.writestr(name, styles_xml)
+            elif name == 'xl/calcChain.xml':
+                # Dropped: dangling Content_Types/rels reference causes
+                # "file format invalid" if we keep those references.
+                pass
+            elif name == '[Content_Types].xml':
+                # Remove calcChain + sharedStrings overrides if files were dropped.
+                ct = tpl_zip.read(name)
+                ct = _re.sub(
+                    rb'<Override\s+PartName="/xl/calcChain\.xml"[^>]*/>',
+                    b'',
+                    ct
+                )
+                if shared_strings is None:
+                    ct = _re.sub(
+                        rb'<Override\s+PartName="/xl/sharedStrings\.xml"[^>]*/>',
+                        b'',
+                        ct
+                    )
+                out_zip.writestr(name, ct)
+            elif name == 'xl/_rels/workbook.xml.rels':
+                rels = tpl_zip.read(name)
+                rels = _re.sub(
+                    rb'<Relationship\s[^>]*calcChain[^>]*/>',
+                    b'',
+                    rels
+                )
+                if shared_strings is None:
+                    rels = _re.sub(
+                        rb'<Relationship\s[^>]*sharedStrings[^>]*/>',
+                        b'',
+                        rels
+                    )
+                out_zip.writestr(name, rels)
+            else:
+                out_zip.writestr(name, tpl_zip.read(name))
+
+    output.seek(0)
+    return output.getvalue()
+
+
+@api_router.get("/requests/{request_id}/ltc")
+async def download_ltc_report(
+    request_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Generate and download a filled LTC for a request."""
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM requests WHERE id = ?", (request_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Request not found")
+        req = await _row_to_request_dict(db, row)
+    finally:
+        await db.close()
+
+    try:
+        excel_bytes = _generate_ltc_excel(req)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logging.error(f"LTC generation error for {request_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"LTC generation failed: {str(e)}")
+
+    rr = req.get("request_number", request_id)
+    filename = f"LTC_{rr}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(excel_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
+
 # Additional report endpoint for step-level exports
 @api_router.get('/reports/steps')
 async def download_step_report(
@@ -3625,7 +4378,20 @@ async def approve_request(
         if row[1] != 'approval':
             raise HTTPException(status_code=400, detail=f"Request is not pending approval (current status: '{row[1]}')")
         now = datetime.now(timezone.utc).isoformat()
-        await db.execute("UPDATE requests SET status = 'testing', approved_at = ?, updated_at = ? WHERE id = ?", (now, now, request_id))
+        # Set planner_est_start to approval time so it appears in Masterlist "Est. Date/Time of Start"
+        # and in Rel Request Planner Estimation "Est. Start Date"
+        await db.execute(
+            "UPDATE requests SET status = 'testing', approved_at = ?, planner_est_start = COALESCE(planner_est_start, ?), updated_at = ? WHERE id = ?",
+            (now, now, now, request_id),
+        )
+        # Also sync est_start in masterlist_2026 if a matching row exists
+        cursor = await db.execute("SELECT request_number FROM requests WHERE id = ?", (request_id,))
+        rn_row = await cursor.fetchone()
+        if rn_row and rn_row[0]:
+            await db.execute(
+                "UPDATE masterlist_2026 SET est_start = COALESCE(est_start, ?) WHERE rrs_no = ? AND (est_start IS NULL OR est_start = '')",
+                (now, rn_row[0]),
+            )
         # Auto-set the first step of every leg to 'in_progress' (In Queue)
         cursor = await db.execute(
             "SELECT DISTINCT leg FROM process_steps WHERE request_id = ?", (request_id,))
@@ -3792,9 +4558,19 @@ async def replace_request_steps(
     still exist at the same position with the same name."""
     db = await get_db()
     try:
-        cursor = await db.execute("SELECT id FROM requests WHERE id = ?", (request_id,))
-        if not await cursor.fetchone():
+        cursor = await db.execute("SELECT id, status FROM requests WHERE id = ?", (request_id,))
+        req_row = await cursor.fetchone()
+        if not req_row:
             raise HTTPException(status_code=404, detail="Request not found")
+
+        # Non-Admin users can only edit process steps before the request is approved
+        if current_user.role != 'Admin':
+            post_approval = {'testing', 'in_progress', 'analysis', 'completed', 'discontinued'}
+            if req_row[1] in post_approval:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Process steps can only be modified before the request is approved"
+                )
 
         if len(payload.steps) == 0:
             raise HTTPException(status_code=400, detail="At least one step is required")
@@ -3831,7 +4607,7 @@ async def replace_request_steps(
                 await db.execute(
                     """INSERT INTO process_steps (request_id, leg, step_number, step_name, status,
                        started_at, completed_at, machine_no, rack_no, operator_id, tray_no, notes, attachments, custom_fields)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (request_id, payload.leg, step_num, step_name, old['status'],
                      old['started_at'], old['completed_at'], old['machine_no'], old.get('rack_no'), old['operator_id'],
                      old['tray_no'], old['notes'], old['attachments'], old['custom_fields']))
@@ -3845,7 +4621,7 @@ async def replace_request_steps(
                 await db.execute(
                     """INSERT INTO process_steps (request_id, leg, step_number, step_name, status,
                        started_at, completed_at, machine_no, rack_no, operator_id, tray_no, notes, attachments, custom_fields)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (request_id, payload.leg, step_num, step_name, 'pending',
                      None, None, None, None, None, None, None, '[]', json.dumps(cf)))
 
@@ -4082,16 +4858,20 @@ async def remove_leg(
 # Dashboard Routes
 # ========================
 @api_router.get("/dashboard/stats", response_model=DashboardStats)
-async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
+async def get_dashboard_stats(mine: bool = False, current_user: User = Depends(get_current_user)):
     db = await get_db()
     try:
+        uf_sql = " AND created_by = ?" if mine else ""
+        r_uf_sql = " AND r.created_by = ?" if mine else ""
+        uf_param = [current_user.id] if mine else []
+
         async def cnt(st=None):
             if st:
-                q = "SELECT COUNT(*) FROM requests WHERE status = ?"
-                p = [st]
+                q = f"SELECT COUNT(*) FROM requests WHERE status = ?{uf_sql}"
+                p = [st] + uf_param
             else:
-                q = "SELECT COUNT(*) FROM requests"
-                p = []
+                q = f"SELECT COUNT(*) FROM requests WHERE 1=1{uf_sql}"
+                p = list(uf_param)
             c = await db.execute(q, p)
             return (await c.fetchone())[0]
 
@@ -4110,8 +4890,8 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         three_days = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
 
         # Delayed requests
-        dq = "SELECT * FROM requests WHERE deadline IS NOT NULL AND deadline != '' AND status != 'completed' AND deadline < ?"
-        cursor = await db.execute(dq, [today])
+        dq = f"SELECT * FROM requests WHERE deadline IS NOT NULL AND deadline != '' AND status != 'completed' AND deadline < ?{uf_sql}"
+        cursor = await db.execute(dq, [today] + uf_param)
         delayed_rows = await cursor.fetchall()
         delayed_list = [{
             "id": r[0], "request_number": r[1], "device_name": r[5] or '',
@@ -4121,8 +4901,8 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         delayed_list.sort(key=lambda x: x['created_at'])
 
         # Upcoming deadlines
-        uq = "SELECT * FROM requests WHERE deadline IS NOT NULL AND deadline != '' AND status != 'completed' AND deadline >= ? AND deadline <= ?"
-        cursor = await db.execute(uq, [today, three_days])
+        uq = f"SELECT * FROM requests WHERE deadline IS NOT NULL AND deadline != '' AND status != 'completed' AND deadline >= ? AND deadline <= ?{uf_sql}"
+        cursor = await db.execute(uq, [today, three_days] + uf_param)
         upcoming_rows = await cursor.fetchall()
         upcoming = len(upcoming_rows)
         upcoming_list = [{
@@ -4133,8 +4913,8 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         upcoming_list.sort(key=lambda x: x['deadline'])
 
         # Noticed requests (have a non-empty note)
-        nq = "SELECT * FROM requests WHERE note IS NOT NULL AND note != '' AND status != 'completed' ORDER BY updated_at DESC"
-        cursor = await db.execute(nq)
+        nq = f"SELECT * FROM requests WHERE note IS NOT NULL AND note != '' AND status != 'completed'{uf_sql} ORDER BY updated_at DESC"
+        cursor = await db.execute(nq, uf_param)
         noticed_rows = await cursor.fetchall()
         noticed_list = [{
             "id": r[0], "request_number": r[1], "device_name": r[5] or '',
@@ -4149,9 +4929,9 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
             "JOIN requests r ON ps.request_id = r.id "
             "WHERE LOWER(ps.step_name) = 'incoming inspection' "
             "AND ps.status IN ('pending', 'in_progress') "
-            "AND r.status != 'completed'"
+            f"AND r.status != 'completed'{r_uf_sql}"
         )
-        cursor = await db.execute(iiq)
+        cursor = await db.execute(iiq, uf_param)
         incoming_inspection_count = (await cursor.fetchone())[0]
 
         # Visual steps pending/in_progress
@@ -4160,7 +4940,7 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
             "JOIN requests r ON ps.request_id = r.id "
             "WHERE LOWER(ps.step_name) = 'visual' "
             "AND ps.status IN ('pending', 'in_progress') "
-            "AND r.status != 'completed'"
+            f"AND r.status != 'completed'{r_uf_sql}", uf_param
         )
         visual_count = (await cursor.fetchone())[0]
 
@@ -4170,7 +4950,7 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
             "JOIN requests r ON ps.request_id = r.id "
             "WHERE LOWER(ps.step_name) = 'sat' "
             "AND ps.status IN ('pending', 'in_progress') "
-            "AND r.status != 'completed'"
+            f"AND r.status != 'completed'{r_uf_sql}", uf_param
         )
         sat_count = (await cursor.fetchone())[0]
 
@@ -4180,7 +4960,7 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
             "JOIN requests r ON ps.request_id = r.id "
             "WHERE LOWER(ps.step_name) = 'bake' "
             "AND ps.status IN ('pending', 'in_progress') "
-            "AND r.status != 'completed'"
+            f"AND r.status != 'completed'{r_uf_sql}", uf_param
         )
         bake_count = (await cursor.fetchone())[0]
 
@@ -4190,7 +4970,7 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
             "JOIN requests r ON ps.request_id = r.id "
             "WHERE LOWER(ps.step_name) = 'hts' "
             "AND ps.status IN ('pending', 'in_progress') "
-            "AND r.status != 'completed'"
+            f"AND r.status != 'completed'{r_uf_sql}", uf_param
         )
         hts_count = (await cursor.fetchone())[0]
 
@@ -4199,7 +4979,7 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
             "SELECT COUNT(*) FROM process_steps ps "
             "JOIN requests r ON ps.request_id = r.id "
             "WHERE ps.status = 'hold' "
-            "AND r.status != 'completed'"
+            f"AND r.status != 'completed'{r_uf_sql}", uf_param
         )
         hold_count = (await cursor.fetchone())[0]
 
@@ -4209,9 +4989,9 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
             "r.note, GROUP_CONCAT(ps.step_name, ', ') AS hold_steps "
             "FROM requests r "
             "JOIN process_steps ps ON ps.request_id = r.id "
-            "WHERE ps.status = 'hold' AND r.status != 'completed' "
+            f"WHERE ps.status = 'hold' AND r.status != 'completed'{r_uf_sql} "
             "GROUP BY r.id "
-            "ORDER BY r.updated_at DESC"
+            "ORDER BY r.updated_at DESC", uf_param
         )
         hold_req_rows = await cursor.fetchall()
         hold_requests_list = [{
@@ -4229,9 +5009,9 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
             "SUM(CASE WHEN ps.status='hold' THEN 1 ELSE 0 END) AS hold "
             "FROM process_steps ps "
             "JOIN requests r ON ps.request_id = r.id "
-            "WHERE r.status != 'completed' "
+            f"WHERE r.status != 'completed'{r_uf_sql} "
             "GROUP BY CASE WHEN UPPER(ps.step_name) = 'SAT' THEN 'SAT' ELSE ps.step_name END "
-            "ORDER BY MIN(ps.step_number)"
+            "ORDER BY MIN(ps.step_number)", uf_param
         )
         sp_rows = await cursor.fetchall()
         step_progress = [
@@ -4240,8 +5020,8 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         ]
 
         # Recent activity
-        rq = "SELECT * FROM requests ORDER BY updated_at DESC LIMIT 10"
-        cursor = await db.execute(rq)
+        rq = f"SELECT * FROM requests WHERE 1=1{uf_sql} ORDER BY updated_at DESC LIMIT 10"
+        cursor = await db.execute(rq, uf_param)
         recent_rows = await cursor.fetchall()
         recent_activity = [{
             "id": r[0], "request_number": r[1], "device_name": r[5] or '',
@@ -4536,6 +5316,79 @@ async def update_settings(
 
         await db.commit()
         return {"message": "Settings updated successfully"}
+    finally:
+        await db.close()
+
+
+@api_router.post("/process-presets")
+async def create_process_preset(
+    data: ProcessPresetCreate,
+    current_user: User = Depends(get_current_user)
+):
+    if not data.label.strip():
+        raise HTTPException(status_code=400, detail="Process name is required")
+    if not data.steps:
+        raise HTTPException(status_code=400, detail="At least one step is required")
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT process_presets FROM settings WHERE id = 1")
+        row = await cursor.fetchone()
+        current_presets = json.loads(row[0]) if row and row[0] else []
+
+        preset_id = f"custom_{int(datetime.now(timezone.utc).timestamp())}_{current_user.id[:8]}"
+        new_preset = {
+            "id": preset_id,
+            "label": data.label.strip(),
+            "description": data.description or "",
+            "steps": data.steps,
+            "created_by": current_user.id,
+            "created_by_username": current_user.username,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "is_custom": True,
+        }
+        updated_presets = current_presets + [new_preset]
+        now = datetime.now(timezone.utc).isoformat()
+
+        cursor2 = await db.execute("SELECT id FROM settings WHERE id = 1")
+        exists = await cursor2.fetchone()
+        if exists:
+            await db.execute(
+                "UPDATE settings SET process_presets = ?, updated_at = ? WHERE id = 1",
+                [json.dumps(updated_presets), now]
+            )
+        else:
+            await db.execute(
+                "INSERT INTO settings (id, process_presets, updated_at) VALUES (1, ?, ?)",
+                [json.dumps(updated_presets), now]
+            )
+        await db.commit()
+        return {"message": "Process preset created", "preset": new_preset}
+    finally:
+        await db.close()
+
+
+@api_router.delete("/process-presets/{preset_id}")
+async def delete_process_preset(
+    preset_id: str,
+    current_user: User = Depends(require_permission('manage_settings'))
+):
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT process_presets FROM settings WHERE id = 1")
+        row = await cursor.fetchone()
+        if not row or not row[0]:
+            raise HTTPException(status_code=404, detail="Preset not found")
+        presets = json.loads(row[0])
+        updated = [p for p in presets if str(p.get("id")) != str(preset_id)]
+        if len(updated) == len(presets):
+            raise HTTPException(status_code=404, detail="Preset not found")
+        now = datetime.now(timezone.utc).isoformat()
+        await db.execute(
+            "UPDATE settings SET process_presets = ?, updated_at = ? WHERE id = 1",
+            [json.dumps(updated), now]
+        )
+        await db.commit()
+        return {"message": "Process preset deleted"}
     finally:
         await db.close()
 
@@ -5222,21 +6075,29 @@ async def import_requests_from_excel(
                 results_errors.append({'file': fname, 'errors': file_errors})
                 continue
 
-            # Always auto-generate REL# — store the old RR# for reference
-            original_rr = request_data.pop('request_number', None)
-            rrs_number = request_data.pop('rrs_number', None)
+            # Retain the original RR# as the primary request_number.
+            # Auto-generate a REL# and store it in original_rr_number for internal reference.
+            request_number = request_data.get('request_number', None)
+            request_data.pop('rrs_number', None)  # RRS# no longer stored separately
 
             db = await get_db()
             year = datetime.now(timezone.utc).year
+            pfx_len = len(f"REL{year}") + 1
+            like_pat = f"REL{year}%"
+            # Check both request_number and original_rr_number for max REL sequence
             cursor = await db.execute(
-                "SELECT MAX(CAST(SUBSTR(request_number, ?) AS INTEGER)) FROM requests WHERE request_number LIKE ?",
-                (len(f"REL{year}") + 1, f"REL{year}%")
+                "SELECT MAX(m) FROM ("
+                "  SELECT MAX(CAST(SUBSTR(request_number, ?) AS INTEGER)) AS m FROM requests WHERE request_number LIKE ?"
+                "  UNION ALL"
+                "  SELECT MAX(CAST(SUBSTR(original_rr_number, ?) AS INTEGER)) AS m FROM requests WHERE original_rr_number LIKE ?"
+                ")",
+                (pfx_len, like_pat, pfx_len, like_pat)
             )
             max_row = await cursor.fetchone()
-            request_number = f"REL{year}{(max_row[0] or 0) + 1:05d}"
-            request_data['original_rr_number'] = original_rr or None
+            auto_rel_number = f"REL{year}{(max_row[0] or 0) + 1:05d}"
+            request_data['original_rr_number'] = auto_rel_number  # store auto REL# here
 
-            # Check for duplicate request_number
+            # Check for duplicate request_number (using the original RR#)
             dup_cursor = await db.execute(
                 "SELECT id FROM requests WHERE request_number = ?", (request_number,)
             )
@@ -5247,16 +6108,7 @@ async def import_requests_from_excel(
                 })
                 continue
 
-            # Store RRS# in classification if present, keep classification clean
-            if rrs_number:
-                existing_class = request_data.get('classification', '')
-                if existing_class:
-                    request_data['classification'] = f"{existing_class} | {rrs_number}"
-                else:
-                    request_data['classification'] = rrs_number
-
             steps = [ProcessStep(**step) for step in DEFAULT_STEPS]
-            request_data['request_number'] = request_number
             request_data['status'] = 'incoming'
 
             request_obj = RelRequest(
@@ -5388,20 +6240,29 @@ async def import_requests_from_word(
                 results_errors.append({'file': fname, 'errors': file_errors})
                 continue
 
-            original_rr = request_data.pop('request_number', None)
+            # Retain the original RR# as the primary request_number.
+            # Auto-generate an RMS# and store it in original_rr_number for internal reference.
+            request_number = request_data.get('request_number', None)
 
             db = await get_db()
             now = datetime.now(timezone.utc)
             year = now.year
             week = now.isocalendar()[1]
             rms_prefix = f"RMS{year}{week:02d}"
+            pfx_len = len(rms_prefix) + 1
+            like_pat = f"{rms_prefix}%"
+            # Check both request_number and original_rr_number for max RMS sequence
             cursor = await db.execute(
-                "SELECT MAX(CAST(SUBSTR(request_number, ?) AS INTEGER)) FROM requests WHERE request_number LIKE ?",
-                (len(rms_prefix) + 1, f"{rms_prefix}%")
+                "SELECT MAX(m) FROM ("
+                "  SELECT MAX(CAST(SUBSTR(request_number, ?) AS INTEGER)) AS m FROM requests WHERE request_number LIKE ?"
+                "  UNION ALL"
+                "  SELECT MAX(CAST(SUBSTR(original_rr_number, ?) AS INTEGER)) AS m FROM requests WHERE original_rr_number LIKE ?"
+                ")",
+                (pfx_len, like_pat, pfx_len, like_pat)
             )
             max_row = await cursor.fetchone()
-            request_number = f"{rms_prefix}{(max_row[0] or 0) + 1:02d}"
-            request_data['original_rr_number'] = original_rr or None
+            auto_rms_number = f"{rms_prefix}{(max_row[0] or 0) + 1:02d}"
+            request_data['original_rr_number'] = auto_rms_number  # store auto RMS# here
 
             dup_cursor = await db.execute(
                 "SELECT id FROM requests WHERE request_number = ?", (request_number,)
@@ -5414,7 +6275,7 @@ async def import_requests_from_word(
                 continue
 
             steps = [ProcessStep(**step) for step in DEFAULT_STEPS]
-            request_data['request_number'] = request_number
+            request_data['request_type'] = 'RMS'
             request_data['status'] = 'incoming'
 
             request_obj = RelRequest(
@@ -5423,14 +6284,14 @@ async def import_requests_from_word(
             )
 
             await db.execute(
-                """INSERT INTO requests (id, request_number, classification, originator, plant,
+                """INSERT INTO requests (id, request_number, request_type, classification, originator, plant,
                    device_name, lot_no, customer, pkg_info, automotive, date_ltc,
                    product_hierarchy, pdl, body_size_x, body_size_y, package_thickness,
                    ball_pitch, ball_count, lead_pitch, lead_count, total_ss, purpose,
                    engineer_special_instruction, deadline, created_by, created_by_username,
                    created_at, updated_at, status, current_step, original_rr_number)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (request_obj.id, request_obj.request_number,
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (request_obj.id, request_obj.request_number, request_obj.request_type,
                  request_obj.classification or '', request_obj.originator or '',
                  request_obj.plant or '', request_obj.device_name or '',
                  request_obj.lot_no or '', request_obj.customer or '',
@@ -5863,6 +6724,556 @@ async def import_whisker_request(
         raise
     except Exception as e:
         logging.error(f"Whisker import error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        await db.close()
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Agile RSS Report Excel Import
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _parse_agile_excel(contents: bytes) -> dict:
+    """
+    Parse an Agile RSS Report Excel (.xlsx) file.
+
+    Returns a dict:
+      {
+        'request_number': str,          # e.g. 'RR00143452'
+        'classification': str,
+        'originator': str,
+        'plant': str,
+        'device_name': str,
+        'lot_no': str,
+        'customer': str,
+        'pkg_info': str,
+        'automotive': bool,
+        'purpose': str,
+        'total_ss': str,
+        'product_hierarchy': str,
+        'pdl': str,
+        'body_size_x': str,
+        'body_size_y': str,
+        'lead_pitch': str,
+        'lead_count': str,
+        'ball_pitch': str,
+        'ball_count': str,
+        'package_thickness': str,
+        'special_instruction': str,
+        'legs': [
+            {
+              'leg_num': int,
+              'lot_no': str,
+              'other_info': str,
+              'target_device': str,
+              'rows': [
+                {
+                  'test_type': str,       # 'MRT' / 'Precon' / 'RelWithPrecon'
+                  'test_item': str,
+                  'test_condition': str,
+                  'reading_point': str,
+                  'has_el': bool,
+                  'has_os': bool,
+                  'has_sat': bool,
+                  'has_ca': bool,
+                  'ss': str,
+                }
+              ],
+              'steps': [str],            # derived step names for the leg
+            }
+        ],
+        'errors': [str],
+      }
+    """
+    import io
+    import openpyxl as _xl
+
+    wb = _xl.load_workbook(io.BytesIO(contents), data_only=True)
+    # Use sheet 0 (Agile Export Report0) for both general info and test matrix
+    ws = wb.worksheets[0]
+
+    def _cv(row_idx, col_idx):
+        """Get cell value from 1-based row/col, return stripped string or ''."""
+        val = ws.cell(row=row_idx, column=col_idx).value
+        return str(val).strip() if val is not None else ''
+
+    errors = []
+
+    # ── General Information block ─────────────────────────────────────────
+    # File layout (confirmed from real Agile / REL Request Sheet):
+    #   Left section : label in col B (2), value in col C (3)
+    #   Right section: label in col D (4), value in col E (5)
+    general = {}
+    for r in range(1, ws.max_row + 1):
+        label       = _cv(r, 2).lower().strip()
+        value       = _cv(r, 3)   # col C
+        right_label = _cv(r, 4).lower().strip()  # col D
+        right_value = _cv(r, 5)   # col E
+        if label:
+            general[label] = value
+        if right_label:
+            general[right_label] = right_value
+
+    def _g(key):
+        return general.get(key.lower(), '')
+
+    request_number    = _g('request number')
+    classification    = _g('classification')
+    originator        = _g('originator')
+    plant             = _g('plant')
+    device_name       = _g('device name')
+    lot_no            = _g('lot no')
+    customer          = _g('customer')
+    pkg_info_raw      = _g('pkg info')
+    automotive_str    = _g('automotive')
+    purpose           = _g('purpose')
+    total_ss          = _g('total s/s')
+    product_hierarchy = _g('product hierarchy')
+    pdl               = _g('pdl')
+    body_size_x       = _g('body size x (mm)')
+    body_size_y       = _g('body size y (mm)')
+    package_thickness = _g('package thickness (mm)')
+    lead_pitch        = _g('lead pitch (mm)')
+    lead_count        = _g('lead count')
+    ball_pitch        = _g('ball pitch (mm)')
+    ball_count        = _g('ball count')
+    date_ltc_raw      = _g('date (ltc)') or _g('date ltc') or _g('date_ltc')
+
+    # RRS# lives in cell F8 (col 6, row 8)
+    rrs_number = _cv(8, 6)  # e.g. 'RRS# 220260257'
+
+    automotive = automotive_str.lower() in ('yes', 'true', '1', 'y')
+
+    # ── Engineer Special Instruction ─────────────────────────────────────
+    special_instruction = ''
+    for r in range(1, ws.max_row + 1):
+        if 'engineer special instruction' in _cv(r, 2).lower() and 'option' not in _cv(r, 2).lower():
+            # next non-empty row in col B is the actual text
+            for r2 in range(r + 1, min(r + 5, ws.max_row + 1)):
+                v = _cv(r2, 2)
+                if v:
+                    special_instruction = v
+                    break
+            break
+
+    # ── Test Matrix block ─────────────────────────────────────────────────
+    # Find the header row that contains 'Leg', 'Test Type', 'Test Item', etc.
+    matrix_header_row = None
+    col_leg = col_lot = col_other = col_target = col_test_type = None
+    col_test_item = col_condition = col_reading = col_el = col_os = col_sat = col_ca = col_ss = None
+
+    for r in range(1, ws.max_row + 1):
+        row_vals = [ws.cell(row=r, column=c).value for c in range(1, 20)]
+        row_strs = [str(v).strip().lower() if v else '' for v in row_vals]
+        if 'leg' in row_strs and 'test type' in row_strs:
+            matrix_header_row = r
+            for i, s in enumerate(row_strs):
+                col_i = i + 1
+                if s == 'leg' and col_leg is None:
+                    col_leg = col_i
+                elif s == 'assy lot no' and col_lot is None:
+                    col_lot = col_i
+                elif s == 'other info' and col_other is None:
+                    col_other = col_i
+                elif s == 'target device' and col_target is None:
+                    col_target = col_i
+                elif s == 'test type' and col_test_type is None:
+                    col_test_type = col_i
+                elif s in ('test item', 'test items') and col_test_item is None:
+                    col_test_item = col_i
+                elif s == 'test condition' and col_condition is None:
+                    col_condition = col_i
+                elif s in ('reflow / reading point', 'reflow/reading point', 'reading point') and col_reading is None:
+                    col_reading = col_i
+                elif s == 'e/l' and col_el is None:
+                    col_el = col_i
+                elif s == 'o/s' and col_os is None:
+                    col_os = col_i
+                elif s == 'sat' and col_sat is None:
+                    col_sat = col_i
+                elif s == 'ca' and col_ca is None:
+                    col_ca = col_i
+                elif s == 'ss' and col_ss is None:
+                    col_ss = col_i
+            break
+
+    if matrix_header_row is None:
+        errors.append('Could not find Test Matrix header row in the Excel file.')
+        return {
+            'request_number': request_number, 'classification': classification,
+            'originator': originator, 'plant': plant, 'device_name': device_name,
+            'lot_no': lot_no, 'customer': customer, 'pkg_info': pkg_info_raw,
+            'automotive': automotive, 'purpose': purpose, 'total_ss': total_ss,
+            'product_hierarchy': product_hierarchy, 'pdl': pdl,
+            'body_size_x': body_size_x, 'body_size_y': body_size_y,
+            'package_thickness': package_thickness, 'lead_pitch': lead_pitch,
+            'lead_count': lead_count, 'ball_pitch': ball_pitch, 'ball_count': ball_count,
+            'date_ltc': date_ltc_raw, 'rrs_number': rrs_number,
+            'special_instruction': special_instruction,
+            'legs': [], 'errors': errors,
+        }
+
+    # ── Parse test matrix data rows ───────────────────────────────────────
+    legs_map: dict = {}   # leg_num (int) → dict
+
+    for r in range(matrix_header_row + 1, ws.max_row + 1):
+        # Stop if leading numeric column is empty AND second column is empty
+        c1 = _cv(r, 1)
+        leg_val = _cv(r, col_leg) if col_leg else ''
+        if not leg_val and not c1:
+            continue
+
+        # Try to parse leg number — must be a digit
+        try:
+            leg_num = int(leg_val)
+        except (ValueError, TypeError):
+            continue
+
+        lot_val    = _cv(r, col_lot)    if col_lot    else ''
+        other_val  = _cv(r, col_other)  if col_other  else ''
+        target_val = _cv(r, col_target) if col_target else ''
+        type_val   = _cv(r, col_test_type)  if col_test_type  else ''
+        item_val   = _cv(r, col_test_item)  if col_test_item  else ''
+        cond_val   = _cv(r, col_condition)  if col_condition  else ''
+        read_val   = _cv(r, col_reading)    if col_reading    else ''
+        el_val     = _cv(r, col_el)         if col_el         else ''
+        os_val     = _cv(r, col_os)         if col_os         else ''
+        sat_val    = _cv(r, col_sat)        if col_sat        else ''
+        ca_val     = _cv(r, col_ca)         if col_ca         else ''
+        ss_val     = _cv(r, col_ss)         if col_ss         else ''
+
+        row_data = {
+            'test_type':      type_val,
+            'test_item':      item_val,
+            'test_condition': cond_val,
+            'reading_point':  read_val,
+            'has_el':         el_val.upper() == 'X',
+            'has_os':         os_val.upper() == 'X',
+            'has_sat':        sat_val.upper() == 'X',
+            'has_ca':         ca_val.upper() == 'X',
+            'ss':             ss_val,
+        }
+
+        if leg_num not in legs_map:
+            legs_map[leg_num] = {
+                'leg_num':      leg_num,
+                'lot_no':       lot_val,
+                'other_info':   other_val,
+                'target_device': target_val,
+                'rows':         [],
+            }
+
+        legs_map[leg_num]['rows'].append(row_data)
+
+    # ── Fixed process step presets (must match Settings.jsx PROCESS_PRESETS) ──
+    _AGILE_STEPS_MRT = [
+        'Incoming Inspection', 'Visual', 'Serialize Samples', 'O/S', 'SAT',
+        'Bake', 'Dry Bake', 'Preconditioning (Precon)',
+        'Moisture Resistance Test', 'Forced Convection Reflow (FCR)',
+        'Temperature Cycle', 'SAT', 'O/S', 'Visual',
+    ]
+    _AGILE_STEPS_PRECON_LONG = [
+        'Incoming Inspection', 'Visual', 'Serialize Samples', 'O/S', 'SAT',
+        'Bake', 'Dry Bake', 'T & H Soak', 'Reflow', 'SAT', 'O/S', 'Visual',
+        'Reliability Test', 'Temperature Cycle', 'SAT', 'O/S', 'Visual',
+    ]
+    _AGILE_STEPS_REL_ONLY = [
+        'Incoming Inspection', 'Visual', 'Serialize Samples', 'O/S', 'SAT',
+        'Bake', 'Dry Bake', 'T & H Soak', 'Reflow',
+        'Reliability Test', 'Temperature Cycle', 'SAT', 'O/S', 'Visual',
+    ]
+
+    # ── Derive process steps per leg ───────────────────────────────────────
+    def _steps_for_leg(rows):
+        """
+        Select the process step preset for a leg based on its Test Type rows:
+
+          - MRT only              → MRT Process preset
+          - Precon + RelWithPrecon → Precon + Long Term preset
+          - RelWithPrecon only    → Rel Only preset
+          - Precon only           → Rel Only preset (closest match)
+          - Any other / fallback  → Rel Only preset
+        """
+        # Normalize: strip spaces and lowercase all test type strings
+        test_types = {r['test_type'].lower().replace(' ', '').strip() for r in rows}
+
+        has_mrt          = 'mrt' in test_types
+        has_precon       = 'precon' in test_types
+        has_rel_with_pre = 'relwithprecon' in test_types
+        has_rel_only     = 'relonly' in test_types
+
+        if has_mrt and not has_precon and not has_rel_with_pre and not has_rel_only:
+            # Leg has only MRT rows → MRT Process
+            steps, ptype = list(_AGILE_STEPS_MRT), 'MRT Process'
+        elif has_rel_with_pre:
+            # Any leg containing RelWithPrecon (with or without Precon) → Precon + Long Term
+            steps, ptype = list(_AGILE_STEPS_PRECON_LONG), 'Precon + Long Term'
+        else:
+            # Explicit "Rel Only" / "RelOnly", Precon alone, or any other fallback → Rel Only
+            steps, ptype = list(_AGILE_STEPS_REL_ONLY), 'Rel Only'
+
+        # Auto-remove O/S and/or SAT steps if the column has no "X" for this leg
+        leg_has_os  = any(r.get('has_os',  False) for r in rows)
+        leg_has_sat = any(r.get('has_sat', False) for r in rows)
+        if not leg_has_os:
+            steps = [s for s in steps if s != 'O/S']
+        if not leg_has_sat:
+            steps = [s for s in steps if s != 'SAT']
+
+        return steps, ptype
+
+    legs_list = []
+    for leg_num in sorted(legs_map.keys()):
+        leg = dict(legs_map[leg_num])
+        steps, process_type = _steps_for_leg(leg['rows'])
+        leg['steps'] = steps
+        leg['process_type'] = process_type
+        legs_list.append(leg)
+
+    return {
+        'request_number':    request_number,
+        'classification':    classification,
+        'originator':        originator,
+        'plant':             plant,
+        'device_name':       device_name,
+        'lot_no':            lot_no,
+        'customer':          customer,
+        'pkg_info':          pkg_info_raw,
+        'automotive':        automotive,
+        'purpose':           purpose,
+        'total_ss':          total_ss,
+        'product_hierarchy': product_hierarchy,
+        'pdl':               pdl,
+        'body_size_x':       body_size_x,
+        'body_size_y':       body_size_y,
+        'package_thickness': package_thickness,
+        'lead_pitch':        lead_pitch,
+        'lead_count':        lead_count,
+        'ball_pitch':        ball_pitch,
+        'ball_count':        ball_count,
+        'date_ltc':          date_ltc_raw,
+        'rrs_number':        rrs_number,
+        'special_instruction': special_instruction,
+        'legs':              legs_list,
+        'errors':            errors,
+    }
+
+
+@api_router.post("/requests/import-agile/preview")
+async def preview_agile_import(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_permission('import_requests'))
+):
+    """Return parsed data from an Agile RSS Report Excel file without creating anything."""
+    fname = file.filename or 'unknown'
+    if not fname.lower().endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail='Please upload an Excel (.xlsx) file')
+
+    contents = await file.read()
+    try:
+        parsed = _parse_agile_excel(contents)
+    except Exception as e:
+        logging.error(f"Agile preview error: {e}", exc_info=True)
+        raise HTTPException(status_code=422, detail=f'Could not parse file: {e}')
+
+    return parsed
+
+
+@api_router.post("/requests/import-agile")
+async def import_agile_request(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_permission('import_requests'))
+):
+    """
+    Parse an Agile RSS Report Excel file and create a new REL request
+    with process steps derived from the test matrix.
+    """
+    fname = file.filename or 'unknown'
+    if not fname.lower().endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail='Please upload an Excel (.xlsx) file')
+
+    contents = await file.read()
+    try:
+        parsed = _parse_agile_excel(contents)
+    except Exception as e:
+        logging.error(f"Agile parse error: {e}", exc_info=True)
+        raise HTTPException(status_code=422, detail=f'Could not parse file: {e}')
+
+    legs_data = parsed.get('legs', [])
+    if not legs_data:
+        raise HTTPException(status_code=422, detail='No test matrix legs found in the file')
+
+    # ── Classify the classification string ───────────────────────────────
+    raw_class = parsed.get('classification', '')
+    # Keep as-is; strip the code prefix if it looks like "E : Engineering Evaluation"
+    classification = raw_class
+
+    # ── Parse numeric fields ──────────────────────────────────────────────
+    def _to_float(s):
+        import re as _r
+        m = _r.search(r'[\d.]+', (s or '').replace(',', ''))
+        try:
+            return float(m.group()) if m else None
+        except Exception:
+            return None
+
+    def _to_int(s):
+        v = _to_float(s)
+        return int(v) if v is not None else None
+
+    db = await get_db()
+    try:
+        now = datetime.now(timezone.utc)
+        year = now.year
+
+        # ── Retain original RR# — auto-generate REL# for internal reference ─
+        original_rr = parsed.get('request_number', '') or ''
+        pfx_len = len(f"REL{year}") + 1
+        like_pat = f"REL{year}%"
+        # Check both request_number and original_rr_number for max REL sequence
+        cursor = await db.execute(
+            "SELECT MAX(m) FROM ("
+            "  SELECT MAX(CAST(SUBSTR(request_number, ?) AS INTEGER)) AS m FROM requests WHERE request_number LIKE ?"
+            "  UNION ALL"
+            "  SELECT MAX(CAST(SUBSTR(original_rr_number, ?) AS INTEGER)) AS m FROM requests WHERE original_rr_number LIKE ?"
+            ")",
+            (pfx_len, like_pat, pfx_len, like_pat)
+        )
+        max_row = await cursor.fetchone()
+        auto_rel_number = f"REL{year}{(max_row[0] or 0) + 1:05d}"
+
+        # Use original RR# as the primary identifier if available, else auto REL#
+        request_number = original_rr if original_rr else auto_rel_number
+        original_rr_number = auto_rel_number  # auto REL# stored as reference
+
+        dup = await db.execute("SELECT id FROM requests WHERE request_number = ?", (request_number,))
+        if await dup.fetchone():
+            raise HTTPException(status_code=409, detail=f"Request '{request_number}' already exists")
+
+        req_id = str(uuid.uuid4())
+
+        await db.execute(
+            """INSERT INTO requests
+               (id, request_number, classification, originator, plant,
+                device_name, lot_no, customer, pkg_info, automotive, date_ltc,
+                product_hierarchy, pdl, body_size_x, body_size_y, package_thickness,
+                ball_pitch, ball_count, lead_pitch, lead_count, total_ss, purpose,
+                engineer_special_instruction, deadline, created_by, created_by_username,
+                created_at, updated_at, status, current_step, num_legs, original_rr_number)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (req_id, request_number,
+             classification,
+             parsed.get('originator', ''),
+             parsed.get('plant', ''),
+             parsed.get('device_name', ''),
+             parsed.get('lot_no', ''),
+             parsed.get('customer', ''),
+             parsed.get('pkg_info', ''),
+             1 if parsed.get('automotive') else 0,
+             parsed.get('date_ltc') or None,
+             parsed.get('product_hierarchy', '') or None,
+             parsed.get('pdl', '') or None,
+             _to_float(parsed.get('body_size_x', '')),
+             _to_float(parsed.get('body_size_y', '')),
+             _to_float(parsed.get('package_thickness', '')),
+             _to_float(parsed.get('ball_pitch', '')) or None,
+             _to_int(parsed.get('ball_count', '')) or None,
+             _to_float(parsed.get('lead_pitch', '')) or None,
+             _to_int(parsed.get('lead_count', '')) or None,
+             parsed.get('total_ss', '') or None,
+             parsed.get('purpose', ''),
+             parsed.get('special_instruction', ''),
+             None,
+             current_user.id, current_user.username,
+             now.isoformat(), now.isoformat(),
+             'incoming', 1,
+             str(len(legs_data)),
+             original_rr_number)
+        )
+
+        # ── Create process steps per leg ──────────────────────────────────
+        for leg in legs_data:
+            leg_num = leg['leg_num']
+            step_names = leg.get('steps', [s['step_name'] for s in DEFAULT_STEPS])
+
+            # Gather custom fields from the test matrix rows.
+            # Map each test type's data to the matching step name in the preset.
+            cf_by_step: dict = {}
+            for row in leg.get('rows', []):
+                tt = row['test_type'].lower().strip()
+                if tt == 'relwithprecon' and 'Reliability Test' not in cf_by_step:
+                    cf_by_step['Reliability Test'] = {
+                        'test_item':      row['test_item'],
+                        'test_condition': row['test_condition'],
+                        'read_points':    row['reading_point'],
+                    }
+                if tt == 'precon' and 'Preconditioning (Precon)' not in cf_by_step:
+                    cf_by_step['Preconditioning (Precon)'] = {
+                        'test_condition': row['test_condition'],
+                        'read_points':    row['reading_point'],
+                    }
+                if tt == 'mrt':
+                    # MRT step data goes on Moisture Resistance Test step
+                    if 'Moisture Resistance Test' not in cf_by_step:
+                        cf_by_step['Moisture Resistance Test'] = {
+                            'test_item':      row['test_item'],
+                            'test_condition': row['test_condition'],
+                            'read_points':    row['reading_point'],
+                        }
+                    # Also carry the test condition onto FCR step
+                    if 'Forced Convection Reflow (FCR)' not in cf_by_step:
+                        cf_by_step['Forced Convection Reflow (FCR)'] = {
+                            'test_condition': row['reading_point'],
+                        }
+
+            for step_num, step_name in enumerate(step_names, start=1):
+                cf = cf_by_step.get(step_name, {})
+                # Determine qty_in from SS of the first row with a value
+                qty_in_val = None
+                if step_num == 1:
+                    for row in leg.get('rows', []):
+                        try:
+                            qty_in_val = int(row['ss'])
+                            break
+                        except (ValueError, TypeError):
+                            pass
+
+                await db.execute(
+                    """INSERT INTO process_steps
+                       (request_id, leg, step_number, step_name, status,
+                        started_at, completed_at, machine_no, operator_id,
+                        tray_no, qty_in, notes, attachments, custom_fields)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (req_id, leg_num, step_num, step_name, 'pending',
+                     None, None, None, None,
+                     None, qty_in_val, None,
+                     json.dumps([]), json.dumps(cf))
+                )
+
+        await db.commit()
+
+        return {
+            'request_id':     req_id,
+            'request_number': request_number,
+            'device_name':    parsed.get('device_name', ''),
+            'num_legs':       len(legs_data),
+            'legs': [
+                {
+                    'leg':    l['leg_num'],
+                    'lot_no': l['lot_no'],
+                    'target_device': l['target_device'],
+                    'steps':  l['steps'],
+                }
+                for l in legs_data
+            ],
+            'warnings': parsed.get('errors', []),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Agile import error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         await db.close()
@@ -7078,18 +8489,18 @@ async def get_masterlist_requests(current_user: User = Depends(get_current_user)
         )
         rows = await cursor.fetchall()
 
-        # Batch-load all stress-test step conditions for all requests in one query
+        # Batch-load all stress-test step conditions with leg info for per-leg test level computation
         steps_cursor = await db.execute(
-            "SELECT request_id, step_name, custom_fields "
+            "SELECT request_id, leg, step_name, custom_fields "
             "FROM process_steps ORDER BY request_id, leg, step_number"
         )
         all_steps = await steps_cursor.fetchall()
 
-        # Group steps by request_id
+        # Group steps by request_id → leg → list[(step_name, custom_fields_json)]
         from collections import defaultdict
-        req_steps: dict = defaultdict(list)
+        req_leg_steps: dict = defaultdict(lambda: defaultdict(list))
         for s in all_steps:
-            req_steps[s[0]].append((s[1], s[2]))  # (step_name, custom_fields_json)
+            req_leg_steps[s[0]][s[1]].append((s[2], s[3]))
 
         result = []
         for r in rows:
@@ -7119,14 +8530,14 @@ async def get_masterlist_requests(current_user: User = Depends(get_current_user)
             stored_lc_bc = r[14] or ""
             lc_bc = stored_lc_bc if stored_lc_bc else _ml_compute_lc_bc(r[21], r[22], r[23], r[24])
 
-            # Test Level: stored → auto-computed from stress-test steps (never falls back to step name)
             stored_test_level = r[25] or ""
-            if stored_test_level:
-                test_level = stored_test_level
-            else:
-                test_level = _compute_test_level_from_steps(req_steps.get(r[0], []))
 
-            result.append({
+            # Build one row per UNIQUE test level so each request shows no duplicate test level rows
+            legs_data = req_leg_steps.get(r[0], {})
+            leg_nums = sorted(legs_data.keys()) if legs_data else []
+
+            # Base fields shared across all leg rows for this request
+            base = {
                 "id": r[0],
                 "request_number": r[1],
                 "ww": ww,
@@ -7138,16 +8549,46 @@ async def get_masterlist_requests(current_user: User = Depends(get_current_user)
                 "pkg_type": r[4] or "",
                 "lc_bc": lc_bc,
                 "rr_agile_no": r[5] or "",
-                "test_level": test_level,
                 "qty": r[15] or r[9] or "",
                 "num_days": r[16] or "",
-                "num_legs": r[17] or "",
+                "num_legs": r[17] or str(len(leg_nums)) if leg_nums else "",
                 "est_start": r[10] or "",
                 "est_completion": r[11] or "",
                 "recommit": r[18] or "",
                 "planner_remarks": r[12] or "",
                 "status": r[19] or "",
-            })
+            }
+
+            if not leg_nums:
+                # No process steps yet — single row with stored/auto test level
+                tl = stored_test_level or _compute_test_level_from_steps([])
+                result.append({**base, "test_level": tl, "leg_number": None, "is_first_leg": True})
+            else:
+                # Compute per-leg test levels then deduplicate (preserve order of first occurrence)
+                seen_tl: list[str] = []
+                for leg_num in leg_nums:
+                    if stored_test_level:
+                        leg_tl = stored_test_level
+                    else:
+                        leg_tl = _compute_test_level_from_steps(legs_data[leg_num])
+                    if leg_tl not in seen_tl:
+                        seen_tl.append(leg_tl)
+
+                for i, leg_tl in enumerate(seen_tl):
+                    leg_row = dict(base)
+                    leg_row["test_level"] = leg_tl
+                    leg_row["leg_number"] = i + 1
+                    leg_row["is_first_leg"] = (i == 0)
+
+                    # Blank the request-identity columns for non-first unique-test-level rows
+                    # (mirrors how Excel masterlist shows sub-rows grouped under one RR#)
+                    if i > 0:
+                        for k in ("ww", "date_received", "rrs_no", "purpose", "qual_type",
+                                  "customer", "pkg_type", "lc_bc", "rr_agile_no"):
+                            leg_row[k] = ""
+
+                    result.append(leg_row)
+
         return result
     finally:
         await db.close()
@@ -7319,6 +8760,53 @@ async def get_loading_unloading(current_user: User = Depends(get_current_user)):
                 'lot_no': row[14] or '',
                 'employee_name': row[15] or '',
                 'machine_desc': row[16] or '',
+            })
+        return result
+    finally:
+        await db.close()
+
+
+@api_router.get("/loading-unloading/scheduled")
+async def get_loading_unloading_scheduled(current_user: User = Depends(get_current_user)):
+    """Return pending (scheduled) monitored stress-test steps from active Rel Requests."""
+    placeholders = ','.join('?' * len(MONITORED_STEP_NAMES))
+    query = f"""
+        SELECT
+            ps.id, ps.request_id, ps.step_number, ps.step_name, ps.leg,
+            ps.status, ps.custom_fields,
+            r.request_number, r.device_name, r.customer, r.lot_no, r.status AS req_status
+        FROM process_steps ps
+        JOIN requests r ON ps.request_id = r.id
+        WHERE LOWER(ps.step_name) IN ({placeholders})
+          AND r.status NOT IN ('discontinued', 'completed')
+          AND ps.status = 'pending'
+        ORDER BY r.created_at DESC, ps.leg, ps.step_number
+    """
+    db = await get_db()
+    try:
+        cursor = await db.execute(query, MONITORED_STEP_NAMES)
+        rows = await cursor.fetchall()
+        result = []
+        for row in rows:
+            cf = {}
+            try:
+                cf = json.loads(row[6]) if row[6] else {}
+            except Exception:
+                pass
+            result.append({
+                'id': row[0],
+                'request_id': row[1],
+                'step_number': row[2],
+                'step_name': row[3],
+                'leg': row[4],
+                'status': 'scheduled',
+                'test_item': cf.get('test_item', ''),
+                'test_condition': cf.get('test_condition', ''),
+                'request_number': row[7],
+                'device_name': row[8] or '',
+                'customer': row[9] or '',
+                'lot_no': row[10] or '',
+                'req_status': row[11] or '',
             })
         return result
     finally:
@@ -7746,12 +9234,132 @@ _STRESS_STEP_KEYWORDS = frozenset([
 ])
 
 
+def _derive_test_level_direct(steps: list) -> str:
+    """Derive a human-readable test level directly from step names and custom_fields
+    without needing Test Items.xlsx.  Used as fallback when the file is unavailable."""
+    import re as _re2
+
+    has_precon = False
+    msl_level: str | None = None
+    tc_parts: list[str] = []          # Temperature Cycle descriptors per step
+    has_thb = False
+    has_hast = False
+    has_hts = False
+    has_elfr = False
+    has_pct = False
+    has_htol = False
+
+    for step_name, cf_raw in steps:
+        sn = (step_name or "").strip()
+        snl = sn.lower()
+        try:
+            cf = json.loads(cf_raw) if cf_raw else {}
+        except Exception:
+            cf = {}
+        ti = (cf.get("test_item") or "").strip()
+        tc = (cf.get("test_condition") or "").strip()
+
+        # Preconditioning
+        if "precon" in snl:
+            has_precon = True
+
+        # Moisture Resistance Test / MRT → MSL level
+        if "moisture resistance" in snl or ("mrt" in snl and "moisture" in snl):
+            # test_item field stores "L1" / "L2" / "L3"
+            m = _re2.match(r"L\s*([123])", ti.upper()) if ti else None
+            if m:
+                msl_level = m.group(1)
+            elif tc:
+                # Infer from condition: "30/60-192" → L3, "60/60-40" → L2, "85/85-168" → L1
+                if "30/60" in tc:
+                    msl_level = "3"
+                elif "60/60" in tc:
+                    msl_level = "2"
+                elif "85/85" in tc:
+                    msl_level = "1"
+
+        # Temperature Cycle
+        if any(x in snl for x in ["temperature cycle", "temp cycle", "t/c a", "t/c b", "t/c c", "t/c h"]):
+            label = ""
+            if tc:
+                # "TC B -55/+125 1000X", "TCB 500CYC", etc.
+                lm = _re2.search(r"TC\s*([A-Z])", tc.upper())
+                cm = _re2.search(r"(\d{3,})\s*(?:X\b|CYC)", tc.upper())
+                if lm:
+                    label = f"TC{lm.group(1)}"
+                    if cm:
+                        label += f" {cm.group(1)}CYC"
+            if not label:
+                # Try to read letter from the step name
+                lm = _re2.search(r"\bT/C\s+([A-Z])\b", sn.upper())
+                if lm:
+                    label = f"TC{lm.group(1)}"
+                else:
+                    label = "T/C"
+            if label not in tc_parts:
+                tc_parts.append(label)
+
+        # T&H Soak / THB
+        if any(x in snl for x in ["t & h soak", "t&h soak", "t/h soak", "thb soak", "thb"]):
+            has_thb = True
+
+        # HAST / bHAST
+        if "hast" in snl:
+            has_hast = True
+
+        # HTS
+        if "hts" in snl or ("high temp" in snl and "storage" in snl):
+            has_hts = True
+
+        # ELFR
+        if "elfr" in snl:
+            has_elfr = True
+
+        # PCT
+        if "pct" in snl:
+            has_pct = True
+
+        # HTOL
+        if "htol" in snl:
+            has_htol = True
+
+    # ── Build result ───────────────────────────────────────────────────────
+    parts: list[str] = []
+
+    if msl_level:
+        base = f"L{msl_level} 260"
+        parts.append(f"PRECON {base}" if has_precon else base)
+
+    if has_thb:
+        parts.append("T&H SOAK")
+
+    if has_hast:
+        parts.append("BHAST" if has_hast else "HAST")
+
+    if has_hts:
+        parts.append("HTS")
+
+    if has_elfr:
+        parts.append("ELFR")
+
+    if has_htol:
+        parts.append("HTOL")
+
+    if has_pct:
+        parts.append("PCT")
+
+    parts.extend(tc_parts)
+
+    return ", ".join(parts)
+
+
 def _compute_test_level_from_steps(steps: list) -> str:
     """Given list of (step_name, custom_fields_json) for a request,
     return comma-joined unique matching Test Items."""
     items = _load_test_items()
     if not items:
-        return ""
+        # Test Items.xlsx not present — derive directly from step data
+        return _derive_test_level_direct(steps)
 
     matched: list[str] = []
     seen: set[str] = set()
@@ -7933,6 +9541,81 @@ async def _get_saved_relmon_record(site: str, sheet: str) -> Optional[aiosqlite.
 
 def _resolve_relmon_site(site: str) -> str:
     return _RELMON_SITE_ALIASES.get(site, site)
+
+
+# Plant name variants → canonical RELMON site
+# Covers: "ATP1", "ATP|P1", "ATP P1", "ATPP1" → ATP1
+#         "ATP3", "ATP|P3", "ATP P3", "ATPP3" → ATP3  (ATP2 alias also kept)
+def _normalize_relmon_plant(plant: str) -> str:
+    """Normalise a free-form plant/site string to the canonical ATP1 / ATP3 label."""
+    if not plant:
+        return 'ATP1'
+    p = plant.strip().upper()
+    # Remove separators so 'ATP|P1', 'ATP P1', 'ATPP1' all collapse the same way
+    p = p.replace('|', '').replace(' ', '').replace('-', '')
+    if p in ('ATP1', 'ATPP1'):
+        return 'ATP1'
+    if p in ('ATP2', 'ATPP2'):
+        return 'ATP3'   # ATP2 is an alias for ATP3 in this system
+    if p in ('ATP3', 'ATPP3'):
+        return 'ATP3'
+    # Fall back: return as-is so truly unknown sites are preserved
+    return plant.strip()
+
+
+# ── Package-type → RELMON site/device-type inference ────────────────────────
+# Derived from actual RELMON Excel sheet names (ATP1 Q4'2025 / ATP3 Q4'2025).
+# Listed most-specific first so the first prefix match wins.
+_RELMON_PKG_KEYWORD_MAP: list[tuple[str, str, str]] = [
+    # (normalized_prefix_no_spaces_upper, canonical_site, display_label)
+    # ── ATP3 packages ────────────────────────────────────────────────────────
+    ("POWERMLF",   "ATP3", "PowerMLF"),
+    ("CABGA",      "ATP3", "CABGA"),
+    ("CTBGA",      "ATP3", "CABGA"),     # CTBGA is a CABGA variant
+    ("PBGA",       "ATP3", "PBGA"),
+    ("SIPCA",      "ATP3", "SiP-CA"),
+    ("SIP",        "ATP3", "SiP-CA"),
+    ("MODULE",     "ATP3", "MODULES"),
+    ("SMLF",       "ATP3", "sMLF"),      # sMLF prefix (s stripped by normalise below)
+    ("CAVITY",     "ATP3", "CAVITY"),    # CAVITY MEMS / CAVITY LF
+    # ── ATP1 packages ────────────────────────────────────────────────────────
+    ("EPTSSOP",    "ATP1", "EpTSSOP"),
+    ("EPTQFP",     "ATP1", "EpTQFP"),
+    ("EPLQFP",     "ATP1", "EpLQFP"),
+    ("EPSOIC",     "ATP1", "EP SOIC"),
+    ("TSSOP",      "ATP1", "TSSOP"),
+    ("TQFP",       "ATP1", "TQFP"),
+    ("LQFP",       "ATP1", "LQFP"),
+    ("MQFP",       "ATP1", "MQFP"),
+    ("SSOP",       "ATP1", "SSOP"),
+    ("PSOP",       "ATP1", "PSOP"),
+    ("PLCC",       "ATP1", "PLCC"),
+    ("PMLF",       "ATP1", "pMLF"),
+    ("SOIC",       "ATP1", "SOIC 150"),
+    ("SC70",       "ATP1", "SOT_SC70"),
+    ("SOT",        "ATP1", "SOT"),
+    # ── Default: bare MLF without s/POWER prefix → ATP3 sMLF ────────────────
+    ("MLF",        "ATP3", "sMLF"),
+]
+
+
+def _infer_relmon_site_from_pkg(pkg_info: str) -> tuple[str, str] | None:
+    """Infer (canonical_site, device_type_label) from a pkg_info string.
+
+    Strips spaces / hyphens / underscores / pipes and does an upper-case
+    prefix match against _RELMON_PKG_KEYWORD_MAP.
+    Returns None if nothing matches.
+    """
+    if not pkg_info:
+        return None
+    # Compact upper-case: remove separators so 'sMLF-MS' → 'SMLFMS'
+    norm = (pkg_info.strip().upper()
+            .replace(' ', '').replace('-', '').replace('_', '')
+            .replace('|', '').replace('/', ''))
+    for keyword, site, label in _RELMON_PKG_KEYWORD_MAP:
+        if norm.startswith(keyword):
+            return (site, label)
+    return None
 
 
 def _relmon_sheet_device_type(sheet_name: str) -> str:
@@ -8135,27 +9818,27 @@ async def get_relmon_data(site: str, sheet: str):
 @api_router.put("/relmon/data")
 async def save_relmon_data(payload: RelMonSaveRequest, current_user: User = Depends(get_current_user)):
     """Save editable RELMON rows and input-form data for a specific site/sheet."""
-    if payload.site not in _RELMON_FILES:
-        raise HTTPException(status_code=404, detail=f"Site '{payload.site}' not found")
+    if not payload.site or not payload.site.strip():
+        raise HTTPException(status_code=400, detail="Site cannot be empty")
     if not payload.sheet or not payload.sheet.strip():
         raise HTTPException(status_code=400, detail="Sheet cannot be empty")
 
-    # Best-effort source validation while allowing saves when the workbook is temporarily locked
-    # or when saving a custom (DB-only) sheet not present in the workbook.
-    try:
-        _parse_relmon_sheet(payload.site, payload.sheet)
-    except PermissionError:
-        existing = await _get_saved_relmon_record(payload.site, payload.sheet)
-        if not existing:
-            raise HTTPException(
-                status_code=423,
-                detail="Source workbook is locked and this sheet has no saved baseline yet",
-            )
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except ValueError:
-        # Sheet not in workbook – allowed for user-added custom sheets
-        pass
+    # Best-effort source validation: skip Excel workbook checks for request-based sheets
+    # (sheet names that are REL request numbers won't exist in the workbook).
+    _resolved_site = _resolve_relmon_site(payload.site)
+    if _resolved_site in _RELMON_FILES:
+        try:
+            _parse_relmon_sheet(_resolved_site, payload.sheet)
+        except PermissionError:
+            existing = await _get_saved_relmon_record(payload.site, payload.sheet)
+            if not existing:
+                raise HTTPException(
+                    status_code=423,
+                    detail="Source workbook is locked and this sheet has no saved baseline yet",
+                )
+        except (FileNotFoundError, ValueError):
+            # Sheet not in workbook / workbook not found – allowed for request-based sheets
+            pass
 
     rows, max_cols = _normalize_relmon_rows(payload.rows)
     form_data = payload.form_data if isinstance(payload.form_data, dict) else {}
@@ -8205,6 +9888,443 @@ async def save_relmon_data(payload: RelMonSaveRequest, current_user: User = Depe
         "updated_at": now,
         "updated_by": current_user.username,
     }
+
+
+# ── RELMON Column Template (matches RELMON Column's.xlsx) ───────────────────
+# 53 columns total, 4 header rows with group/sub-header structure
+_RELMON_TEMPLATE_NUM_COLS = 53
+_RELMON_TEMPLATE_HEADER_ROWS = 4
+
+
+def _build_relmon_template() -> tuple[list[list], list[dict]]:
+    """Build the 4-row header template matching the RELMON Column's.xlsx format.
+
+    Column groups (0-based indices):
+      0-2:   Package  (Device Type, L/C, Body SIZE mm)
+      3-4:   Factory  (Date Code, Mfg Site)
+      5-21:  Materials (Die Size, L/F Size, L/F Type, Stamp/Etch, Matl, Wire,
+                        Die Coat, Mold Compound, Die Attach, H/S, Plating Comp)
+      22:    Preconditioning Test Condition  (spans all 4 header rows)
+      23:    Reflow Temp                     (spans all 4 header rows)
+      24-33: Delamination (%) Before Preconditioning  (Type I-V, each with #/avg%)
+      34-43: Delamination (%) After Preconditioning   (Type I-V, each with #/avg%)
+      44-46: MRT Results  (#, SS, Result)
+      47-52: Reliability Results (Rel Test, degC/R.H.%, # of hrs/cyc, "hrs"/"cyc", # Fail, SS)
+    """
+    N = _RELMON_TEMPLATE_NUM_COLS
+
+    # Row 0 – top-level group headers
+    row0 = [None] * N
+    row0[0]  = 'Package'
+    row0[3]  = 'Factory'
+    row0[5]  = 'Materials'
+    row0[22] = 'Preconditioning\nTest Condition'
+    row0[23] = 'Reflow\nTemp'
+    row0[24] = 'Delamination (%)\nBefore Preconditioning'
+    row0[34] = 'Delamination (%)\nAfter Preconditioning'
+    row0[44] = 'MRT Results'
+    row0[47] = 'Reliability Results'
+
+    # Row 1 – all None (merged with row 0 for group spans)
+    row1 = [None] * N
+
+    # Row 2 – sub-headers
+    row2 = [None] * N
+    row2[0]  = 'Device\nType'
+    row2[1]  = 'L/C'
+    row2[2]  = 'Body\nSIZE (mm)'
+    row2[3]  = 'Date\nCode'
+    row2[4]  = 'Mfg\nSite'
+    row2[5]  = 'Die Size'          # colspan 3 (cols 5-7)
+    row2[8]  = 'L/F Size'          # colspan 3 (cols 8-10)
+    row2[11] = 'L/F Type'          # colspan 3 (cols 11-13)
+    row2[14] = 'Stamp\nor Etch'
+    row2[15] = 'Matl'
+    row2[16] = 'Wire'              # row3[16] = 'Au(mil)' (not merged across rows)
+    row2[17] = 'Die\nCoat'
+    row2[18] = 'Mold\nCompound'
+    row2[19] = 'Die\nAttach'
+    row2[20] = 'H/S'
+    row2[21] = 'Plating\nComposition'
+    # Delamination Before type headers (colspan 2 each)
+    row2[24] = 'Type I';   row2[26] = 'Type II';  row2[28] = 'Type III'
+    row2[30] = 'Type IV';  row2[32] = 'Type V'
+    # Delamination After type headers
+    row2[34] = 'Type I';   row2[36] = 'Type II';  row2[38] = 'Type III'
+    row2[40] = 'Type IV';  row2[42] = 'Type V'
+    # MRT
+    row2[44] = '#';  row2[45] = 'SS';  row2[46] = 'Result'
+    # Reliability
+    row2[47] = 'Rel\nTest'
+    row2[48] = ' degC/'
+    row2[49] = '# of'
+    row2[50] = '"hrs" or'
+    row2[51] = '#'
+    row2[52] = 'SS'
+
+    # Row 3 – sub-sub-headers
+    row3 = [None] * N
+    row3[5]  = '(mil)'; row3[6]  = 'X'; row3[7]  = '(mil)'   # Die Size
+    row3[8]  = '(mil)'; row3[9]  = 'X'; row3[10] = '(mil)'   # L/F Size
+    row3[11] = 'VHDLF / HDLF'                                  # colspan 3 (L/F Type sub)
+    row3[16] = 'Au(mil)'                                        # Wire unit
+    # Delamination Before sub-sub-headers (#, avg%) per type
+    for base in range(24, 34, 2):
+        row3[base] = '#'; row3[base + 1] = 'avg %'
+    # Delamination After sub-sub-headers
+    for base in range(34, 44, 2):
+        row3[base] = '#'; row3[base + 1] = 'avg %'
+    # MRT & Reliability sub-sub-headers
+    row3[44] = 'Fail'       # MRT # → Fail
+    row3[48] = 'R.H.%'
+    row3[49] = 'hrs/cyc'
+    row3[50] = '"cyc"'
+    row3[51] = 'Fail'
+
+    header_rows = [row0, row1, row2, row3]
+
+    # Merge definitions (0-based row/col indices)
+    merges = [
+        # ── Group headers (rows 0-1) ──────────────────────────────────────
+        {'min_row': 0, 'max_row': 1, 'min_col': 0,  'max_col': 2},   # Package
+        {'min_row': 0, 'max_row': 1, 'min_col': 3,  'max_col': 4},   # Factory
+        {'min_row': 0, 'max_row': 1, 'min_col': 5,  'max_col': 21},  # Materials
+        {'min_row': 0, 'max_row': 3, 'min_col': 22, 'max_col': 22},  # Precond Test Cond
+        {'min_row': 0, 'max_row': 3, 'min_col': 23, 'max_col': 23},  # Reflow Temp
+        {'min_row': 0, 'max_row': 1, 'min_col': 24, 'max_col': 33},  # Delam Before
+        {'min_row': 0, 'max_row': 1, 'min_col': 34, 'max_col': 43},  # Delam After
+        {'min_row': 0, 'max_row': 1, 'min_col': 44, 'max_col': 46},  # MRT Results
+        {'min_row': 0, 'max_row': 1, 'min_col': 47, 'max_col': 52},  # Reliability Results
+        # ── Sub-headers spanning rows 2-3 ────────────────────────────────
+        {'min_row': 2, 'max_row': 3, 'min_col': 0,  'max_col': 0},   # Device Type
+        {'min_row': 2, 'max_row': 3, 'min_col': 1,  'max_col': 1},   # L/C
+        {'min_row': 2, 'max_row': 3, 'min_col': 2,  'max_col': 2},   # Body SIZE (mm)
+        {'min_row': 2, 'max_row': 3, 'min_col': 3,  'max_col': 3},   # Date Code
+        {'min_row': 2, 'max_row': 3, 'min_col': 4,  'max_col': 4},   # Mfg Site
+        {'min_row': 2, 'max_row': 2, 'min_col': 5,  'max_col': 7},   # Die Size colspan
+        {'min_row': 2, 'max_row': 2, 'min_col': 8,  'max_col': 10},  # L/F Size colspan
+        {'min_row': 2, 'max_row': 2, 'min_col': 11, 'max_col': 13},  # L/F Type colspan
+        {'min_row': 3, 'max_row': 3, 'min_col': 11, 'max_col': 13},  # VHDLF/HDLF colspan
+        {'min_row': 2, 'max_row': 3, 'min_col': 14, 'max_col': 14},  # Stamp or Etch
+        {'min_row': 2, 'max_row': 3, 'min_col': 15, 'max_col': 15},  # Matl
+        # Wire col 16: row2="Wire", row3="Au(mil)" – NOT merged across rows
+        {'min_row': 2, 'max_row': 3, 'min_col': 17, 'max_col': 17},  # Die Coat
+        {'min_row': 2, 'max_row': 3, 'min_col': 18, 'max_col': 18},  # Mold Compound
+        {'min_row': 2, 'max_row': 3, 'min_col': 19, 'max_col': 19},  # Die Attach
+        {'min_row': 2, 'max_row': 3, 'min_col': 20, 'max_col': 20},  # H/S
+        {'min_row': 2, 'max_row': 3, 'min_col': 21, 'max_col': 21},  # Plating Composition
+        # ── Delamination Before type headers (row 2 colspan 2) ───────────
+        {'min_row': 2, 'max_row': 2, 'min_col': 24, 'max_col': 25},  # Type I
+        {'min_row': 2, 'max_row': 2, 'min_col': 26, 'max_col': 27},  # Type II
+        {'min_row': 2, 'max_row': 2, 'min_col': 28, 'max_col': 29},  # Type III
+        {'min_row': 2, 'max_row': 2, 'min_col': 30, 'max_col': 31},  # Type IV
+        {'min_row': 2, 'max_row': 2, 'min_col': 32, 'max_col': 33},  # Type V
+        # ── Delamination After type headers (row 2 colspan 2) ────────────
+        {'min_row': 2, 'max_row': 2, 'min_col': 34, 'max_col': 35},  # Type I
+        {'min_row': 2, 'max_row': 2, 'min_col': 36, 'max_col': 37},  # Type II
+        {'min_row': 2, 'max_row': 2, 'min_col': 38, 'max_col': 39},  # Type III
+        {'min_row': 2, 'max_row': 2, 'min_col': 40, 'max_col': 41},  # Type IV
+        {'min_row': 2, 'max_row': 2, 'min_col': 42, 'max_col': 43},  # Type V
+        # ── MRT sub-headers spanning rows 2-3 ────────────────────────────
+        {'min_row': 2, 'max_row': 3, 'min_col': 45, 'max_col': 45},  # SS
+        {'min_row': 2, 'max_row': 3, 'min_col': 46, 'max_col': 46},  # Result
+        # ── Reliability sub-headers spanning rows 2-3 ────────────────────
+        {'min_row': 2, 'max_row': 3, 'min_col': 47, 'max_col': 47},  # Rel Test
+        {'min_row': 2, 'max_row': 3, 'min_col': 52, 'max_col': 52},  # SS
+    ]
+
+    return header_rows, merges
+
+
+def _build_relmon_data_row(
+    dev_type: str, lbc_val: Any, pkg_size: str, plant: str,
+) -> list:
+    """Build a single RELMON data row (53 columns) auto-populated from RMS fields.
+
+    Column mapping from RMS data:
+      0  = Device Type  → product_hierarchy
+      1  = L/C          → lead_count or ball_count
+      2  = Body SIZE mm → body_size_x × body_size_y
+      4  = Mfg Site     → plant (assembly site)
+      All other columns are None (filled manually in the RELMON form).
+    """
+    row: list = [None] * _RELMON_TEMPLATE_NUM_COLS
+    row[0] = dev_type or None
+    row[1] = lbc_val if lbc_val not in ('', None) else None
+    row[2] = pkg_size or None
+    # col 3 = Date Code  → not available in requests table
+    row[4] = plant or None
+    return row
+
+
+@api_router.get("/relmon/request-list")
+async def get_relmon_request_list(site: Optional[str] = None):
+    """Return ALL RMS requests (all statuses) for the RELMON Request Overview.
+
+    Rows are sorted by device_type (product_hierarchy) ASC, then pkg_info ASC,
+    then request_number ASC so the table groups naturally by package family.
+    Plant values are normalised via _normalize_relmon_plant().
+    """
+    db = await aiosqlite.connect(DB_PATH)
+    try:
+        sql = """
+            SELECT
+                request_number,
+                product_hierarchy,
+                pkg_info,
+                lead_count,
+                ball_count,
+                body_size_x,
+                body_size_y,
+                customer,
+                plant,
+                approved_at,
+                status,
+                originator,
+                lot_no,
+                device_name,
+                classification,
+                created_at
+            FROM requests
+            WHERE (request_type = 'RMS' OR request_number LIKE 'RMS%')
+        """
+        params: list = []
+        if site:
+            # Match against normalised plant so callers can pass e.g. "ATP1" or "ATP|P1"
+            sql += " AND UPPER(REPLACE(REPLACE(REPLACE(plant,'|',''),' ',''),'-','')) IN (?,?)"
+            if site.upper().replace('|','').replace(' ','').replace('-','') in ('ATP1','ATPP1'):
+                params += ['ATP1', 'ATPP1']
+            elif site.upper().replace('|','').replace(' ','').replace('-','') in ('ATP3','ATPP3','ATP2','ATPP2'):
+                params += ['ATP3', 'ATPP3']
+            else:
+                params += [site.upper(), site.upper()]
+        sql += (
+            " ORDER BY COALESCE(product_hierarchy,'') ASC,"
+            " COALESCE(pkg_info,'') ASC,"
+            " request_number ASC"
+        )
+        cursor = await db.execute(sql, params)
+        rows = await cursor.fetchall()
+
+        result = []
+        for i, r in enumerate(rows):
+            x, y = r[5], r[6]
+            if x is not None and y is not None:
+                pkg_size = f"{x}x{y} mm"
+            elif x is not None:
+                pkg_size = f"{x} mm"
+            else:
+                pkg_size = ""
+
+            raw_plant = r[8] or ''
+            pkg_inf   = r[2] or ''
+            inferred  = _infer_relmon_site_from_pkg(pkg_inf)
+            result.append({
+                "row_no": i + 1,
+                "request_number": r[0] or "",
+                "device_type": r[1] or "",
+                "pkg_info": pkg_inf,
+                "lead_count": r[3],
+                "ball_count": r[4],
+                "package_size": pkg_size,
+                "customer": r[7] or "",
+                "plant": _normalize_relmon_plant(raw_plant),
+                "approved_at": (r[9] or "")[:10],
+                "status": r[10] or "",
+                "originator": r[11] or "",
+                "lot_no": r[12] or "",
+                "device_name": r[13] or "",
+                "classification": r[14] or "",
+                "created_at": (r[15] or "")[:10],
+                # Package-type inference against ATP1/ATP3 RELMON device-type lists
+                "matched_device_type": inferred[1] if inferred else "",
+                "inferred_site": inferred[0] if inferred else "",
+            })
+
+        return {"requests": result, "total": len(result)}
+    finally:
+        await db.close()
+
+
+@api_router.get("/relmon/request-sheets")
+async def get_relmon_request_sheets():
+    """Return ALL RMS requests (all statuses) as sidebar sheet names grouped by normalised site.
+
+    Each entry has format: "DeviceType (REQ_NUMBER)" so the frontend's
+    parseSheetFamily() groups by device type and shows req number as the variant.
+    Plant values are normalised via _normalize_relmon_plant().
+    """
+    db = await aiosqlite.connect(DB_PATH)
+    try:
+        cursor = await db.execute(
+            """
+            SELECT request_number,
+                   COALESCE(plant, 'ATP1') AS site,
+                   COALESCE(product_hierarchy, 'Unknown Device Type') AS dev_type,
+                   COALESCE(pkg_info, '') AS pkg_info
+            FROM requests
+            WHERE (request_type = 'RMS' OR request_number LIKE 'RMS%')
+            ORDER BY COALESCE(product_hierarchy,'') ASC, request_number ASC
+            """
+        )
+        rows = await cursor.fetchall()
+        out: dict[str, list[str]] = {}
+        for req_no, site, dev_type, pkg_info in rows:
+            canonical = _normalize_relmon_plant(site)
+            # If pkg_info matches a known RELMON device-type keyword, use inferred
+            # site and label (overrides plant-based canonical for cleaner grouping)
+            inferred = _infer_relmon_site_from_pkg(pkg_info)
+            if inferred:
+                canonical = inferred[0]
+                # Use matched device type label unless product_hierarchy is set
+                if dev_type == 'Unknown Device Type':
+                    dev_type = inferred[1]
+            elif canonical not in ('ATP1', 'ATP3'):
+                canonical = 'ATP3'   # default fallback
+            sheet_name = f"{dev_type} ({req_no})"
+            out.setdefault(canonical, []).append(sheet_name)
+        return out
+    finally:
+        await db.close()
+
+
+@api_router.get("/relmon/request-sheet-data")
+async def get_relmon_request_sheet_data(site: str, req_no: str):
+    """Return RELMON form data + table rows auto-populated from a single approved request.
+
+    Any previously saved manual edits (in relmon_sheet_data) are merged on top.
+    """
+    db = await aiosqlite.connect(DB_PATH)
+    db.row_factory = aiosqlite.Row
+    try:
+        cursor = await db.execute(
+            """
+            SELECT request_number, product_hierarchy, pkg_info,
+                   lead_count, ball_count, body_size_x, body_size_y,
+                   package_thickness, lead_pitch, ball_pitch,
+                   plant, customer, lot_no, device_name,
+                   approved_at, status, originator, total_ss,
+                   classification, purpose, created_at
+            FROM requests
+            WHERE request_number = ? AND (request_type = 'RMS' OR request_number LIKE 'RMS%')
+            """,
+            (req_no,),
+        )
+        req = await cursor.fetchone()
+        if not req:
+            raise HTTPException(status_code=404, detail=f"RMS request '{req_no}' not found")
+
+        rno        = req["request_number"] or ''
+        dev_type   = req["product_hierarchy"] or ''
+        pkg_info   = req["pkg_info"] or ''
+        lead_ct    = req["lead_count"]
+        ball_ct    = req["ball_count"]
+        sx, sy     = req["body_size_x"], req["body_size_y"]
+        thick      = req["package_thickness"]
+        lpitch     = req["lead_pitch"]
+        bpitch     = req["ball_pitch"]
+        plant      = _normalize_relmon_plant(req["plant"] or '')
+        cust       = req["customer"] or ''
+        lot        = req["lot_no"] or ''
+        dev_name   = req["device_name"] or ''
+        appr_at    = req["approved_at"] or ''
+        status_val = req["status"] or ''
+        orig       = req["originator"] or ''
+        total_ss   = req["total_ss"]
+        classif    = req["classification"] or ''
+        created_at = req["created_at"] or ''
+
+        lbc_val  = lead_ct if lead_ct is not None else (ball_ct if ball_ct is not None else '')
+        pkg_size = (f"{sx}x{sy} mm" if sx is not None and sy is not None else
+                    (f"{sx} mm" if sx is not None else ''))
+        pitch    = str(lpitch or bpitch or '') if (lpitch or bpitch) else ''
+
+        form_data = {
+            'type': 'Standard',
+            'date_received': (appr_at[:10] if appr_at else '') or created_at[:10],
+            'enrolled_by': orig,
+            'rms_no': rno,
+            'ww': '',
+            'assembly_site': plant,
+            'customer': cust,
+            'package_type': pkg_info,
+            'lead_ball_count': str(lbc_val) if lbc_val != '' else '',
+            'package_size': pkg_size,
+            'package_thickness': str(thick) if thick is not None else '',
+            'lead_pitch': pitch,
+            'lot_number': lot,
+            'device_number': dev_name,
+            'unit_quantity': str(total_ss) if total_ss else '',
+        }
+
+        # Build the standard RELMON column template (4 header rows + 1 data row)
+        template_headers, template_merges = _build_relmon_template()
+        rms_data_row = _build_relmon_data_row(dev_type, lbc_val, pkg_size, plant)
+        base_rows: list[list] = template_headers + [rms_data_row]
+        base_merges: list[dict] = template_merges
+
+        # Merge with any manually saved overrides for this request
+        saved = await _get_saved_relmon_record(site, rno)
+        if saved:
+            saved_form = _safe_relmon_json_load(saved["form_json"], {})
+            if isinstance(saved_form, dict) and saved_form:
+                form_data.update(saved_form)
+            saved_rows_raw   = _safe_relmon_json_load(saved["rows_json"], [])
+            saved_merges_raw = _safe_relmon_json_load(saved["merges_json"], [])
+            if saved_rows_raw:
+                saved_rows_norm, saved_num_cols = _normalize_relmon_rows(saved_rows_raw)
+                # Use saved table data only if it was saved in the new 53-column format
+                # (>= 4 header rows + at least 1 data row, with >= 20 cols per row)
+                if (
+                    len(saved_rows_norm) >= 5
+                    and saved_num_cols >= 20
+                ):
+                    # Keep template headers, replace data rows with saved edits
+                    base_rows = template_headers + saved_rows_norm[_RELMON_TEMPLATE_HEADER_ROWS:]
+                    if isinstance(saved_merges_raw, list) and saved_merges_raw:
+                        base_merges = saved_merges_raw
+                # else: old-format save (14 cols) → discard table rows, use fresh template
+                # form_data already merged above so manual field edits are preserved
+
+        num_cols = len(base_rows[0]) if base_rows else _RELMON_TEMPLATE_NUM_COLS
+        return {
+            'site': site,
+            'sheet': rno,
+            'form_data': form_data,
+            'rows': base_rows,
+            'merges': base_merges,
+            'num_rows': len(base_rows),
+            'num_cols': num_cols,
+            'updated_at': saved["updated_at"] if saved else None,
+            'updated_by': saved["updated_by"] if saved else None,
+        }
+    finally:
+        await db.close()
+
+
+@api_router.delete("/relmon/saved-data")
+async def clear_relmon_saved_data(
+    site: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+):
+    """Delete all DB-saved RELMON edits (relmon_sheet_data) for a site or all sites.
+
+    This is non-destructive to the source Excel workbooks; it only removes
+    the locally saved overrides so the RELMON falls back to the workbook data.
+    """
+    if current_user.role not in (UserRole.ADMIN, UserRole.PLANNER):
+        raise HTTPException(status_code=403, detail="Only Admin or Planner can clear RELMON saved data")
+
+    db = await aiosqlite.connect(DB_PATH)
+    try:
+        if site:
+            cursor = await db.execute("DELETE FROM relmon_sheet_data WHERE site = ?", (site,))
+        else:
+            cursor = await db.execute("DELETE FROM relmon_sheet_data")
+        await db.commit()
+        return {"ok": True, "deleted_rows": cursor.rowcount, "site": site or "all"}
+    finally:
+        await db.close()
 
 
 # ========================
@@ -8262,7 +10382,10 @@ if FRONTEND_DIST.exists():
     @app.get("/{full_path:path}", response_class=HTMLResponse)
     async def serve_spa(request: Request, full_path: str):
         """Serve the React SPA index.html for all non-API routes."""
-        # Don't serve SPA for API routes or uploads (they're already handled above)
+        # API routes should never reach here — return JSON 404 so the browser
+        # never confuses an HTML page for a JSON response.
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail=f"API endpoint not found: /{full_path}")
         index_file = FRONTEND_DIST / "index.html"
         return HTMLResponse(content=index_file.read_text(encoding="utf-8"))
 else:

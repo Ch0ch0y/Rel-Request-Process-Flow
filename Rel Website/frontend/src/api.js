@@ -116,6 +116,9 @@ class ApiClient {
   addEmployee(data) { return this.post('/employees', data); }
   deleteEmployee(id) { return this.delete(`/employees/${id}`); }
 
+  // Process Monitoring
+  getProcessMonitoring() { return this.get('/process-monitoring'); }
+
   // Request Notes
   updateNote(requestId, note) { return this.patch(`/requests/${requestId}/note`, { note }); }
   deleteNote(requestId) { return this.delete(`/requests/${requestId}/note`); }
@@ -186,9 +189,50 @@ class ApiClient {
     return res.json();
   }
 
+  async previewAgileExcel(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const headers = {};
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+    const res = await fetch(`${API_BASE}/requests/import-agile/preview`, { method: 'POST', headers, body: formData });
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try {
+        const data = await res.json();
+        const detail = data.detail;
+        if (typeof detail === 'string' && detail) msg = detail;
+        else if (Array.isArray(detail)) msg = detail.map(e => e.msg || JSON.stringify(e)).join('; ');
+        else if (detail) msg = JSON.stringify(detail);
+      } catch { /* use default msg */ }
+      throw new Error(msg || 'Agile preview failed');
+    }
+    return res.json();
+  }
+
+  async importAgileExcel(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const headers = {};
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+    const res = await fetch(`${API_BASE}/requests/import-agile`, { method: 'POST', headers, body: formData });
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try {
+        const data = await res.json();
+        const detail = data.detail;
+        if (typeof detail === 'string' && detail) msg = detail;
+        else if (Array.isArray(detail)) msg = detail.map(e => e.msg || JSON.stringify(e)).join('; ');
+        else if (detail) msg = JSON.stringify(detail);
+      } catch { /* use default msg */ }
+      throw new Error(msg || 'Agile import failed');
+    }
+    return res.json();
+  }
+
   // Dashboard
-  getDashboardStats() { return this.get('/dashboard/stats'); }
+  getDashboardStats(mine = false) { return this.get('/dashboard/stats' + (mine ? '?mine=true' : '')); }
   getLoadingUnloading() { return this.get('/loading-unloading'); }
+  getLoadingUnloadingScheduled() { return this.get('/loading-unloading/scheduled'); }
   async exportLoadingUnloading(stepName) {
     const params = stepName && stepName !== 'all' ? `?step_name=${encodeURIComponent(stepName)}` : '';
     const res = await fetch(`/api/loading-unloading/export${params}`, {
@@ -228,6 +272,8 @@ class ApiClient {
   // Settings
   getSettings() { return this.get('/settings'); }
   updateSettings(data) { return this.patch('/settings', data); }
+  createProcessPreset(data) { return this.post('/process-presets', data); }
+  deleteProcessPreset(id) { return this.delete(`/process-presets/${id}`); }
   verifyTechCode(code) { return this.post('/verify-tech-code', { code }); }
 
   // Backups
@@ -302,6 +348,14 @@ class ApiClient {
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
     const res = await fetch(`${API_BASE}/requests/${id}/sat-report`, { headers });
     if (!res.ok) throw new Error(`SAT report generation failed: ${res.status}`);
+    return res.blob();
+  }
+
+  async downloadLtcReport(id) {
+    const headers = {};
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+    const res = await fetch(`${API_BASE}/requests/${id}/ltc`, { headers });
+    if (!res.ok) throw new Error(`LTC generation failed: ${res.status}`);
     return res.blob();
   }
 }

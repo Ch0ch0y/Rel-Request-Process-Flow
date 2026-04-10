@@ -437,8 +437,8 @@ export default function Users() {
         <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">{error}</div>
       ) : activeTab === 'users' ? (
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px]">
+          <div>
+          <table className="w-full">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
                 <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">User</th>

@@ -6,6 +6,7 @@ import ProcessTimeline from '../components/ProcessTimeline';
 import ImportExcelModal from '../components/ImportExcelModal';
 import ImportWordModal from '../components/ImportWordModal';
 import ImportWhiskerModal from '../components/ImportWhiskerModal';
+import ImportAgileModal from '../components/ImportAgileModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { Search, ChevronRight, Clock, FileText, FileSpreadsheet, Trash2, MessageSquarePlus } from 'lucide-react';
 
@@ -42,6 +43,7 @@ export default function MyRequests() {
   const [showImport, setShowImport] = useState(false);
   const [showImportWord, setShowImportWord] = useState(false);
   const [showImportWhisker, setShowImportWhisker] = useState(false);
+  const [showImportAgile, setShowImportAgile] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
 
   const canDeleteReq = (req) => {
@@ -124,6 +126,10 @@ export default function MyRequests() {
                 className="inline-flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg px-3.5 py-2 font-medium text-sm shadow-sm hover:shadow-md transition-all">
                 <FileText className="w-4 h-4" /> Import Whisker
               </button>
+              <button onClick={() => setShowImportAgile(true)}
+                className="inline-flex items-center gap-2 bg-violet-600 hover:bg-violet-700 text-white rounded-lg px-3.5 py-2 font-medium text-sm shadow-sm hover:shadow-md transition-all">
+                <FileSpreadsheet className="w-4 h-4" /> Import From Agile
+              </button>
             </div>
           )}
         </div>
@@ -179,7 +185,7 @@ export default function MyRequests() {
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-3 mb-1 flex-wrap">
-                    <span className="font-mono text-base font-bold text-blue-700 dark:text-blue-400 tracking-tight">{req.request_number}</span>
+                    <span className="font-mono text-base font-bold text-blue-700 dark:text-blue-400 tracking-tight">{req.original_rr_number || req.request_number}</span>
                     <StatusBadge status={req.status} />
                     {/* Blinking red dot for delayed */}
                     {req.deadline && new Date(req.deadline) < new Date() && req.status !== 'completed' && (
@@ -198,6 +204,11 @@ export default function MyRequests() {
                       <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 border border-indigo-200">{legCount} LEGs</span>
                     )}
                   </div>
+                  {req.original_rr_number && (
+                    <p className="font-mono text-xs text-amber-500 dark:text-amber-400 font-semibold mb-0.5">
+                      RR# {req.request_number}
+                    </p>
+                  )}
                   <div className="flex items-center gap-4 text-xs text-slate-400 dark:text-slate-500">
                     {req.device_name && <span>Device: {req.device_name}</span>}
                     {req.customer && <span>Customer: {req.customer}</span>}
@@ -245,6 +256,7 @@ export default function MyRequests() {
       <ImportExcelModal open={showImport} onClose={() => setShowImport(false)} onImported={loadRequests} />
       <ImportWordModal open={showImportWord} onClose={() => setShowImportWord(false)} onImported={loadRequests} />
       <ImportWhiskerModal open={showImportWhisker} onClose={() => setShowImportWhisker(false)} onImported={loadRequests} />
+      <ImportAgileModal open={showImportAgile} onClose={() => setShowImportAgile(false)} onImported={loadRequests} />
       <ConfirmDialog
         open={!!deleteConfirm}
         title="Delete Request"

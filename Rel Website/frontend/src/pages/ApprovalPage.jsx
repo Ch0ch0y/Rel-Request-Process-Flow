@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api';
 import {
   ShieldCheck, ThumbsUp, ThumbsDown, ClipboardList,
-  Eye, ExternalLink, RefreshCw, TableProperties,
+  Eye, ExternalLink,
 } from 'lucide-react';
 
 const STATUS_COLORS = {
@@ -17,40 +17,6 @@ const STATUS_LABELS = {
   approval: 'Approval', review: 'Review', testing: 'Testing', analysis: 'Analysis',
 };
 
-const ML_COLS = [
-  { key: 'ww',              label: 'WW' },
-  { key: 'date_received',   label: 'Date Received at RelLab' },
-  { key: 'rrs_no',          label: 'RRS No.' },
-  { key: 'purpose',         label: 'Purpose' },
-  { key: 'qual_type',       label: 'Qual Type' },
-  { key: 'customer',        label: 'Customer' },
-  { key: 'pkg_type',        label: 'Pkg. Type' },
-  { key: 'lc_bc',           label: 'L/C B/C' },
-  { key: 'rr_agile_no',     label: 'RR/Agile No.' },
-  { key: 'test_level',      label: 'Test Level' },
-  { key: 'qty',             label: 'Qty' },
-  { key: 'num_days',        label: '# of Days' },
-  { key: 'num_legs',        label: '# of Legs' },
-  { key: 'est_start',       label: 'Est. Date/Time of Start' },
-  { key: 'est_completion',  label: 'Est. Date of Completion' },
-  { key: 'recommit',        label: 'Re-Commit' },
-  { key: 'planner_remarks', label: 'Planner Remarks' },
-];
-
-// Keys the planner can edit inline (all others are read-only from request data)
-const EDITABLE_KEYS = new Set(['test_level','qty','num_days','num_legs','est_start','est_completion','recommit','planner_remarks']);
-// Maps frontend row key → backend PATCH body key
-const CELL_FIELD_MAP = { qty: 'ml_qty', est_start: 'planner_est_start', est_completion: 'planner_est_end', planner_remarks: 'planner_note', test_level: 'test_level' };
-
-const ML_STATUS_COLORS = {
-  approval:     'bg-violet-100 text-violet-700 border-violet-200',
-  review:       'bg-blue-100 text-blue-700 border-blue-200',
-  testing:      'bg-orange-100 text-orange-700 border-orange-200',
-  analysis:     'bg-teal-100 text-teal-700 border-teal-200',
-  completed:    'bg-emerald-100 text-emerald-700 border-emerald-200',
-  discontinued: 'bg-slate-100 text-slate-500 border-slate-200',
-};
-
 export default function ApprovalPage() {
   const { hasRole } = useAuth();
 
@@ -59,15 +25,6 @@ export default function ApprovalPage() {
   const [error, setError] = useState('');
   const [actionLoading, setActionLoading] = useState({});
   const [actionMsg, setActionMsg] = useState({});
-
-  const [masterlist, setMasterlist] = useState([]);
-  const [mlLoading, setMlLoading] = useState(true);
-  const [mlError, setMlError] = useState('');
-  const [testItems, setTestItems] = useState([]);
-
-  // Inline cell editing state
-  const [editingCell, setEditingCell] = useState({ rowId: null, colKey: null, value: '', original: '' });
-  const skipBlurRef = useRef(false);
 
   const canApprove = hasRole('Admin', 'Planner');
 
@@ -79,19 +36,8 @@ export default function ApprovalPage() {
       .finally(() => setLoading(false));
   };
 
-  const loadMasterlist = () => {
-    setMlLoading(true);
-    setMlError('');
-    api.getMasterlistRequests()
-      .then(data => setMasterlist(Array.isArray(data) ? data : []))
-      .catch(e => setMlError(e.message))
-      .finally(() => setMlLoading(false));
-  };
-
   useEffect(() => {
     load();
-    loadMasterlist();
-    api.get('/test-items').then(data => { if (Array.isArray(data)) setTestItems(data); }).catch(() => {});
   }, []);
 
   const handleAction = async (id, action) => {
@@ -110,30 +56,6 @@ export default function ApprovalPage() {
       setActionMsg(prev => ({ ...prev, [id]: 'Error: ' + e.message }));
     } finally {
       setActionLoading(prev => ({ ...prev, [id]: null }));
-    }
-  };
-
-  const startCellEdit = (rowId, colKey, val) => {
-    if (!canApprove || !EDITABLE_KEYS.has(colKey)) return;
-    const v = String(val || '');
-    setEditingCell({ rowId, colKey, value: v, original: v });
-  };
-
-  const cancelCellEdit = () => {
-    skipBlurRef.current = true;
-    setEditingCell({ rowId: null, colKey: null, value: '', original: '' });
-  };
-
-  const commitCell = async (rowId, colKey, value, original) => {
-    if (skipBlurRef.current) { skipBlurRef.current = false; return; }
-    setEditingCell({ rowId: null, colKey: null, value: '', original: '' });
-    if (value === original) return;
-    const backendKey = CELL_FIELD_MAP[colKey] || colKey;
-    setMasterlist(prev => prev.map(r => r.id === rowId ? { ...r, [colKey]: value } : r));
-    try {
-      await api.updateRequestMasterlistFields(rowId, { [backendKey]: value });
-    } catch {
-      setMasterlist(prev => prev.map(r => r.id === rowId ? { ...r, [colKey]: original } : r));
     }
   };
 
@@ -199,7 +121,7 @@ export default function ApprovalPage() {
             <h3 className="font-heading font-semibold text-slate-800 dark:text-slate-100">Pending Approval</h3>
             <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300">{requests.length}</span>
           </div>
-          <div className="overflow-x-auto">
+          <div>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/30">
@@ -260,150 +182,6 @@ export default function ApprovalPage() {
           </div>
         </div>
       )}
-
-      {/* Section 2: Masterlist */}
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex flex-wrap items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
-            <TableProperties className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <h2 className="font-heading font-bold text-slate-900 dark:text-white text-base leading-tight">Masterlist</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              {masterlist.length > 0 ? masterlist.length + ' RELDMS request(s)' : 'No requests found'}
-              {canApprove && masterlist.length > 0 && <span className="ml-2 text-blue-500">· Click a cell to edit</span>}
-            </p>
-          </div>
-          <button onClick={loadMasterlist} title="Refresh"
-            className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
-            <RefreshCw className={'w-4 h-4 ' + (mlLoading ? 'animate-spin' : '')} />
-          </button>
-        </div>
-
-        {mlLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-7 w-7 border-b-2 border-blue-600" />
-          </div>
-        ) : mlError ? (
-          <div className="m-6 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg text-red-700 dark:text-red-400 text-sm">{mlError}</div>
-        ) : masterlist.length === 0 ? (
-          <div className="py-14 text-center">
-            <TableProperties className="w-10 h-10 text-slate-200 dark:text-slate-600 mx-auto mb-3" />
-            <p className="text-slate-500 dark:text-slate-400 font-medium text-sm">No RELDMS requests found</p>
-            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">All existing RELDMS requests will appear here automatically.</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full border-collapse text-[11px]">
-              <thead>
-                <tr className="bg-blue-600">
-                  <th className="border border-blue-500 px-2 py-2 text-left text-[10px] font-bold text-white uppercase tracking-wide whitespace-nowrap">Status</th>
-                  {ML_COLS.map(col => (
-                    <th key={col.key} className="border border-blue-500 px-2 py-2 text-left text-[10px] font-bold text-white uppercase tracking-wide whitespace-nowrap">
-                      {col.label}{canApprove && EDITABLE_KEYS.has(col.key) && <span className="ml-1 opacity-60 font-normal normal-case">✎</span>}
-                    </th>
-                  ))}
-                  <th className="border border-blue-500 px-2 py-2 text-center text-[10px] font-bold text-white uppercase tracking-wide whitespace-nowrap">Link</th>
-                </tr>
-              </thead>
-              <tbody>
-                {masterlist.map((row, ri) => (
-                  <tr key={row.id} className={ri % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/80 dark:bg-slate-800/50'}>
-                    <td className="border border-slate-200 dark:border-slate-700 px-2 py-1 whitespace-nowrap">
-                      {row.status && (
-                        <span className={'inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold border ' + (ML_STATUS_COLORS[row.status] || 'bg-slate-100 text-slate-500 border-slate-200')}>
-                          {row.status.charAt(0).toUpperCase() + row.status.slice(1)}
-                        </span>
-                      )}
-                    </td>
-                    {ML_COLS.map(col => {
-                      const isEditing = editingCell.rowId === row.id && editingCell.colKey === col.key;
-                      const isEditable = canApprove && EDITABLE_KEYS.has(col.key);
-                      const rawVal = row[col.key] || '';
-                      // Format date_received as a readable date string
-                      const displayVal = col.key === 'date_received' && rawVal
-                        ? (() => { try { return new Date(rawVal).toLocaleDateString(); } catch { return rawVal; } })()
-                        : rawVal;
-                      return (
-                        <td
-                          key={col.key}
-                          onClick={() => { if (!isEditing) startCellEdit(row.id, col.key, rawVal); }}
-                          className={[
-                            'border border-slate-200 dark:border-slate-700',
-                            isEditing
-                              ? 'p-0 outline outline-2 outline-blue-500 bg-white dark:bg-slate-900 relative z-10'
-                              : isEditable
-                                ? 'px-2 py-1 cursor-text hover:bg-blue-50 dark:hover:bg-blue-900/20'
-                                : 'px-2 py-1',
-                          ].join(' ')}
-                        >
-                          {isEditing ? (
-                            col.key === 'planner_remarks' ? (
-                              <textarea
-                                autoFocus
-                                rows={2}
-                                value={editingCell.value}
-                                onChange={e => setEditingCell(prev => ({ ...prev, value: e.target.value }))}
-                                onBlur={() => commitCell(row.id, col.key, editingCell.value, editingCell.original)}
-                                onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); cancelCellEdit(); } }}
-                                className="w-full px-2 py-1 border-none outline-none bg-transparent text-[11px] text-slate-900 dark:text-white resize-none min-w-[150px]"
-                              />
-                            ) : col.key === 'test_level' ? (
-                              <>
-                                <datalist id="ml-test-level-list">
-                                  {testItems.map(item => <option key={item} value={item} />)}
-                                </datalist>
-                                <input
-                                  autoFocus
-                                  type="search"
-                                  list="ml-test-level-list"
-                                  autoComplete="off"
-                                  placeholder="Type to search…"
-                                  value={editingCell.value}
-                                  onChange={e => setEditingCell(prev => ({ ...prev, value: e.target.value }))}
-                                  onBlur={() => commitCell(row.id, col.key, editingCell.value, editingCell.original)}
-                                  onKeyDown={e => {
-                                    if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
-                                    if (e.key === 'Escape') { e.preventDefault(); cancelCellEdit(); }
-                                  }}
-                                  className="w-full px-2 py-1 border-none outline-none bg-transparent text-[11px] text-slate-900 dark:text-white min-w-[160px]"
-                                />
-                              </>
-                            ) : (
-                              <input
-                                autoFocus
-                                type="text"
-                                value={editingCell.value}
-                                onChange={e => setEditingCell(prev => ({ ...prev, value: e.target.value }))}
-                                onBlur={() => commitCell(row.id, col.key, editingCell.value, editingCell.original)}
-                                onKeyDown={e => {
-                                  if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
-                                  if (e.key === 'Escape') { e.preventDefault(); cancelCellEdit(); }
-                                }}
-                                className="w-full px-2 py-1 border-none outline-none bg-transparent text-[11px] text-slate-900 dark:text-white min-w-[60px]"
-                              />
-                            )
-                          ) : (
-                            <span className={'block text-slate-700 dark:text-slate-300 ' + (col.key !== 'planner_remarks' ? 'truncate max-w-[130px]' : 'max-w-[160px]')}>
-                              {displayVal || (isEditable ? <span className="text-slate-300 dark:text-slate-600 select-none">—</span> : '')}
-                            </span>
-                          )}
-                        </td>
-                      );
-                    })}
-                    <td className="border border-slate-200 dark:border-slate-700 px-2 py-1 whitespace-nowrap text-center">
-                      <Link to={'/requests/' + row.id} title="View request"
-                        className="inline-flex items-center justify-center text-blue-500 hover:text-blue-700 dark:hover:text-blue-300">
-                        <ExternalLink className="w-3 h-3" />
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
     </div>
   );
 }

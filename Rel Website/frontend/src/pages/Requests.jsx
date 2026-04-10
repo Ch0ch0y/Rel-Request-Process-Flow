@@ -10,6 +10,7 @@ import {
 import ImportExcelModal from '../components/ImportExcelModal';
 import ImportWordModal from '../components/ImportWordModal';
 import ImportWhiskerModal from '../components/ImportWhiskerModal';
+import ImportAgileModal from '../components/ImportAgileModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 const FIELDS = [
@@ -354,6 +355,7 @@ export default function Requests() {
   const [showImport, setShowImport] = useState(false);
   const [showImportWord, setShowImportWord] = useState(false);
   const [showImportWhisker, setShowImportWhisker] = useState(false);
+  const [showImportAgile, setShowImportAgile] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const { hasRole, hasPerm, user } = useAuth();
 
@@ -444,6 +446,10 @@ export default function Requests() {
                 <button onClick={() => setShowImportWhisker(true)}
                   className="inline-flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg px-3.5 py-2 font-medium text-sm shadow-sm hover:shadow-md transition-all">
                   <FileText className="w-4 h-4" /> Import Whisker
+                </button>
+                <button onClick={() => setShowImportAgile(true)}
+                  className="inline-flex items-center gap-2 bg-violet-600 hover:bg-violet-700 text-white rounded-lg px-3.5 py-2 font-medium text-sm shadow-sm hover:shadow-md transition-all">
+                  <FileSpreadsheet className="w-4 h-4" /> Import From Agile
                 </button>
               </>
             )}
@@ -537,7 +543,9 @@ export default function Requests() {
             >
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-3 mb-1">
-                  <span className="font-mono text-base font-bold text-blue-700 dark:text-blue-400 tracking-tight">{req.request_number}</span>
+                  <span className="font-mono text-base font-bold text-blue-700 dark:text-blue-400 tracking-tight">
+                    {req.original_rr_number || req.request_number}
+                  </span>
                   <StatusBadge status={req.status} />
                   {/* Blinking red dot for delayed requests */}
                   {req.deadline && new Date(req.deadline) < new Date() && req.status !== 'completed' && (
@@ -564,6 +572,11 @@ export default function Requests() {
                     ) : null;
                   })()}
                 </div>
+                {req.original_rr_number && (
+                  <p className="font-mono text-xs text-amber-500 dark:text-amber-400 font-semibold mb-0.5">
+                    RR# {req.request_number}
+                  </p>
+                )}
                 <div className="flex items-center gap-4 text-xs text-slate-400 dark:text-slate-500">
                   {req.device_name && <span>Device: {req.device_name}</span>}
                   {req.customer && <span>Customer: {req.customer}</span>}
@@ -612,6 +625,7 @@ export default function Requests() {
       <ImportExcelModal open={showImport} onClose={() => setShowImport(false)} onImported={loadRequests} />
       <ImportWordModal open={showImportWord} onClose={() => setShowImportWord(false)} onImported={loadRequests} />
       <ImportWhiskerModal open={showImportWhisker} onClose={() => setShowImportWhisker(false)} onImported={loadRequests} />
+      <ImportAgileModal open={showImportAgile} onClose={() => setShowImportAgile(false)} onImported={loadRequests} />
       <ConfirmDialog
         open={!!deleteConfirm}
         title="Delete Request"

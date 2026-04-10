@@ -253,6 +253,33 @@ const OS_TEST_CONDITIONS = ['Open/Short'];
 const SAT_TEST_ITEMS = ['SAT'];
 const SAT_TEST_CONDITIONS = ['T&C Scan'];
 
+/**
+ * Returns the default { item, cond } for the Rel Test Traveller table.
+ * Used when a step has no saved test_item / test_condition yet.
+ */
+function getDefaultTravCells(stepName, totalSS) {
+  const n = (stepName || '').toLowerCase().trim();
+  if (n === 'inspection' || n === 'incoming inspection') {
+    return { item: 'Inspection', cond: 'Note if units are in Jedec tray, Canister, TNR, etc.' };
+  }
+  if (n === 'visual') {
+    return { item: 'Visual', cond: 'X40' };
+  }
+  if (n === 'serialize samples' || n === 'serialize sample') {
+    const cond = totalSS
+      ? `Mark units from 1 to ${totalSS} for SAT identification`
+      : 'Mark units from 1 to (TOTAL SS) for SAT identification';
+    return { item: 'Serialize', cond };
+  }
+  if (n === 'o/s' || n === 'open/short') {
+    return { item: 'Open/Short', cond: 'Open/Short' };
+  }
+  if (n === 'sat') {
+    return { item: 'SAT', cond: 'T&C Scan' };
+  }
+  return { item: stepName || '', cond: '' };
+}
+
 const CA_TEST_ITEMS = ['Full CA', 'NON-STD FCA', 'NON-STD CON ANA (Complex)', 'NON-STD CON ANA (Easy)'];
 // No predefined conditions for CA — users can add via the pencil editor if needed
 
@@ -591,6 +618,98 @@ const DEFAULT_PROCESS_PRESETS = [
 
 const LS_PRESETS_KEY = 'rel_step_presets';
 const LS_STEP_OPTS_PREFIX = 'rel_step_opts_';
+
+function NewProcessModal({ onClose, onSave, createdByUsername }) {
+  const [label, setLabel] = useState('');
+  const [selectedSteps, setSelectedSteps] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const addStep = (step) => setSelectedSteps(prev => [...prev, step]);
+  const removeStep = (index) => setSelectedSteps(prev => prev.filter((_, i) => i !== index));
+
+  const handleSave = async () => {
+    if (!label.trim()) { setError('Process name is required'); return; }
+    if (selectedSteps.length === 0) { setError('Add at least one step'); return; }
+    setSaving(true); setError('');
+    try {
+      await onSave({ label: label.trim(), description: '', steps: selectedSteps });
+    } catch (e) {
+      setError(e.message || 'Failed to save');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-md flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
+          <div>
+            <h4 className="font-semibold text-slate-800 dark:text-slate-100 text-sm">New Process Template</h4>
+            <p className="text-[10px] text-slate-400 mt-0.5">Created by: <span className="font-medium text-slate-500 dark:text-slate-300">{createdByUsername}</span></p>
+          </div>
+          <button onClick={onClose} className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-600 transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-4 overflow-y-auto flex-1">
+          <div>
+            <label className="block text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Process Name</label>
+            <input
+              type="text" autoFocus
+              value={label}
+              onChange={e => setLabel(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSave()}
+              placeholder="e.g. My Custom Flow"
+              className="w-full border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-700 text-sm text-slate-800 dark:text-slate-100 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900 transition-all"
+            />
+          </div>
+
+          {selectedSteps.length > 0 && (
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Selected Steps ({selectedSteps.length})</p>
+              <div className="flex flex-wrap gap-1.5">
+                {selectedSteps.map((step, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-lg text-xs font-medium">
+                    <span className="text-blue-400 dark:text-blue-500 text-[10px]">{i + 1}.</span> {step}
+                    <button onClick={() => removeStep(i)} className="ml-0.5 text-blue-400 hover:text-blue-600 dark:hover:text-blue-200 transition-colors">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Available Steps — click to add</p>
+            <div className="flex flex-wrap gap-1.5">
+              {DEFAULT_STEP_PRESETS.map(step => (
+                  <button key={step} type="button" onClick={() => addStep(step)}
+                    className="px-2 py-1 rounded-lg text-xs font-medium transition-colors border bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300 cursor-pointer">
+                    {step}
+                  </button>
+                ))}
+            </div>
+          </div>
+
+          {error && <p className="text-xs text-red-500 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded-lg">{error}</p>}
+        </div>
+
+        <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-1.5 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors">Cancel</button>
+          <button onClick={handleSave} disabled={saving}
+            className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium transition-colors flex items-center gap-1.5">
+            {saving
+              ? <><div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Saving…</>
+              : <><Plus className="w-3.5 h-3.5" /> Save Process</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function loadStepOpts(key, defaults) {
   try {
@@ -1837,6 +1956,7 @@ export default function RequestDetail() {
   const [customStepInput, setCustomStepInput] = useState('');
   const [downloadingReport, setDownloadingReport] = useState(false);
   const [downloadingSatReport, setDownloadingSatReport] = useState(false);
+  const [downloadingLtc, setDownloadingLtc] = useState(false);
   const [showTraveller, setShowTraveller] = useState(false);
   const [showSteps, setShowSteps] = useState(false);
   const [travEmployees, setTravEmployees] = useState({});
@@ -1857,6 +1977,7 @@ export default function RequestDetail() {
   // Process presets (loaded from settings)
   const [processPresets, setProcessPresets] = useState([]);
   const [legProcessSaving, setLegProcessSaving] = useState(false);
+  const [showNewProcessModal, setShowNewProcessModal] = useState(false);
   // Note
   const [noteEditing, setNoteEditing] = useState(false);
   const [noteInput, setNoteInput] = useState('');
@@ -1879,7 +2000,10 @@ export default function RequestDetail() {
   // Technicians can now edit all steps, but must provide Date and Employee number before saving
   const canUpdateStep = hasPerm('update_steps') || hasRole('Admin') || hasRole('Technician') || !!user?.isGuest;
   const canEdit = hasPerm('edit_request') || hasRole('Admin');
-  const canManageSteps = hasPerm('manage_steps') || hasRole('Admin');
+  // Admin can manage steps anytime; Reliability Engineer only before approval
+  const POST_APPROVAL_STATUSES = ['testing', 'in_progress', 'analysis', 'completed', 'discontinued'];
+  const notYetApproved = !POST_APPROVAL_STATUSES.includes(request?.status);
+  const canManageSteps = hasRole('Admin') || ((hasPerm('manage_steps') || hasRole('Reliability Engineer')) && notYetApproved);
   // Admin and Rel Engineer can freely edit any step regardless of order
   const canBypassOrder = canUpdateStep; // All users who can update steps can unlock any step
 
@@ -1902,6 +2026,28 @@ export default function RequestDetail() {
     if (!trimmed || stepPresets.includes(trimmed)) return;
     savePresets([...stepPresets, trimmed]);
     setPresetNewInput('');
+  };
+
+  const reloadProcessPresets = () => {
+    api.getSettings().then(s => {
+      if (s.process_presets && s.process_presets.length) {
+        const saved = s.process_presets;
+        const missing = DEFAULT_PROCESS_PRESETS.filter(bp => !saved.some(sp => sp.id === bp.id));
+        setProcessPresets([...saved, ...missing]);
+      } else {
+        setProcessPresets(DEFAULT_PROCESS_PRESETS);
+      }
+    }).catch(() => {});
+  };
+  const handleCreateProcessPreset = async (data) => {
+    await api.createProcessPreset(data);
+    setShowNewProcessModal(false);
+    reloadProcessPresets();
+  };
+  const handleDeleteProcessPreset = async (presetId) => {
+    if (!window.confirm('Delete this process template? This cannot be undone.')) return;
+    await api.deleteProcessPreset(presetId);
+    reloadProcessPresets();
   };
 
   const loadRequest = () => {
@@ -2041,6 +2187,24 @@ export default function RequestDetail() {
       setTimeout(() => setSaveMsg(''), 3000);
     } finally {
       setDownloadingSatReport(false);
+    }
+  };
+
+  const handleDownloadLtcReport = async () => {
+    setDownloadingLtc(true);
+    try {
+      const blob = await api.downloadLtcReport(id);
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `LTC_${request?.request_number || id}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setSaveMsg(`LTC error: ${err.message}`);
+      setTimeout(() => setSaveMsg(''), 3000);
+    } finally {
+      setDownloadingLtc(false);
     }
   };
 
@@ -2456,14 +2620,8 @@ export default function RequestDetail() {
         <div className="flex-1">
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-heading font-bold text-blue-700 dark:text-blue-400 tracking-tight font-mono">
-              {request.request_number}
+              {request.original_rr_number || request.request_number}
             </h1>
-            {request.original_rr_number && (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-100 border border-amber-300 dark:bg-amber-900/40 dark:border-amber-600/50">
-                <span className="text-xs font-semibold text-amber-500 dark:text-amber-400 uppercase tracking-wide">RR#</span>
-                <span className="font-mono text-sm font-bold text-amber-800 dark:text-amber-300">{request.original_rr_number}</span>
-              </span>
-            )}
             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
               request.status === 'completed'    ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
               request.status === 'discontinued' ? 'bg-rose-100 text-rose-700 border-rose-200' :
@@ -2482,6 +2640,11 @@ export default function RequestDetail() {
             </span>
             {saveMsg && <span className="text-xs text-emerald-600">{saveMsg}</span>}
           </div>
+          {request.original_rr_number && (
+            <p className="text-sm font-mono text-amber-500 dark:text-amber-400 mt-0.5 font-semibold">
+              RR# {request.request_number}
+            </p>
+          )}
           <p className="text-sm text-slate-400 mt-0.5">
             Created by {request.created_by_username} • {new Date(request.created_at).toLocaleString()}
             {request.deadline && <> • Due: {request.deadline}</>}
@@ -2493,6 +2656,16 @@ export default function RequestDetail() {
             <Edit3 className="w-4 h-4" /> Edit
           </button>
         )}
+        <button
+          onClick={handleDownloadLtcReport}
+          disabled={downloadingLtc}
+          title="Download LTC Format (.xlsx)"
+          className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 rounded-lg text-sm font-medium transition-all">
+          {downloadingLtc
+            ? <span className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin" />
+            : <FileSpreadsheet className="w-4 h-4" />}
+          Download LTC
+        </button>
         <button
           onClick={handleDownloadSatReport}
           disabled={downloadingSatReport}
@@ -3059,8 +3232,8 @@ export default function RequestDetail() {
                   {request.original_rr_number && (
                     <div className="flex items-center gap-3 mb-3 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-700/50">
                       <div className="flex-shrink-0">
-                        <span className="block text-xs font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 mb-0.5">Original RR#</span>
-                        <span className="font-mono text-base font-bold text-amber-800 dark:text-amber-300 tracking-tight">{request.original_rr_number}</span>
+                        <span className="block text-xs font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 mb-0.5">RR#</span>
+                        <span className="font-mono text-base font-bold text-amber-800 dark:text-amber-300 tracking-tight">{request.request_number}</span>
                       </div>
                     </div>
                   )}
@@ -3128,23 +3301,44 @@ export default function RequestDetail() {
                   const active = preset.steps.length === names.length &&
                     preset.steps.every((st, i) => st === names[i]);
                   return (
-                    <button key={preset.id} type="button"
-                      disabled={legProcessSaving}
-                      onClick={() => handleApplyLegProcess(preset)}
-                      className={`inline-flex flex-col items-start px-3 py-1.5 rounded-lg border text-left transition-all disabled:opacity-50 ${
-                        active
-                          ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
-                          : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-blue-50 hover:border-blue-300'
-                      }`}>
-                      <span className={`text-xs font-semibold leading-tight ${active ? 'text-white' : 'text-slate-700'}`}>
-                        {preset.label}
-                      </span>
-                      <span className={`text-[10px] ${active ? 'text-blue-100' : 'text-slate-400'}`}>
-                        {preset.steps.length} steps
-                      </span>
-                    </button>
+                    <div key={preset.id} className="relative inline-flex group">
+                      <button type="button"
+                        disabled={legProcessSaving}
+                        onClick={() => handleApplyLegProcess(preset)}
+                        className={`inline-flex flex-col items-start px-3 py-1.5 rounded-lg border text-left transition-all disabled:opacity-50 ${
+                          active
+                            ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+                            : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-blue-50 hover:border-blue-300'
+                        } ${preset.is_custom ? 'pr-6' : ''}`}>
+                        <span className={`text-xs font-semibold leading-tight ${active ? 'text-white' : 'text-slate-700'}`}>
+                          {preset.label}
+                        </span>
+                        <span className={`text-[10px] ${active ? 'text-blue-100' : 'text-slate-400'}`}>
+                          {preset.steps.length} steps
+                          {preset.is_custom && preset.created_by_username && (
+                            <span className={`ml-1 ${active ? 'text-blue-200' : 'text-slate-300'}`}>· {preset.created_by_username}</span>
+                          )}
+                        </span>
+                      </button>
+                      {preset.is_custom && hasRole('Admin') && (
+                        <button
+                          onClick={e => { e.stopPropagation(); handleDeleteProcessPreset(preset.id); }}
+                          title="Delete process template"
+                          className="absolute top-0.5 right-0.5 w-4 h-4 rounded flex items-center justify-center bg-red-100 text-red-400 hover:bg-red-500 hover:text-white opacity-0 group-hover:opacity-100 transition-all">
+                          <X className="w-2.5 h-2.5" />
+                        </button>
+                      )}
+                    </div>
                   );
                 })}
+                {canManageSteps && (
+                  <button
+                    onClick={() => setShowNewProcessModal(true)}
+                    title="Create a new process template"
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 text-slate-400 hover:border-blue-400 hover:text-blue-600 text-xs font-medium transition-colors">
+                    <Plus className="w-3 h-3" /> New Process
+                  </button>
+                )}
                 {legProcessSaving && <span className="text-xs text-slate-400">Applying…</span>}
                 {(() => {
                   const names = legSteps.map(s => s.step_name);
@@ -3560,6 +3754,7 @@ export default function RequestDetail() {
                             : '';
                           const toLocalDt = v => v ? new Date(v).toISOString().slice(0, 16) : '';
                           const opName = step.operator_id ? (travEmployees[step.operator_id]?.name || step.operator_id) : '';
+                          const travDefaults = getDefaultTravCells(step.step_name, request.total_ss);
 
                           // Renders an editable cell
                           const EditCell = ({ field, display, inputType = 'text', extraCls = '', tdCls = '' }) => {
@@ -3567,8 +3762,8 @@ export default function RequestDetail() {
                             const start  = () => {
                               if (!canEdit) return;
                               let init = '';
-                              if      (field === 'test_item')      init = cf.test_item || '';
-                              else if (field === 'test_condition') init = cf.test_condition || '';
+                              if      (field === 'test_item')      init = cf.test_item || travDefaults.item;
+                              else if (field === 'test_condition') init = cf.test_condition || travDefaults.cond;
                               else if (field === 'qty_in')         init = step.qty_in != null ? String(step.qty_in) : '';
                               else if (field === 'qty_out')        init = step.qty_out != null ? String(step.qty_out) : '';
                               else if (field === 'tray_no')        init = step.tray_no || '';
@@ -3671,14 +3866,14 @@ export default function RequestDetail() {
                               {/* Test Item */}
                               <EditCell
                                 field="test_item"
-                                display={cf.test_item || step.step_name}
-                                tdCls={isPending ? 'text-slate-400 italic' : 'font-medium text-slate-800'}
+                                display={cf.test_item || travDefaults.item}
+                                tdCls={isPending && !cf.test_item ? 'text-slate-400 italic' : 'font-medium text-slate-800'}
                               />
                               {/* Test Condition */}
                               <EditCell
                                 field="test_condition"
-                                display={cf.test_condition || ''}
-                                tdCls="text-slate-600"
+                                display={cf.test_condition || travDefaults.cond}
+                                tdCls={`text-slate-600${!cf.test_condition && travDefaults.cond ? ' italic text-slate-400' : ''}`}
                               />
                               {/* Qty IN */}
                               <EditCell
@@ -3764,6 +3959,15 @@ export default function RequestDetail() {
             </div>
           )}
         </div>
+      )}
+
+      {/* New Process Template Modal */}
+      {showNewProcessModal && (
+        <NewProcessModal
+          onClose={() => setShowNewProcessModal(false)}
+          onSave={handleCreateProcessPreset}
+          createdByUsername={user?.username || user?.name || 'Unknown'}
+        />
       )}
     </div>
   );

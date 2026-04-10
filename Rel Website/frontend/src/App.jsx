@@ -18,9 +18,11 @@ import Presentation from './pages/Presentation';
 import TaskManager from './pages/TaskManager';
 import RetentionMonitor from './pages/RetentionMonitor';
 import ApprovalPage from './pages/ApprovalPage';
+import MasterlistPage from './pages/MasterlistPage';
 import LoadingUnloading from './pages/LoadingUnloading';
 import PerformanceMonitor from './pages/PerformanceMonitor';
 import RelMon from './pages/RelMon';
+import ProcessMonitoring from './pages/ProcessMonitoring';
 import UserGuide, { hasUserDismissedGuide } from './components/UserGuide';
 
 const GUEST_ALLOWED_PATHS = ['/', '/completed'];
@@ -188,9 +190,11 @@ function AppRoutes() {
             <Route path="task-manager" element={<ProtectedRoute><TaskManager /></ProtectedRoute>} />
             <Route path="retention-monitor" element={<ProtectedRoute><RetentionMonitor /></ProtectedRoute>} />
             <Route path="approval" element={<ProtectedRoute><ApprovalPage /></ProtectedRoute>} />
+            <Route path="masterlist" element={<ProtectedRoute><MasterlistPage /></ProtectedRoute>} />
             <Route path="loading-unloading" element={<ProtectedRoute guestAllowed><LoadingUnloading /></ProtectedRoute>} />
             <Route path="performance" element={<ProtectedRoute><PerformanceMonitor /></ProtectedRoute>} />
             <Route path="relmon" element={<ProtectedRoute><RelMon /></ProtectedRoute>} />
+            <Route path="process-monitoring" element={<ProtectedRoute><ProcessMonitoring /></ProtectedRoute>} />
           </Route>
         </Routes>
       </RouteTransition>

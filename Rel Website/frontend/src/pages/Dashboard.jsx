@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -145,6 +145,10 @@ export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [dashMode, setDashMode] = useState('my');
+  const [contentKey, setContentKey] = useState(0);
+  const [slideDir, setSlideDir] = useState(1);
+  const isInitialMount = useRef(true);
   const navigate = useNavigate();
   const { user } = useAuth();
   const { theme } = useTheme();
@@ -157,11 +161,18 @@ export default function Dashboard() {
     : { Request: '#f59e0b', Review: '#3b82f6', Approval: '#7c3aed', Testing: '#ea580c', Analysis: '#0d9488', Completed: '#10b981', Delayed: '#ef4444' };
 
   useEffect(() => {
-    api.getDashboardStats()
-      .then(setStats)
+    const initial = isInitialMount.current;
+    isInitialMount.current = false;
+    if (initial) setLoading(true);
+    setError('');
+    api.getDashboardStats(dashMode === 'my')
+      .then(data => {
+        setStats(data);
+        if (!initial) setContentKey(k => k + 1);
+      })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [dashMode]);
 
   if (loading) {
     return (
@@ -196,7 +207,7 @@ export default function Dashboard() {
       <div className="space-y-6 stagger-children">
       {/* Header — flat, with PHT clock */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-6 py-5 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
               isTechnician ? 'bg-orange-100 dark:bg-orange-900/30' : 'bg-blue-100 dark:bg-blue-900/30'
@@ -207,15 +218,41 @@ export default function Dashboard() {
             </div>
             <div>
               <h1 className="text-xl font-heading font-bold text-slate-900 dark:text-white tracking-tight">
-                {isTechnician ? "Technician's Dashboard" : 'RELDMS Dashboard'}
+                {isTechnician ? "Technician's Dashboard" : (dashMode === 'my' ? 'My Dashboard' : 'RELDMS Dashboard')}
               </h1>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                 {isTechnician
                   ? `${stats.total_requests} active test${stats.total_requests !== 1 ? 's' : ''} \u00b7 ${stats.delayed_requests} delayed \u00b7 ${stats.hold_count ?? 0} on hold`
-                  : 'Semiconductor Package & Test Services — Philippines Operations'}
+                  : dashMode === 'my'
+                    ? `${stats.total_requests} active \u00b7 ${stats.delayed_requests} delayed`
+                    : 'Semiconductor Package & Test Services — Philippines Operations'}
               </p>
             </div>
           </div>
+          {!isTechnician && (
+            <div className="flex items-center rounded-lg border border-slate-200 dark:border-slate-600 overflow-hidden text-xs font-medium self-center">
+              <button
+                onClick={() => { setSlideDir(-1); setDashMode('my'); }}
+                className={`px-3 py-1.5 transition-colors ${
+                  dashMode === 'my'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
+                }`}
+              >
+                My Dashboard
+              </button>
+              <button
+                onClick={() => { setSlideDir(1); setDashMode('reldms'); }}
+                className={`px-3 py-1.5 transition-colors ${
+                  dashMode === 'reldms'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
+                }`}
+              >
+                RELDMS Dashboard
+              </button>
+            </div>
+          )}
           <div className="text-right flex-shrink-0">
             <p className="text-2xl font-bold text-blue-600 dark:text-cyan-400 font-mono leading-none">
               {time} <span className="text-sm font-sans font-medium text-slate-500 dark:text-slate-400">PHT</span>
@@ -224,6 +261,13 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Animated content — slides in on dashboard mode switch */}
+      <div
+        key={contentKey}
+        className="space-y-6"
+        style={contentKey > 0 ? { animation: `${slideDir > 0 ? 'dashSlideInRight' : 'dashSlideInLeft'} 0.45s cubic-bezier(0.16, 1, 0.3, 1) both` } : undefined}
+      >
 
       {/* Workflow Pipeline — visible to all non-technician users */}
       {!isTechnician && <WorkflowPipeline stats={stats} onNavigate={navigate} />}
@@ -894,6 +938,7 @@ export default function Dashboard() {
         </>
       )}
 
+      </div>{/* end animated content wrapper */}
     </div>
     </>
   );
