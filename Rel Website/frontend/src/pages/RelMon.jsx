@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import * as XLSX from 'xlsx';
 import api from '../api';
 import {
   Database, RefreshCw, Loader2, AlertTriangle, ChevronRight,
@@ -40,34 +41,34 @@ const RELMON_FORM_SCHEMA = {
     { key: 'date_reported', label: 'Date Reported', type: 'date' },
   ],
   pkg_lot: [
-    { key: 'package_code', label: 'Package Code' },
-    { key: 'package_type', label: 'Package Type' },
-    { key: 'lead_ball_count', label: 'Lead/Ball Count' },
-    { key: 'package_size', label: 'Package Size' },
-    { key: 'package_thickness', label: 'Package Thickness' },
-    { key: 'lead_pitch', label: 'Lead Pitch' },
+    { key: 'package_code',      label: 'Package Code',      type: 'pkg-autocomplete', pkgField: 'pkg_code' },
+    { key: 'package_type',      label: 'Package Type',      type: 'pkg-autocomplete', pkgField: 'pkg_type' },
+    { key: 'lead_ball_count',   label: 'Lead/Ball Count',   type: 'pkg-autocomplete', pkgField: 'pin_count' },
+    { key: 'package_size',      label: 'Package Size',      type: 'pkg-autocomplete', pkgField: 'body_size' },
+    { key: 'package_thickness', label: 'Package Thickness', type: 'pkg-autocomplete', pkgField: 'pkg_thickness' },
+    { key: 'lead_pitch',        label: 'Lead Pitch',        type: 'pkg-autocomplete', pkgField: 'lb_pitch' },
     { key: 'assembly_site', label: 'Assembly Site' },
-    { key: 'customer_no', label: 'Customer No.' },
-    { key: 'customer', label: 'Customer' },
+    { key: 'customer_no', label: 'Customer No.', type: 'customer-no-autocomplete' },
+    { key: 'customer', label: 'Customer', type: 'customer-autocomplete' },
     { key: 'device_number', label: 'Device Number' },
     { key: 'lot_number', label: 'Lot Number' },
     { key: 'date_code', label: 'Date Code' },
     { key: 'unit_quantity', label: 'Unit Quantity' },
   ],
   materials: [
-    { key: 'die_size_mils', label: 'Die Size (mils)' },
-    { key: 'passivation', label: 'Passivation' },
-    { key: 'metallization', label: 'Metallization' },
-    { key: 'die_pad_size_mils', label: 'Die Pad Size (mils)' },
-    { key: 'lf_type', label: 'LF Type' },
-    { key: 'lf_subs_material', label: 'LF/Subs Material' },
-    { key: 'lf_subs_supplier', label: 'LF/Subs Supplier' },
-    { key: 'lf_subs_sid', label: 'LF/Subs SID #' },
-    { key: 'die_attach_material', label: 'Die Attach Material' },
-    { key: 'wire_size_type', label: 'Wire Size/Type' },
-    { key: 'die_coat', label: 'Die Coat' },
-    { key: 'emc_encap_fill_material', label: 'EMC/Encap/Fill Matl' },
-    { key: 'hs', label: 'HS' },
+    { key: 'die_size_mils',           label: 'Die Size (mils)' },
+    { key: 'passivation',             label: 'Passivation',         type: 'material-autocomplete', matCode: 'PASS' },
+    { key: 'metallization',           label: 'Metallization',       type: 'material-autocomplete', matCode: 'METAL' },
+    { key: 'die_pad_size_mils',       label: 'Die Pad Size (mils)' },
+    { key: 'lf_type',                 label: 'LF Type',             type: 'material-autocomplete', matCode: 'LFT' },
+    { key: 'lf_subs_material',        label: 'LF/Subs Material',    type: 'material-autocomplete', matCode: 'LFM' },
+    { key: 'lf_subs_supplier',        label: 'LF/Subs Supplier' },
+    { key: 'lf_subs_sid',             label: 'LF/Subs SID #' },
+    { key: 'die_attach_material',     label: 'Die Attach Material', type: 'material-autocomplete', matCode: 'EPOXY' },
+    { key: 'wire_size_type',          label: 'Wire Size/Type',      type: 'material-autocomplete', matCode: 'WIRE' },
+    { key: 'die_coat',                label: 'Die Coat',            type: 'material-autocomplete', matCode: 'DC' },
+    { key: 'emc_encap_fill_material', label: 'EMC/Encap/Fill Matl', type: 'material-autocomplete', matCode: 'EMC' },
+    { key: 'hs',                      label: 'HS',                  type: 'material-autocomplete', matCode: 'HSM' },
   ],
   rel_test: [
     { key: 'mrt_level', label: 'MRT Level' },
@@ -236,7 +237,276 @@ function normalizeRows(rows) {
   });
 }
 
-function RelMonFormField({ field, value, onChange }) {
+// Customer autocomplete field used for both Customer No. and Customer
+function CustomerAutocompleteField({ field, value, onChange, customers, onPairFill }) {
+  const [query, setQuery] = useState(value ?? '');
+  const [open, setOpen] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const containerRef = useRef(null);
+
+  // Keep local query in sync when external value changes (e.g. autofill from partner field)
+  useEffect(() => { setQuery(value ?? ''); }, [value]);
+
+  const isNoField = field.type === 'customer-no-autocomplete';
+
+  const filtered = query.length === 0
+    ? customers.slice(0, 80)
+    : customers.filter((c) => {
+        const q = query.toLowerCase();
+        return isNoField
+          ? c.no.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)
+          : c.name.toLowerCase().includes(q) || c.no.toLowerCase().includes(q);
+      }).slice(0, 80);
+
+  const handleSelect = (customer) => {
+    setOpen(false);
+    if (isNoField) {
+      setQuery(customer.no);
+      onChange(field.key, customer.no);
+      onPairFill('customer', customer.name);
+    } else {
+      setQuery(customer.name);
+      onChange(field.key, customer.name);
+      onPairFill('customer_no', customer.no);
+    }
+  };
+
+  const handleInput = (e) => {
+    const v = e.target.value;
+    setQuery(v);
+    onChange(field.key, v);
+    setOpen(true);
+  };
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  return (
+    <label className="flex flex-col gap-1 relative" ref={containerRef}>
+      <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">{field.label}</span>
+      <input
+        type="text"
+        value={query}
+        onChange={handleInput}
+        onFocus={() => { setFocused(true); setOpen(true); }}
+        onBlur={() => setFocused(false)}
+        autoComplete="off"
+        placeholder={isNoField ? 'No. or name…' : 'Customer name…'}
+        className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-xs text-slate-700 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-400"
+      />
+      {open && filtered.length > 0 && (
+        <ul className="absolute top-full left-0 right-0 z-50 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 shadow-lg text-xs">
+          {filtered.map((c) => (
+            <li
+              key={c.no}
+              onMouseDown={(e) => { e.preventDefault(); handleSelect(c); }}
+              className="flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/30 border-b border-slate-100 dark:border-slate-700/50 last:border-0"
+            >
+              <span className="font-mono text-slate-400 dark:text-slate-500 w-8 shrink-0 text-right">{c.no}</span>
+              <span className="text-slate-700 dark:text-slate-200 truncate">{c.name}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </label>
+  );
+}
+
+// Material autocomplete — filters by material_code matching field.matCode
+function MaterialAutocompleteField({ field, value, onChange, materials }) {
+  const [query, setQuery] = useState(value ?? '');
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => { setQuery(value ?? ''); }, [value]);
+
+  const pool = materials.filter((m) => m.material_code === field.matCode);
+
+  const filtered = query.length === 0
+    ? pool.slice(0, 100)
+    : pool.filter((m) => {
+        const q = query.toLowerCase();
+        return m.short_desc.toLowerCase().includes(q) ||
+               m.full_desc.toLowerCase().includes(q);
+      }).slice(0, 100);
+
+  const handleSelect = (mat) => {
+    const val = mat.short_desc || mat.full_desc;
+    setQuery(val);
+    onChange(field.key, val);
+    setOpen(false);
+  };
+
+  const handleInput = (e) => {
+    const v = e.target.value;
+    setQuery(v);
+    onChange(field.key, v);
+    setOpen(true);
+  };
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  return (
+    <label className="flex flex-col gap-1 relative" ref={containerRef}>
+      <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">{field.label}</span>
+      <input
+        type="text"
+        value={query}
+        onChange={handleInput}
+        onFocus={() => setOpen(true)}
+        autoComplete="off"
+        placeholder={`Search ${field.label.toLowerCase()}\u2026`}
+        className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-xs text-slate-700 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-400"
+      />
+      {open && filtered.length > 0 && (
+        <ul className="absolute top-full left-0 right-0 z-50 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 shadow-lg text-xs">
+          {filtered.map((m, i) => (
+            <li
+              key={`${m.material_code}-${m.short_desc}-${i}`}
+              onMouseDown={(e) => { e.preventDefault(); handleSelect(m); }}
+              className="flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/30 border-b border-slate-100 dark:border-slate-700/50 last:border-0"
+            >
+              <span className="font-semibold text-slate-700 dark:text-slate-200 flex-1 truncate">{m.short_desc}</span>
+              {m.full_desc && m.full_desc !== m.short_desc && (
+                <span className="text-slate-400 dark:text-slate-500 truncate text-right shrink-0 max-w-[40%]">{m.full_desc}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </label>
+  );
+}
+
+// Package autocomplete — unified for all 6 pkg fields, only opens on typing
+function PackageAutocompleteField({ field, value, onChange, packages, onPkgFill }) {
+  const [query, setQuery] = useState(value ?? '');
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+  const pkgField = field.pkgField ?? 'pkg_code';
+
+  useEffect(() => { setQuery(value ?? ''); }, [value]);
+
+  const filtered = query.length === 0
+    ? packages.slice(0, 100)
+    : packages.filter((p) => {
+        const q = query.toLowerCase();
+        const primary = String(p[pkgField] ?? '').toLowerCase();
+        const code = (p.pkg_code ?? '').toLowerCase();
+        const type = (p.pkg_type ?? p.pkg_description ?? '').toLowerCase();
+        return primary.includes(q) || code.includes(q) || type.includes(q);
+      }).slice(0, 100);
+
+  const handleSelect = (pkg) => {
+    setOpen(false);
+    const displayVal = String(pkg[pkgField] ?? '');
+    setQuery(displayVal);
+    onChange(field.key, displayVal);
+    onPkgFill({
+      package_code:      pkg.pkg_code ?? '',
+      package_type:      pkg.pkg_type ?? pkg.pkg_description ?? '',
+      lead_ball_count:   pkg.pin_count ?? '',
+      package_size:      pkg.body_size ?? '',
+      package_thickness: pkg.pkg_thickness ?? '',
+      lead_pitch:        pkg.lb_pitch ?? '',
+    });
+  };
+
+  const handleInput = (e) => {
+    const v = e.target.value;
+    setQuery(v);
+    onChange(field.key, v);
+    setOpen(true);
+  };
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  return (
+    <label className="flex flex-col gap-1 relative" ref={containerRef}>
+      <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">{field.label}</span>
+      <input
+        type="text"
+        value={query}
+        onChange={handleInput}
+        onFocus={() => setOpen(true)}
+        autoComplete="off"
+        placeholder={`Search ${field.label.toLowerCase()}\u2026`}
+        className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-xs text-slate-700 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-400"
+      />
+      {open && filtered.length > 0 && (
+        <ul className="absolute top-full left-0 right-0 z-50 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 shadow-lg text-xs">
+          {filtered.map((p, i) => (
+            <li
+              key={`${p.pkg_code}-${i}`}
+              onMouseDown={(e) => { e.preventDefault(); handleSelect(p); }}
+              className="flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/30 border-b border-slate-100 dark:border-slate-700/50 last:border-0"
+            >
+              <span className="font-mono text-blue-600 dark:text-blue-400 shrink-0 min-w-[4rem] truncate">{String(p[pkgField] ?? '')}</span>
+              <span className="font-mono text-slate-400 dark:text-slate-500 shrink-0 w-20 truncate text-right">{p.pkg_code}</span>
+              <span className="text-slate-700 dark:text-slate-200 truncate flex-1">{p.pkg_type || p.pkg_description}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </label>
+  );
+}
+
+function RelMonFormField({ field, value, onChange, customers, onPairFill, packages, onPkgFill, materials }) {
+  if (field.type === 'material-autocomplete') {
+    return (
+      <MaterialAutocompleteField
+        field={field}
+        value={value}
+        onChange={onChange}
+        materials={materials ?? []}
+      />
+    );
+  }
+  if (field.type === 'pkg-autocomplete') {
+    return (
+      <PackageAutocompleteField
+        field={field}
+        value={value}
+        onChange={onChange}
+        packages={packages ?? []}
+        onPkgFill={onPkgFill ?? (() => {})}
+      />
+    );
+  }
+
+  if (field.type === 'customer-no-autocomplete' || field.type === 'customer-autocomplete') {
+    return (
+      <CustomerAutocompleteField
+        field={field}
+        value={value}
+        onChange={onChange}
+        customers={customers ?? []}
+        onPairFill={onPairFill ?? (() => {})}
+      />
+    );
+  }
+
   if (field.type === 'type-radio') {
     return (
       <div className="col-span-2 rounded-lg border border-slate-200 dark:border-slate-700 p-2">
@@ -391,7 +661,7 @@ function StatusBadge({ status }) {
   );
 }
 
-function RequestOverviewTable({ requests, loading, error, onSelectSheet }) {
+function RequestOverviewTable({ requests, loading, error, onSelectSheet, overviewEdits = {}, onCellEdit }) {
   if (loading) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-3 text-slate-400">
@@ -480,13 +750,28 @@ function RequestOverviewTable({ requests, loading, error, onSelectSheet }) {
       globalRow += 1;
       const leadBall = req.lead_count ?? req.ball_count ?? '';
       const inferredSite = req.inferred_site;
-      const empty = <td className={TdB} />;
+
+      // Editable cell helper — col index matches the header column layout
+      const EC = (col, init = '') => {
+        const k = `${req.request_number}__${col}`;
+        const v = overviewEdits[k] ?? init;
+        return (
+          <td key={k} className="border border-slate-700 p-0">
+            <input
+              value={v}
+              onChange={(e) => onCellEdit && onCellEdit(req.request_number, col, e.target.value)}
+              className="w-full min-w-[64px] bg-transparent text-center text-[10px] text-slate-100 px-1 py-[5px] outline-none focus:bg-blue-950/60 focus:ring-1 focus:ring-inset focus:ring-blue-500 rounded-none"
+            />
+          </td>
+        );
+      };
+
       return (
         <tr
           key={req.request_number}
           className="even:bg-slate-800/30 hover:bg-blue-900/20"
         >
-          {/* Prefix: # and Request No. */}
+          {/* Prefix: # and Request No. — fixed, not editable */}
           <td className={`${TdB} text-slate-400 select-none`}>{globalRow}</td>
           <td className={TdB}>
             <button
@@ -496,42 +781,42 @@ function RequestOverviewTable({ requests, loading, error, onSelectSheet }) {
             >{req.request_number}</button>
           </td>
 
-          {/* Package: Device Type | L/C | Body SIZE (mm) */}
-          <td className={`${TdB} font-medium text-slate-200`}>{req.matched_device_type || ''}</td>
-          <td className={TdB}>{leadBall || ''}</td>
-          <td className={TdB}>{req.package_size || ''}</td>
+          {/* Package cols 0-2 */}
+          {EC(0, req.matched_device_type || '')}
+          {EC(1, String(leadBall ?? ''))}
+          {EC(2, req.package_size || '')}
 
-          {/* Factory: Date Code | Mfg Site */}
-          <td className={TdB}>{''}</td>
-          <td className={TdB}>{req.plant || ''}</td>
+          {/* Factory cols 3-4 */}
+          {EC(3, '')}
+          {EC(4, req.plant || '')}
 
-          {/* Materials: Die Size (3) */}
-          {empty}{empty}{empty}
-          {/* L/F Size (3) */}
-          {empty}{empty}{empty}
-          {/* L/F Type (3) */}
-          {empty}{empty}{empty}
-          {/* Stamp/Etch | Matl | Wire Au | Die Coat | Mold Compound | Die Attach | H/S | Plating */}
-          {empty}{empty}{empty}{empty}{empty}{empty}{empty}{empty}
+          {/* Materials — Die Size cols 5-7 */}
+          {EC(5)}{EC(6)}{EC(7)}
+          {/* L/F Size cols 8-10 */}
+          {EC(8)}{EC(9)}{EC(10)}
+          {/* L/F Type cols 11-13 */}
+          {EC(11)}{EC(12)}{EC(13)}
+          {/* Stamp/Etch | Matl | Wire Au | Die Coat | Mold Compound | Die Attach | H/S | Plating cols 14-21 */}
+          {EC(14)}{EC(15)}{EC(16)}{EC(17)}{EC(18)}{EC(19)}{EC(20)}{EC(21)}
 
-          {/* Preconditioning Test Condition */}
-          {empty}
-          {/* Reflow Temp */}
-          {empty}
+          {/* Preconditioning col 22 */}
+          {EC(22)}
+          {/* Reflow Temp col 23 */}
+          {EC(23)}
 
-          {/* Delamination Before: 5 types × (#, avg%) = 10 cells */}
-          {empty}{empty}{empty}{empty}{empty}{empty}{empty}{empty}{empty}{empty}
+          {/* Delamination Before cols 24-33 */}
+          {EC(24)}{EC(25)}{EC(26)}{EC(27)}{EC(28)}{EC(29)}{EC(30)}{EC(31)}{EC(32)}{EC(33)}
 
-          {/* Delamination After: 5 types × (#, avg%) = 10 cells */}
-          {empty}{empty}{empty}{empty}{empty}{empty}{empty}{empty}{empty}{empty}
+          {/* Delamination After cols 34-43 */}
+          {EC(34)}{EC(35)}{EC(36)}{EC(37)}{EC(38)}{EC(39)}{EC(40)}{EC(41)}{EC(42)}{EC(43)}
 
-          {/* MRT Results: #/Fail | SS | Result */}
-          {empty}{empty}{empty}
+          {/* MRT Results cols 44-46 */}
+          {EC(44)}{EC(45)}{EC(46)}
 
-          {/* Reliability Results: Rel Test | degC/R.H.% | # of hrs/cyc | "hrs"/"cyc" | # Fail | SS */}
-          {empty}{empty}{empty}{empty}{empty}{empty}
+          {/* Reliability Results cols 47-52 */}
+          {EC(47)}{EC(48)}{EC(49)}{EC(50)}{EC(51)}{EC(52)}
 
-          {/* Suffix: Status | RELMON Sheet */}
+          {/* Suffix: Status | RELMON Sheet — fixed */}
           <td className={TdB}><StatusBadge status={req.status} /></td>
           <td className={TdB}>
             {onSelectSheet && (
@@ -697,12 +982,53 @@ export default function RelMon() {
   const [search, setSearch] = useState('');
   const [expandedFamilies, setExpandedFamilies] = useState({});
   const [reloadTick, setReloadTick] = useState(0);
+  const [customerList, setCustomerList] = useState([]);
+  const [pkgList, setPkgList] = useState([]);
+  const [materialList, setMaterialList] = useState([]);
+  const [overviewEdits, setOverviewEdits] = useState({});
   const [showDeviceTypeModal, setShowDeviceTypeModal] = useState(false);
   const [deviceTypeLoading, setDeviceTypeLoading] = useState(false);
   const [deviceTypeError, setDeviceTypeError] = useState(null);
   const [deviceTypeOrder, setDeviceTypeOrder] = useState('asc');
   const [deviceTypeData, setDeviceTypeData] = useState(null);
   const abortRef = useRef(null);
+
+  const handleOverviewCellEdit = useCallback((reqNum, col, val) => {
+    setOverviewEdits((prev) => ({ ...prev, [`${reqNum}__${col}`]: val }));
+  }, []);
+
+  // ── Customer List ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    api.get('/relmon/customer-list')
+      .then((res) => setCustomerList(res.customers ?? []))
+      .catch(() => {});
+  }, []);
+
+  // ── Package List ───────────────────────────────────────────────────────────
+  useEffect(() => {
+    api.get('/relmon/pkg-list')
+      .then((res) => setPkgList(res.packages ?? []))
+      .catch(() => {});
+  }, []);
+
+  // ── Material List ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    api.get('/relmon/material-list')
+      .then((res) => setMaterialList(res.materials ?? []))
+      .catch(() => {});
+  }, []);
+
+  // helper: fill one form field and mark dirty
+  const handlePairFill = useCallback((key, value) => {
+    setFormData((prev) => ({ ...prev, [key]: value }));
+    setDirty(true);
+  }, []);
+
+  // helper: fill multiple package fields at once and mark dirty
+  const handlePkgFill = useCallback((fields) => {
+    setFormData((prev) => ({ ...prev, ...fields }));
+    setDirty(true);
+  }, []);
 
   // ── Request Overview ──────────────────────────────────────────────────────
   const loadRequestList = useCallback(() => {
@@ -916,6 +1242,182 @@ export default function RelMon() {
     URL.revokeObjectURL(url);
   };
 
+  const exportOverviewToExcel = () => {
+    if (!filteredRequestList.length) return;
+
+    const NUM_COLS = 56; // 2 prefix + 53 data + 1 Status
+
+    // ── 3-row header ────────────────────────────────────────────────────────
+    const hdr1 = Array(NUM_COLS).fill('');
+    const hdr2 = Array(NUM_COLS).fill('');
+    const hdr3 = Array(NUM_COLS).fill('');
+
+    // Row 1 group labels
+    hdr1[0]  = '#';
+    hdr1[1]  = 'Request No.';
+    hdr1[2]  = 'Package';
+    hdr1[5]  = 'Factory';
+    hdr1[7]  = 'Materials';
+    hdr1[24] = 'Preconditioning Test Condition';
+    hdr1[25] = 'Reflow Temp';
+    hdr1[26] = 'Delamination (%) Before Preconditioning';
+    hdr1[36] = 'Delamination (%) After Preconditioning';
+    hdr1[46] = 'MRT Results';
+    hdr1[49] = 'Reliability Results';
+    hdr1[55] = 'Status';
+
+    // Row 2 sub-headers
+    hdr2[2]  = 'Device Type';
+    hdr2[3]  = 'L/C';
+    hdr2[4]  = 'Body SIZE (mm)';
+    hdr2[5]  = 'Date Code';
+    hdr2[6]  = 'Mfg Site';
+    hdr2[7]  = 'Die Size';
+    hdr2[10] = 'L/F Size';
+    hdr2[13] = 'L/F Type';
+    hdr2[16] = 'Stamp or Etch';
+    hdr2[17] = 'Matl';
+    hdr2[18] = 'Wire';
+    hdr2[19] = 'Die Coat';
+    hdr2[20] = 'Mold Compound';
+    hdr2[21] = 'Die Attach';
+    hdr2[22] = 'H/S';
+    hdr2[23] = 'Plating Composition';
+    hdr2[26] = 'Type I';  hdr2[28] = 'Type II';  hdr2[30] = 'Type III';  hdr2[32] = 'Type IV';  hdr2[34] = 'Type V';
+    hdr2[36] = 'Type I';  hdr2[38] = 'Type II';  hdr2[40] = 'Type III';  hdr2[42] = 'Type IV';  hdr2[44] = 'Type V';
+    hdr2[46] = '#';  hdr2[47] = 'SS';  hdr2[48] = 'Result';
+    hdr2[49] = 'Rel Test';  hdr2[50] = 'degC/';  hdr2[51] = '# of';  hdr2[52] = '"hrs" or';  hdr2[53] = '#';  hdr2[54] = 'SS';
+
+    // Row 3 sub-sub-headers
+    hdr3[7]  = '(mil)';  hdr3[8] = '\u00d7';  hdr3[9]  = '(mil)';
+    hdr3[10] = '(mil)';  hdr3[11] = '\u00d7'; hdr3[12] = '(mil)';
+    hdr3[13] = 'VHDLF / HDLF';
+    hdr3[18] = 'Au(mil)';
+    for (let i = 0; i < 5; i++) { hdr3[26 + i * 2] = '#';  hdr3[27 + i * 2] = 'avg %'; }
+    for (let i = 0; i < 5; i++) { hdr3[36 + i * 2] = '#';  hdr3[37 + i * 2] = 'avg %'; }
+    hdr3[46] = 'Fail';
+    hdr3[50] = 'R.H.%';  hdr3[51] = 'hrs/cyc';  hdr3[52] = '"cyc"';  hdr3[53] = 'Fail';
+
+    const aoa = [hdr1, hdr2, hdr3];
+
+    // ── Data rows grouped by Device Type ─────────────────────────────────────
+    const grps = {};
+    const grpOrder = [];
+    for (const req of filteredRequestList) {
+      const key = req.matched_device_type || req.device_type || '(Unmatched)';
+      if (!grps[key]) { grps[key] = []; grpOrder.push(key); }
+      grps[key].push(req);
+    }
+    grpOrder.sort((a, b) => {
+      const sA = grps[a][0]?.inferred_site || '';
+      const sB = grps[b][0]?.inferred_site || '';
+      if (sA !== sB) return sA.localeCompare(sB);
+      return a.localeCompare(b);
+    });
+
+    let rowNum = 0;
+    const groupHeaderAoaRows = [];
+
+    grpOrder.forEach((deviceType) => {
+      const grpRows = grps[deviceType];
+      const grpRow = Array(NUM_COLS).fill('');
+      grpRow[0] = `Device Type: ${deviceType}${grpRows[0]?.inferred_site ? ` [${grpRows[0].inferred_site}]` : ''}`;
+      aoa.push(grpRow);
+      groupHeaderAoaRows.push(aoa.length - 1);
+
+      grpRows.forEach((req) => {
+        rowNum += 1;
+        const leadBall = req.lead_count ?? req.ball_count ?? '';
+        const ov = (col) => overviewEdits[`${req.request_number}__${col}`] ?? '';
+        aoa.push([
+          rowNum,
+          req.request_number,
+          ov(0) || req.matched_device_type || '',
+          ov(1) || String(leadBall),
+          ov(2) || req.package_size || '',
+          ov(3),
+          ov(4) || req.plant || '',
+          ov(5), ov(6), ov(7),
+          ov(8), ov(9), ov(10),
+          ov(11), ov(12), ov(13),
+          ov(14), ov(15), ov(16), ov(17), ov(18), ov(19), ov(20), ov(21),
+          ov(22), ov(23),
+          ov(24), ov(25), ov(26), ov(27), ov(28), ov(29), ov(30), ov(31), ov(32), ov(33),
+          ov(34), ov(35), ov(36), ov(37), ov(38), ov(39), ov(40), ov(41), ov(42), ov(43),
+          ov(44), ov(45), ov(46),
+          ov(47), ov(48), ov(49), ov(50), ov(51), ov(52),
+          req.status || '',
+        ]);
+      });
+    });
+
+    // ── Merges ───────────────────────────────────────────────────────────────
+    const xlMerges = [
+      { s:{r:0,c:0},  e:{r:2,c:0}  }, // #
+      { s:{r:0,c:1},  e:{r:2,c:1}  }, // Request No.
+      { s:{r:0,c:2},  e:{r:0,c:4}  }, // Package
+      { s:{r:0,c:5},  e:{r:0,c:6}  }, // Factory
+      { s:{r:0,c:7},  e:{r:0,c:23} }, // Materials
+      { s:{r:0,c:24}, e:{r:2,c:24} }, // Preconditioning
+      { s:{r:0,c:25}, e:{r:2,c:25} }, // Reflow
+      { s:{r:0,c:26}, e:{r:0,c:35} }, // Del Before
+      { s:{r:0,c:36}, e:{r:0,c:45} }, // Del After
+      { s:{r:0,c:46}, e:{r:0,c:48} }, // MRT Results
+      { s:{r:0,c:49}, e:{r:0,c:54} }, // Reliability Results
+      { s:{r:0,c:55}, e:{r:2,c:55} }, // Status
+      { s:{r:1,c:2},  e:{r:2,c:2}  }, // Device Type
+      { s:{r:1,c:3},  e:{r:2,c:3}  }, // L/C
+      { s:{r:1,c:4},  e:{r:2,c:4}  }, // Body SIZE
+      { s:{r:1,c:5},  e:{r:2,c:5}  }, // Date Code
+      { s:{r:1,c:6},  e:{r:2,c:6}  }, // Mfg Site
+      { s:{r:1,c:7},  e:{r:1,c:9}  }, // Die Size
+      { s:{r:1,c:10}, e:{r:1,c:12} }, // L/F Size
+      { s:{r:1,c:13}, e:{r:1,c:15} }, // L/F Type
+      { s:{r:1,c:16}, e:{r:2,c:16} }, // Stamp or Etch
+      { s:{r:1,c:17}, e:{r:2,c:17} }, // Matl
+      { s:{r:1,c:19}, e:{r:2,c:19} }, // Die Coat
+      { s:{r:1,c:20}, e:{r:2,c:20} }, // Mold Compound
+      { s:{r:1,c:21}, e:{r:2,c:21} }, // Die Attach
+      { s:{r:1,c:22}, e:{r:2,c:22} }, // H/S
+      { s:{r:1,c:23}, e:{r:2,c:23} }, // Plating Composition
+      { s:{r:1,c:26}, e:{r:1,c:27} }, { s:{r:1,c:28}, e:{r:1,c:29} }, // Del Before types
+      { s:{r:1,c:30}, e:{r:1,c:31} }, { s:{r:1,c:32}, e:{r:1,c:33} },
+      { s:{r:1,c:34}, e:{r:1,c:35} },
+      { s:{r:1,c:36}, e:{r:1,c:37} }, { s:{r:1,c:38}, e:{r:1,c:39} }, // Del After types
+      { s:{r:1,c:40}, e:{r:1,c:41} }, { s:{r:1,c:42}, e:{r:1,c:43} },
+      { s:{r:1,c:44}, e:{r:1,c:45} },
+      { s:{r:1,c:47}, e:{r:2,c:47} }, // MRT SS
+      { s:{r:1,c:48}, e:{r:2,c:48} }, // MRT Result
+      { s:{r:1,c:49}, e:{r:2,c:49} }, // Rel Test
+      { s:{r:1,c:54}, e:{r:2,c:54} }, // Rel SS
+      { s:{r:2,c:13}, e:{r:2,c:15} }, // VHDLF / HDLF
+    ];
+    groupHeaderAoaRows.forEach((ri) => xlMerges.push({ s:{r:ri,c:0}, e:{r:ri,c:NUM_COLS-1} }));
+
+    // ── Column widths ────────────────────────────────────────────────────────
+    const wch = [
+      5, 16, 16, 8, 14, 12, 10,
+      8, 4, 8, 8, 4, 8, 12, 12, 12,
+      12, 10, 10, 10, 16, 14, 8, 18,
+      22, 12,
+      ...Array(10).fill(8),
+      ...Array(10).fill(8),
+      8, 8, 10,
+      12, 10, 10, 10, 8, 8,
+      14,
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!merges'] = xlMerges;
+    ws['!cols'] = wch.map((w) => ({ wch: w }));
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Reliability Monitor');
+
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    XLSX.writeFile(wb, `RELMON_Overview_${today}.xlsx`);
+  };
+
   const loadDeviceTypes = useCallback((order = 'asc') => {
     setDeviceTypeLoading(true);
     setDeviceTypeError(null);
@@ -1071,6 +1573,14 @@ export default function RelMon() {
                   Clear Saved RELMON Data
                 </button>
                 <button
+                  onClick={exportOverviewToExcel}
+                  disabled={!filteredRequestList.length}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-300 dark:border-emerald-600 text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors disabled:opacity-50"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Export Excel
+                </button>
+                <button
                   onClick={() => setReqFullView(true)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-blue-300 dark:border-blue-600 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
                 >
@@ -1098,6 +1608,14 @@ export default function RelMon() {
                       Sync
                     </button>
                     <button
+                      onClick={exportOverviewToExcel}
+                      disabled={!filteredRequestList.length}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-300 dark:border-emerald-600 text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors disabled:opacity-50"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Export Excel
+                    </button>
+                    <button
                       onClick={() => setReqFullView(false)}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
                     >
@@ -1111,6 +1629,8 @@ export default function RelMon() {
                     requests={filteredRequestList}
                     loading={reqListLoading}
                     error={!reqListLoading ? reqListError : null}
+                    overviewEdits={overviewEdits}
+                    onCellEdit={handleOverviewCellEdit}
                     onSelectSheet={(reqNo, site, matchedDevType) => {
                       setReqFullView(false);
                       const targetSite = site || activeSite;
@@ -1140,6 +1660,8 @@ export default function RelMon() {
               requests={filteredRequestList}
               loading={reqListLoading}
               error={!reqListLoading ? reqListError : null}
+              overviewEdits={overviewEdits}
+              onCellEdit={handleOverviewCellEdit}
               onSelectSheet={(reqNo, site, matchedDevType) => {
                 const targetSite = site || activeSite;
                 // Construct sheet name directly from known device type + req number
@@ -1346,6 +1868,11 @@ export default function RelMon() {
                       field={field}
                       value={formData[field.key]}
                       onChange={handleFormChange}
+                      customers={customerList}
+                      onPairFill={handlePairFill}
+                      packages={pkgList}
+                      onPkgFill={handlePkgFill}
+                      materials={materialList}
                     />
                   ))}
                 </div>

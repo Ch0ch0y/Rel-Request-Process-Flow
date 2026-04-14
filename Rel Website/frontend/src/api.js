@@ -118,6 +118,7 @@ class ApiClient {
 
   // Process Monitoring
   getProcessMonitoring() { return this.get('/process-monitoring'); }
+  toggleRequestPriority(requestId) { return this.patch(`/requests/${requestId}/priority`, {}); }
 
   // Request Notes
   updateNote(requestId, note) { return this.patch(`/requests/${requestId}/note`, { note }); }

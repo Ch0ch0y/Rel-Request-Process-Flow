@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LTC GEN - Auto Fill Reliability Test Request Sheet</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #F0F4F8;
+      color: #222;
+      min-height: 100vh;
+    }
+    header {
+      background: #003DA5;
+      padding: 14px 32px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    }
+    header .logo  { font-size: 26px; font-weight: 700; color: #fff; letter-spacing: 2px; }
+    header .sub   { font-size: 13px; color: #AACCFF; }
+    main {
+      max-width: 920px;
+      margin: 28px auto;
+      padding: 0 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 10px;
+      padding: 22px 26px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.09);
+    }
+    .card-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: #003DA5;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #E4ECF8;
+    }
+    /* ---- File rows ---- */
+    .file-row {
+      display: grid;
+      grid-template-columns: 190px 1fr 110px;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .file-row:last-child { margin-bottom: 0; }
+    .file-row label {
+      font-size: 13px;
+      font-weight: 600;
+      color: #333;
+    }
+    .file-box {
+      font-size: 12px;
+      color: #555;
+      background: #F5F8FC;
+      border: 1px solid #C8D6EC;
+      border-radius: 6px;
+      padding: 7px 10px;
+      min-height: 34px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      cursor: default;
+    }
+    .file-box.empty { color: #aaa; font-style: italic; }
+    .file-box.ok    { color: #1A5A1A; border-color: #7ABF7A; background: #F2FAF2; }
+    input[type="file"] { display: none; }
+    /* Output name row */
+    .out-row {
+      display: grid;
+      grid-template-columns: 190px 1fr 110px;
+      align-items: center;
+      gap: 10px;
+    }
+    #out-name {
+      font-size: 12px;
+      padding: 7px 10px;
+      border: 1px solid #C8D6EC;
+      border-radius: 6px;
+      background: #F5F8FC;
+      color: #333;
+      min-height: 34px;
+      width: 100%;
+    }
+    #out-name:focus { outline: 2px solid #003DA5; border-color: #003DA5; }
+    /* ---- Buttons ---- */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 7px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: background 0.15s, opacity 0.15s;
+      white-space: nowrap;
+    }
+    .btn-gray  { background: #E4ECF8; color: #003DA5; }
+    .btn-gray:hover  { background: #CCD8F0; }
+    .btn-blue  { background: #003DA5; color: #fff; padding: 10px 26px; font-size: 14px; }
+    .btn-blue:hover  { background: #00298A; }
+    .btn-blue:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-small { padding: 5px 12px; font-size: 12px; }
+    /* ---- Preview ---- */
+    #preview-area {
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 12px;
+      background: #FAFAFA;
+      border: 1px solid #DDD;
+      border-radius: 6px;
+      padding: 12px;
+      height: 210px;
+      overflow: auto;
+      white-space: pre;
+      color: #333;
+      margin-top: 10px;
+    }
+    .preview-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    #preview-note { font-size: 12px; color: #888; }
+    /* ---- Action bar ---- */
+    .action-bar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    #status {
+      font-size: 13px;
+      color: #555;
+    }
+    #status.ok  { color: #1A6A1A; font-weight: 600; }
+    #status.err { color: #B00; font-weight: 600; }
+    /* ---- Progress ---- */
+    .progress-wrap { display: none; }
+    .progress-wrap.show { display: flex; align-items: center; gap: 8px; }
+    .progress-bar {
+      width: 180px;
+      height: 6px;
+      background: #D8E4F4;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      width: 35%;
+      background: #003DA5;
+      border-radius: 3px;
+      animation: sweep 1.1s ease-in-out infinite alternate;
+    }
+    @keyframes sweep {
+      from { transform: translateX(-120%); }
+      to   { transform: translateX(400%); }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <span class="logo">LTC GEN</span>
+  <span class="sub">Auto Fill - Reliability Test Request Sheet</span>
+</header>
+
+<main>
+
+  <!-- File Selection -->
+  <div class="card">
+    <div class="card-title">File Selection</div>
+
+    <div class="file-row">
+      <label>Source - RSS Report:</label>
+      <div id="src-box" class="file-box empty">No file selected...</div>
+      <button class="btn btn-gray" onclick="document.getElementById('src-input').click()">Browse...</button>
+      <input type="file" id="src-input" accept=".xlsx,.xlsm,.xls">
+    </div>
+
+    <div class="file-row">
+      <label>Template (LTC):</label>
+      <div id="tpl-box" class="file-box empty">No file selected...</div>
+      <button class="btn btn-gray" onclick="document.getElementById('tpl-input').click()">Browse...</button>
+      <input type="file" id="tpl-input" accept=".xlsx,.xlsm,.xls">
+    </div>
+
+    <div class="out-row" style="margin-top:10px;">
+      <label style="font-size:13px;font-weight:600;color:#333;">Save Output As:</label>
+      <input type="text" id="out-name" placeholder="output_FILLED.xlsx">
+      <span style="font-size:12px;color:#888;text-align:center;">(auto .xlsx)</span>
+    </div>
+  </div>
+
+  <!-- Preview -->
+  <div class="card">
+    <div class="card-title">Extracted Data Preview</div>
+    <div class="preview-bar">
+      <button class="btn btn-gray" onclick="doPreview()">Preview Data from Source</button>
+      <span id="preview-note"></span>
+    </div>
+    <div id="preview-area">Select a source RSS Report file and click "Preview Data from Source"...</div>
+  </div>
+
+  <!-- Action -->
+  <div class="card">
+    <div class="action-bar">
+      <button class="btn btn-blue" id="gen-btn" onclick="doGenerate()">Generate Filled Template</button>
+      <div class="progress-wrap" id="prog-wrap">
+        <div class="progress-bar"><div class="progress-fill"></div></div>
+        <span style="font-size:12px;color:#555;">Processing...</span>
+      </div>
+      <span id="status">Select the RSS Report to begin.</span>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ==============================================================
+//  STATE
+// ==============================================================
+let srcFile = null;
+let tplFile = null;
+
+document.getElementById('src-input').addEventListener('change', function () {
+  srcFile = this.files[0] || null;
+  if (srcFile) {
+    setBox('src-box', srcFile.name);
+    const base = srcFile.name.replace(/\.[^.]+$/, '');
+    document.getElementById('out-name').value = base + '_FILLED.xlsx';
+    setStatus('Source selected. Ready to preview or generate.', '');
+  }
+});
+
+document.getElementById('tpl-input').addEventListener('change', function () {
+  tplFile = this.files[0] || null;
+  if (tplFile) setBox('tpl-box', tplFile.name);
+});
+
+function setBox(id, name) {
+  const el = document.getElementById(id);
+  el.textContent = name;
+  el.className = 'file-box ok';
+}
+
+// ==============================================================
+//  PARSE SOURCE
+// ==============================================================
+function parseSource(wb) {
+  const SHEET = 'Agile Export Report0';
+  if (!wb.Sheets[SHEET]) throw new Error("Sheet '" + SHEET + "' not found in source file.");
+  const ws = wb.Sheets[SHEET];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+
+  const data = {};
+  const testMatrix = [];
+  let inMatrix = false;
+
+  for (const row of rows) {
+    const b = row[1], c = row[2], d = row[3], e = row[4];
+    const bStr = (b == null) ? '' : String(b).trim();
+    const dStr = (d == null) ? '' : String(d).trim();
+
+    if (bStr === 'Test Matrix') { inMatrix = true; continue; }
+
+    if (inMatrix) {
+      if (bStr === 'Leg') continue;
+      const a = row[0];
+      if (a != null && String(a).trim() !== '' && !isNaN(Number(a))) {
+        testMatrix.push({
+          Leg:       row[1],
+          AssyLotNo: row[2],
+          OtherInfo: row[3],
+          TestType:  row[5],
+          TestItem:  row[6],
+          TestCond:  row[7],
+          ReadingPt: row[8],
+          EL:        row[9],
+          OS:        row[10],
+          SAT:       row[11],
+          CA:        row[12],
+          SS:        row[13],
+        });
+      }
+      continue;
+    }
+
+    if (bStr) data[bStr] = c;
+    if (dStr) data[dStr] = e;
+  }
+
+  data.test_matrix = testMatrix;
+  return data;
+}
+
+// ==============================================================
+//  FILL TEMPLATE
+// ==============================================================
+function jsDateSerial(date) {
+  // Excel serial: days since Dec 30, 1899
+  return (date.getTime() - Date.UTC(1899, 11, 30)) / 86400000;
+}
+
+function fillTemplate(srcData, wb) {
+  if (!wb.Sheets['Sheet1']) throw new Error("Sheet 'Sheet1' not found in template.");
+  const ws = wb.Sheets['Sheet1'];
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todaySerial = jsDateSerial(today);
+
+  // Build set of merge-slave cell addresses so we skip them
+  const slaves = new Set();
+  for (const m of (ws['!merges'] || [])) {
+    for (let r = m.s.r; r <= m.e.r; r++) {
+      for (let c = m.s.c; c <= m.e.c; c++) {
+        if (r === m.s.r && c === m.s.c) continue;
+        slaves.add(XLSX.utils.encode_cell({ r, c }));
+      }
+    }
+  }
+
+  function keepStyle(ref) {
+    const ex = ws[ref];
+    return ex ? ex.s : undefined;
+  }
+
+  function w(ref, value) {
+    if (slaves.has(ref)) return;
+    if (value == null || value === '') return;
+    const s = keepStyle(ref);
+    const v = String(value);
+    ws[ref] = s !== undefined ? { t: 's', v, w: v, s } : { t: 's', v, w: v };
+  }
+
+  function wNum(ref, value) {
+    if (slaves.has(ref)) return;
+    if (value == null || value === '') return;
+    const num = Number(value);
+    if (isNaN(num)) { w(ref, value); return; }
+    const s = keepStyle(ref);
+    ws[ref] = s !== undefined ? { t: 'n', v: num, s } : { t: 'n', v: num };
+  }
+
+  function wDate(ref) {
+    if (slaves.has(ref)) return;
+    const s = keepStyle(ref);
+    ws[ref] = s !== undefined
+      ? { t: 'n', v: todaySerial, z: 'mm/dd/yyyy', s }
+      : { t: 'n', v: todaySerial, z: 'mm/dd/yyyy' };
+  }
+
+  w('D8',  srcData['Request Number']);
+  w('O8',  srcData['Product Hierarchy']);
+  w('D9',  srcData['Classification']);
+  w('O9',  srcData['PDL']);
+  w('D10', srcData['Originator']);
+  w('O10', srcData['Body Size X (mm)']);
+  w('D11', srcData['Plant']);
+  w('O11', srcData['Body Size Y (mm)']);
+  w('D12', srcData['Device Name']);
+  w('O12', srcData['Package Thickness (mm)']);
+  w('D13', srcData['Lot No']);
+  w('O13', srcData['Ball Pitch (mm)']);
+  w('D14', srcData['Customer']);
+  w('O14', srcData['Ball Count']);
+  w('D15', srcData['PKG Info']);
+  w('O15', srcData['Lead Pitch (mm)']);
+  w('D16', srcData['Automotive']);
+  w('O16', srcData['Lead Count']);
+  wDate('D17');
+  wNum('O17', srcData['Total S/S']);
+  w('D18', srcData['Purpose']);
+
+  // Serialize samples text
+  const totalSS = srcData['Total S/S'];
+  if (!slaves.has('D33') && totalSS != null) {
+    const txt = 'Mark units from 1 to ' + totalSS + ' for SAT identification';
+    ws['D33'] = { t: 's', v: txt, w: txt };
+  }
+
+  // Engineer name: strip "(employee_id)" suffix
+  const rrsEng = String(srcData['RRS Engineer'] || '');
+  const engName = rrsEng.includes('(') ? rrsEng.split('(')[0].trim() : rrsEng.trim();
+  if (engName) w('D48', engName);
+
+  wDate('K50');
+  wDate('C55');
+
+  // Test matrix
+  const matrix = srcData.test_matrix || [];
+  const START = 26;
+  const COLS = ['B','C','D','F','H','J','M','P','Q','R','S','T'];
+
+  // Clear stale rows
+  const clearCount = Math.max(matrix.length + 4, 6);
+  for (let i = 0; i < clearCount; i++) {
+    for (const col of COLS) {
+      const ref = col + (START + i);
+      if (!slaves.has(ref) && ws[ref]) ws[ref] = { t: 's', v: '', w: '' };
+    }
+  }
+
+  for (let i = 0; i < matrix.length; i++) {
+    const row = matrix[i];
+    const r = START + i;
+    w('B' + r, row.Leg);
+    w('C' + r, row.AssyLotNo);
+    w('D' + r, row.OtherInfo);
+    w('F' + r, row.TestType);
+    w('H' + r, row.TestItem);
+    w('J' + r, row.TestCond);
+    w('M' + r, row.ReadingPt);
+    const el = row.EL;
+    if (el != null && String(el) !== '' && String(el) !== 'nan') wNum('P' + r, el);
+    w('Q' + r, row.OS);
+    w('R' + r, row.SAT);
+    const ca = row.CA;
+    if (ca != null && String(ca) !== '' && String(ca) !== 'nan') wNum('S' + r, ca);
+    wNum('T' + r, row.SS);
+  }
+}
+
+// ==============================================================
+//  UTILITIES
+// ==============================================================
+function readFileBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = e => resolve(e.target.result);
+    reader.onerror = () => reject(new Error('Cannot read file: ' + file.name));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function setStatus(msg, type) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = type || '';
+}
+
+function pad(str, len) {
+  return String(str == null ? '' : str).padEnd(len, ' ');
+}
+
+// ==============================================================
+//  PREVIEW
+// ==============================================================
+async function doPreview() {
+  if (!srcFile) { alert('Please select a Source RSS Report file first.'); return; }
+  const area = document.getElementById('preview-area');
+  const note = document.getElementById('preview-note');
+  area.textContent = 'Parsing...';
+  note.textContent = '';
+
+  try {
+    const buf = await readFileBuffer(srcFile);
+    const wb  = XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: true });
+    const data = parseSource(wb);
+    const tm = data.test_matrix || [];
+
+    const lines = [];
+    lines.push(pad('Field', 42) + 'Value');
+    lines.push('-'.repeat(82));
+    for (const [k, v] of Object.entries(data)) {
+      if (k === 'test_matrix') continue;
+      lines.push(pad(k, 42) + (v == null ? '(empty)' : String(v)));
+    }
+    lines.push('');
+    lines.push('Test Matrix rows: ' + tm.length);
+    tm.forEach((row, i) => lines.push('  Row ' + (i + 1) + ': ' + JSON.stringify(row)));
+
+    area.textContent = lines.join('\n');
+    note.textContent = 'Parsed ' + (Object.keys(data).length - 1) + ' fields + ' + tm.length + ' matrix rows.';
+    setStatus('Source parsed successfully.', '');
+  } catch (err) {
+    area.textContent = 'Error: ' + err.message;
+    setStatus('Parse error: ' + err.message, 'err');
+  }
+}
+
+// ==============================================================
+//  GENERATE
+// ==============================================================
+async function doGenerate() {
+  if (!srcFile) { setStatus('Please select a Source RSS Report file.', 'err'); return; }
+  if (!tplFile) { setStatus('Please select a Template (LTC) file.', 'err'); return; }
+
+  let outName = document.getElementById('out-name').value.trim() || 'output_FILLED';
+  if (!outName.toLowerCase().endsWith('.xlsx')) outName += '.xlsx';
+
+  const btn  = document.getElementById('gen-btn');
+  const prog = document.getElementById('prog-wrap');
+  const stat = document.getElementById('status');
+  btn.disabled = true;
+  prog.className = 'progress-wrap show';
+  setStatus('', '');
+
+  try {
+    const [srcBuf, tplBuf] = await Promise.all([
+      readFileBuffer(srcFile),
+      readFileBuffer(tplFile),
+    ]);
+
+    const srcWb = XLSX.read(new Uint8Array(srcBuf), {
+      type: 'array', cellDates: true
+    });
+    const tplWb = XLSX.read(new Uint8Array(tplBuf), {
+      type: 'array', cellStyles: true, cellDates: true, cellFormulas: true
+    });
+
+    const srcData = parseSource(srcWb);
+    fillTemplate(srcData, tplWb);
+
+    const out  = XLSX.write(tplWb, { bookType: 'xlsx', type: 'array', cellStyles: true });
+    const blob = new Blob([out], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a');
+    a.href = url;
+    a.download = outName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    setStatus('Done! Downloaded: ' + outName, 'ok');
+  } catch (err) {
+    setStatus('Error: ' + err.message, 'err');
+  } finally {
+    btn.disabled = false;
+    prog.className = 'progress-wrap';
+  }
+}
+</script>
+</body>
+</html>

@@ -27,9 +27,11 @@ const ML_COLS = [
   { key: 'planner_remarks', label: 'Planner Remarks' },
 ];
 
-const EDITABLE_KEYS = new Set(['test_level','qty','num_days','num_legs','est_start','est_completion','recommit','planner_remarks']);
-const CELL_FIELD_MAP = { qty: 'ml_qty', est_start: 'planner_est_start', est_completion: 'planner_est_end', planner_remarks: 'planner_note', test_level: 'test_level' };
-const DATE_KEYS = new Set(['est_start', 'est_completion']);
+const EDITABLE_KEYS = new Set(ML_COLS.map(c => c.key));
+const CELL_FIELD_MAP = { qty: 'ml_qty', est_start: 'planner_est_start', est_completion: 'planner_est_end', planner_remarks: 'planner_note', test_level: 'test_level', qual_type: 'qual_type', pkg_type: 'pkg_type', rr_agile_no: 'rr_agile_no', date_received: 'date_received', rrs_no: 'rrs_no' };
+const DATE_KEYS = new Set(['est_start', 'est_completion', 'date_received']);
+const TEXTAREA_KEYS = new Set(['planner_remarks', 'purpose']);
+const DATALIST_KEYS = new Set(['test_level']);
 
 // Parse any date string into a Date object; returns null on failure
 function parseAnyDate(str) {
@@ -80,8 +82,6 @@ const ML_STATUS_COLORS = {
 };
 
 export default function MasterlistPage() {
-  const { hasRole } = useAuth();
-
   const [masterlist, setMasterlist] = useState([]);
   const [mlLoading, setMlLoading] = useState(true);
   const [mlError, setMlError] = useState('');
@@ -92,11 +92,11 @@ export default function MasterlistPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [testLevelFilter, setTestLevelFilter] = useState('all');
 
-  const [editingCell, setEditingCell] = useState({ rowId: null, colKey: null, value: '', original: '' });
+  const [editingCell, setEditingCell] = useState({ rowKey: null, rowId: null, colKey: null, value: '', original: '' });
   const skipBlurRef = useRef(false);
   const [fullView, setFullView] = useState(false);
 
-  const canEdit = hasRole('Admin', 'Planner');
+  const canEdit = true;
 
   // Derived dropdown options
   const uniqueStatuses = useMemo(
@@ -140,21 +140,21 @@ export default function MasterlistPage() {
     api.get('/test-items').then(data => { if (Array.isArray(data)) setTestItems(data); }).catch(() => {});
   }, []);
 
-  const startCellEdit = (rowId, colKey, val) => {
-    if (!canEdit || !EDITABLE_KEYS.has(colKey)) return;
+  const startCellEdit = (rowKey, rowId, colKey, val) => {
+    if (!EDITABLE_KEYS.has(colKey)) return;
     // For date columns use the datetime-local format so the browser picker works
     const v = DATE_KEYS.has(colKey) ? toDatetimeLocal(val) : String(val || '');
-    setEditingCell({ rowId, colKey, value: v, original: v });
+    setEditingCell({ rowKey, rowId, colKey, value: v, original: v });
   };
 
   const cancelCellEdit = () => {
     skipBlurRef.current = true;
-    setEditingCell({ rowId: null, colKey: null, value: '', original: '' });
+    setEditingCell({ rowKey: null, rowId: null, colKey: null, value: '', original: '' });
   };
 
-  const commitCell = async (rowId, colKey, value, original) => {
+  const commitCell = async (rowKey, rowId, colKey, value, original) => {
     if (skipBlurRef.current) { skipBlurRef.current = false; return; }
-    setEditingCell({ rowId: null, colKey: null, value: '', original: '' });
+    setEditingCell({ rowKey: null, rowId: null, colKey: null, value: '', original: '' });
     if (value === original) return;
     const backendKey = CELL_FIELD_MAP[colKey] || colKey;
     // Capture row before state update so we can read related fields for computation
@@ -182,15 +182,6 @@ export default function MasterlistPage() {
     }
   };
 
-  if (!canEdit) {
-    return (
-      <div className="p-8 text-center">
-        <ShieldCheck className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-        <p className="text-slate-500 font-medium">Access restricted to Admin and Planner.</p>
-      </div>
-    );
-  }
-
   return (
     <div className={fullView ? 'fixed inset-0 z-[9999] flex flex-col bg-white dark:bg-slate-900' : 'space-y-6 stagger-children'}>
       <div className={fullView ? 'flex flex-col flex-1 min-h-0 overflow-hidden' : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm overflow-hidden'}>
@@ -202,7 +193,7 @@ export default function MasterlistPage() {
             <h1 className="font-heading font-bold text-slate-900 dark:text-white text-xl leading-tight">Masterlist</h1>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               {filteredList.length > 0 ? filteredList.length + ' RELDMS request(s)' + (filteredList.length < masterlist.length ? ' (filtered)' : '') : 'No requests found'}
-              {canEdit && masterlist.length > 0 && <span className="ml-2 text-blue-500">· Click a cell to edit</span>}
+              {masterlist.length > 0 && <span className="ml-2 text-blue-500">· Click any cell to edit</span>}
             </p>
           </div>
           {/* Search bar */}
@@ -277,7 +268,7 @@ export default function MasterlistPage() {
                   <th className="border border-blue-500 px-2 py-2 text-left text-[10px] font-bold text-white uppercase tracking-wide whitespace-nowrap">Status</th>
                   {ML_COLS.map(col => (
                     <th key={col.key} className="border border-blue-500 px-2 py-2 text-left text-[10px] font-bold text-white uppercase tracking-wide whitespace-nowrap">
-                      {col.label}{canEdit && EDITABLE_KEYS.has(col.key) && <span className="ml-1 opacity-60 font-normal normal-case">✎</span>}
+                      {col.label}
                     </th>
                   ))}
                   <th className="border border-blue-500 px-2 py-2 text-center text-[10px] font-bold text-white uppercase tracking-wide whitespace-nowrap">Link</th>
@@ -301,8 +292,8 @@ export default function MasterlistPage() {
                       )}
                     </td>
                     {ML_COLS.map(col => {
-                      const isEditing = editingCell.rowId === row.id && editingCell.colKey === col.key;
-                      const isEditable = canEdit && EDITABLE_KEYS.has(col.key);
+                      const isEditing = editingCell.rowKey === rowKey && editingCell.colKey === col.key;
+                      const isEditable = EDITABLE_KEYS.has(col.key);
                       const rawVal = row[col.key] || '';
                       // For non-first leg rows the identity columns are already blanked by backend
                       const displayVal = DATE_KEYS.has(col.key) && rawVal
@@ -313,7 +304,7 @@ export default function MasterlistPage() {
                       return (
                         <td
                           key={col.key}
-                          onClick={() => { if (!isEditing) startCellEdit(row.id, col.key, rawVal); }}
+                          onClick={() => { if (!isEditing) startCellEdit(rowKey, row.id, col.key, rawVal); }}
                           className={[
                             'border border-slate-200 dark:border-slate-700',
                             isEditing
@@ -325,17 +316,17 @@ export default function MasterlistPage() {
                           ].join(' ')}
                         >
                           {isEditing ? (
-                            col.key === 'planner_remarks' ? (
+                            TEXTAREA_KEYS.has(col.key) ? (
                               <textarea
                                 autoFocus
                                 rows={2}
                                 value={editingCell.value}
                                 onChange={e => setEditingCell(prev => ({ ...prev, value: e.target.value }))}
-                                onBlur={() => commitCell(row.id, col.key, editingCell.value, editingCell.original)}
+                                onBlur={() => commitCell(rowKey, row.id, col.key, editingCell.value, editingCell.original)}
                                 onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); cancelCellEdit(); } }}
                                 className="w-full px-2 py-1 border-none outline-none bg-transparent text-[11px] text-slate-900 dark:text-white resize-none min-w-[150px]"
                               />
-                            ) : col.key === 'test_level' ? (
+                            ) : DATALIST_KEYS.has(col.key) ? (
                               <>
                                 <datalist id="ml-test-level-list">
                                   {testItems.map(item => <option key={item} value={item} />)}
@@ -348,7 +339,7 @@ export default function MasterlistPage() {
                                   placeholder="Type to search…"
                                   value={editingCell.value}
                                   onChange={e => setEditingCell(prev => ({ ...prev, value: e.target.value }))}
-                                  onBlur={() => commitCell(row.id, col.key, editingCell.value, editingCell.original)}
+                                  onBlur={() => commitCell(rowKey, row.id, col.key, editingCell.value, editingCell.original)}
                                   onKeyDown={e => {
                                     if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
                                     if (e.key === 'Escape') { e.preventDefault(); cancelCellEdit(); }
@@ -362,7 +353,7 @@ export default function MasterlistPage() {
                                 type="datetime-local"
                                 value={editingCell.value}
                                 onChange={e => setEditingCell(prev => ({ ...prev, value: e.target.value }))}
-                                onBlur={() => commitCell(row.id, col.key, editingCell.value, editingCell.original)}
+                                onBlur={() => commitCell(rowKey, row.id, col.key, editingCell.value, editingCell.original)}
                                 onKeyDown={e => {
                                   if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
                                   if (e.key === 'Escape') { e.preventDefault(); cancelCellEdit(); }
@@ -375,7 +366,7 @@ export default function MasterlistPage() {
                                 type="text"
                                 value={editingCell.value}
                                 onChange={e => setEditingCell(prev => ({ ...prev, value: e.target.value }))}
-                                onBlur={() => commitCell(row.id, col.key, editingCell.value, editingCell.original)}
+                                onBlur={() => commitCell(rowKey, row.id, col.key, editingCell.value, editingCell.original)}
                                 onKeyDown={e => {
                                   if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
                                   if (e.key === 'Escape') { e.preventDefault(); cancelCellEdit(); }
@@ -384,8 +375,8 @@ export default function MasterlistPage() {
                               />
                             )
                           ) : (
-                            <span className={'block text-slate-700 dark:text-slate-300 ' + (col.key !== 'planner_remarks' ? 'truncate max-w-[130px]' : 'max-w-[160px]')}>
-                              {displayVal || (isEditable ? <span className="text-slate-300 dark:text-slate-600 select-none">—</span> : '')}
+                            <span className={'block text-slate-700 dark:text-slate-300 ' + (TEXTAREA_KEYS.has(col.key) ? 'max-w-[160px]' : 'truncate max-w-[130px]')}>
+                              {displayVal || <span className="text-slate-300 dark:text-slate-600 select-none">—</span>}
                             </span>
                           )}
                         </td>

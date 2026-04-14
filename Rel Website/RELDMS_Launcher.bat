@@ -90,30 +90,41 @@ REM ======================================================
 cls
 set "DEPLOY_MODE=lan"
 
-REM Detect LAN IP
+REM Detect LAN IP — uses PowerShell to get the real 10.x/172.x IP, not APIPA
 set "LANIP="
-for /f "tokens=2 delims=:" %%a in ('ipconfig ^| findstr /C:"IPv4"') do (
-    set "LANIP=%%a"
-)
-REM Trim leading space
-if defined LANIP set "LANIP=!LANIP: =!"
+for /f "usebackq tokens=*" %%a in (`powershell -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '169.254.*' -and $_.IPAddress -ne '127.0.0.1' } | Select-Object -First 1).IPAddress"`) do set "LANIP=%%a"
+
 if defined LANIP (
     set "HOST_ADDR=!LANIP!"
 ) else (
     set "HOST_ADDR=%COMPUTERNAME%"
 )
 
+cls
+color 0B
 echo.
-echo  +----------------------------------------------+
-echo  :   Mode: SHARED NETWORK / LAN                :
-echo  +----------------------------------------------+
+echo  +======================================================+
+echo  :                                                      :
+echo  :       RELDMS - LAN / Shared Network Mode            :
+echo  :                                                      :
+echo  +======================================================+
+echo  :                                                      :
+echo  :   SHARE THIS URL WITH OTHER COMPUTERS:              :
+echo  :                                                      :
+echo  :     http://!HOST_ADDR!:8000                         :
+echo  :                                                      :
+echo  +======================================================+
 echo.
-echo  Your LAN IP: !HOST_ADDR!
+echo  ^ Copy and paste that URL into the browser on
+echo    any computer connected to the same network.
 echo.
-echo  NOTE: When Python starts, Windows may show a
-echo  firewall popup. Click "Allow access" to let
-echo  other PCs connect.
+echo  ----------------------------------------------------------
+echo   NOTE: If others CANNOT connect, the company firewall
+echo   may be blocking port 8000. Ask your IT department to
+echo   run open_firewall.bat as Administrator on this PC.
+echo  ----------------------------------------------------------
 echo.
+pause
 goto :setup
 
 REM ======================================================

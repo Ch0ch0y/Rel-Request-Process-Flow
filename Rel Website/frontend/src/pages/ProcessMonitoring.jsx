@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
 import {
-  Activity, RefreshCw, Loader2, Search, X, Filter, ChevronRight,
-  CheckCircle2, Clock, AlertTriangle, Play, Square, User, Wrench,
-  Package, Layers, CalendarDays, Tag, ClipboardCheck,
-  Eye, Edit3, Save, XCircle, Users, BarChart3, Zap, ListChecks,
-  ChevronDown, ChevronUp, Building2, FlaskConical, Cpu,
+  Activity, RefreshCw, Loader2, Search, X,
+  CheckCircle2, Clock, AlertTriangle, Play, Square, User,
+  Layers, CalendarDays, Tag, ClipboardCheck,
+  Eye, Users, Zap, ListChecks,
+  ChevronDown, ChevronUp, Building2, FlaskConical,
+  TableProperties, Filter, Flame,
 } from 'lucide-react';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -94,18 +95,6 @@ function StepStatusPill({ status }) {
   );
 }
 
-function ProgressBar({ completed, total, inProgress }) {
-  if (!total) return null;
-  const comp = Math.min(completed / total, 1) * 100;
-  const prog = Math.min(inProgress / total, 1) * 100;
-  return (
-    <div className="h-2 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden flex">
-      <div className="h-full bg-emerald-500 transition-all duration-500" style={{ width: `${comp}%` }} />
-      <div className="h-full bg-blue-400 transition-all duration-500" style={{ width: `${prog}%` }} />
-    </div>
-  );
-}
-
 function SummaryCard({ label, value, icon: Icon, color, sub }) {
   return (
     <div className={`rounded-xl border p-4 shadow-sm flex items-center gap-4 ${color}`}>
@@ -183,312 +172,23 @@ function AssignPopover({ employees, currentId, onAssign, onClose }) {
 }
 
 // ── Step Card ─────────────────────────────────────────────────────────────────
-function StepCard({ step, employees, onUpdate, requestId, isUpdating }) {
-  const [showAssign, setShowAssign] = useState(false);
-  const [showDetails, setShowDetails] = useState(false);
-  const cfg = STEP_STATUS_CONFIG[step.status] || STEP_STATUS_CONFIG.pending;
-  const Icon = cfg.icon;
-  const grad = getStepGradient(step.step_name);
-  const emp = employees.find(e => e.id === step.operator_id);
-
-  const handleAssign = async (empId) => {
-    setShowAssign(false);
-    await onUpdate(step.step_number, step.leg, { operator_id: empId });
-  };
-
-  const handleStatusChange = async (newStatus) => {
-    if (newStatus === step.status) return;
-    const payload = { status: newStatus };
-    if (newStatus === 'in_progress' && !step.started_at) {
-      payload.started_at = new Date().toISOString();
-    }
-    await onUpdate(step.step_number, step.leg, payload);
-  };
-
-  const isLoading = isUpdating === `${step.leg}-${step.step_number}`;
-
-  return (
-    <div className={`relative rounded-xl border transition-all duration-200 ${cfg.bg} ${isLoading ? 'opacity-60' : ''}`}>
-      {/* Left accent bar */}
-      <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-xl bg-gradient-to-b ${grad}`} />
-
-      <div className="pl-4 pr-3 py-3">
-        {/* Header row */}
-        <div className="flex items-start gap-2">
-          {/* Step number badge */}
-          <div className={`flex-shrink-0 w-7 h-7 rounded-lg bg-gradient-to-br ${grad} flex items-center justify-center text-white text-xs font-bold shadow`}>
-            {step.step_number}
-          </div>
-
-          {/* Step name + status */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-semibold text-sm text-slate-800 dark:text-slate-100 leading-tight">
-                {step.step_name}
-              </span>
-              <StepStatusPill status={step.status} />
-              {step.status === 'in_progress' && step.started_at && (
-                <span className="text-xs text-slate-400 dark:text-slate-500">
-                  {elapsed(step.started_at)} elapsed
-                </span>
-              )}
-            </div>
-
-            {/* Employee assignment */}
-            <div className="flex items-center gap-1.5 mt-1">
-              <User className="w-3 h-3 text-slate-400 flex-shrink-0" />
-              <div className="relative">
-                <button
-                  onClick={() => setShowAssign(v => !v)}
-                  className="text-xs text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 flex items-center gap-1 transition-colors"
-                >
-                  {emp ? (
-                    <span className="font-medium text-slate-700 dark:text-slate-200">{emp.name}</span>
-                  ) : (
-                    <span className="text-slate-400 italic">Unassigned — click to assign</span>
-                  )}
-                  <ChevronDown className="w-3 h-3" />
-                </button>
-                {showAssign && (
-                  <AssignPopover
-                    employees={employees}
-                    currentId={step.operator_id}
-                    onAssign={handleAssign}
-                    onClose={() => setShowAssign(false)}
-                  />
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Action buttons */}
-          <div className="flex items-center gap-1 flex-shrink-0">
-            {isLoading && <Loader2 className="w-4 h-4 animate-spin text-blue-500" />}
-            {/* Status action buttons */}
-            {step.status === 'pending' && (
-              <button
-                onClick={() => handleStatusChange('in_progress')}
-                title="Start step"
-                className="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/60 transition-colors"
-              >
-                <Play className="w-3.5 h-3.5" />
-              </button>
-            )}
-            {step.status === 'in_progress' && (
-              <button
-                onClick={() => handleStatusChange('completed')}
-                title="Complete step"
-                className="p-1.5 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 transition-colors"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5" />
-              </button>
-            )}
-            {step.status === 'completed' && (
-              <button
-                onClick={() => handleStatusChange('in_progress')}
-                title="Revert to in progress"
-                className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
-              >
-                <Square className="w-3.5 h-3.5" />
-              </button>
-            )}
-            <button
-              onClick={() => setShowDetails(v => !v)}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-            >
-              {showDetails ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            </button>
-          </div>
-        </div>
-
-        {/* Quick info pills */}
-        <div className="flex flex-wrap gap-1.5 mt-2">
-          {step.machine_no && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs bg-slate-100 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300">
-              <Wrench className="w-3 h-3" /> {step.machine_no}
-            </span>
-          )}
-          {step.rack_no && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs bg-slate-100 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300">
-              <Package className="w-3 h-3" /> Rack {step.rack_no}
-            </span>
-          )}
-          {step.tray_no && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs bg-slate-100 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300">
-              <Tag className="w-3 h-3" /> Tray {step.tray_no}
-            </span>
-          )}
-          {step.qty_in != null && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs bg-slate-100 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300">
-              In: {step.qty_in}{step.qty_out != null ? ` / Out: ${step.qty_out}` : ''}
-            </span>
-          )}
-        </div>
-
-        {/* Expandable details */}
-        {showDetails && (
-          <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-600/50 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-            <div>
-              <span className="text-slate-400 dark:text-slate-500 font-medium">Started</span>
-              <p className="text-slate-700 dark:text-slate-200">{formatDT(step.started_at)}</p>
-            </div>
-            <div>
-              <span className="text-slate-400 dark:text-slate-500 font-medium">Completed</span>
-              <p className="text-slate-700 dark:text-slate-200">{formatDT(step.completed_at)}</p>
-            </div>
-            {step.notes && (
-              <div className="col-span-2">
-                <span className="text-slate-400 dark:text-slate-500 font-medium">Notes</span>
-                <p className="text-slate-700 dark:text-slate-200 whitespace-pre-wrap">{step.notes}</p>
-              </div>
-            )}
-            {step.custom_fields && Object.keys(step.custom_fields).length > 0 && (
-              <div className="col-span-2">
-                <span className="text-slate-400 dark:text-slate-500 font-medium">Custom Fields</span>
-                <div className="flex flex-wrap gap-1 mt-0.5">
-                  {Object.entries(step.custom_fields).map(([k, v]) => v && (
-                    <span key={k} className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs">
-                      {k}: {v}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Leg Panel ─────────────────────────────────────────────────────────────────
-function LegPanel({ legNum, steps, employees, onUpdate, updatingKey }) {
-  const total    = steps.length;
-  const completed = steps.filter(s => s.status === 'completed').length;
-  const inProg   = steps.filter(s => s.status === 'in_progress').length;
-  const pct      = total ? Math.round((completed / total) * 100) : 0;
-
-  return (
-    <div>
-      {/* Leg header */}
-      <div className="flex items-center justify-between mb-3 px-1">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-600 to-violet-600 flex items-center justify-center text-white text-xs font-bold shadow">
-            {legNum}
-          </div>
-          <h3 className="font-semibold text-sm text-slate-700 dark:text-slate-200">Leg {legNum}</h3>
-          <span className="text-xs text-slate-400">
-            {completed}/{total} steps · {inProg} active
-          </span>
-        </div>
-        <span className={`text-sm font-bold ${pct === 100 ? 'text-emerald-600' : 'text-blue-600'}`}>{pct}%</span>
-      </div>
-
-      {/* Progress bar */}
-      <div className="mb-4 px-1">
-        <ProgressBar completed={completed} inProgress={inProg} total={total} />
-      </div>
-
-      {/* Step cards */}
-      <div className="space-y-2">
-        {steps.map(step => (
-          <StepCard
-            key={`${legNum}-${step.step_number}`}
-            step={step}
-            employees={employees}
-            onUpdate={onUpdate}
-            isUpdating={updatingKey}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── Request List Item ─────────────────────────────────────────────────────────
-function RequestListItem({ req, isSelected, onClick }) {
-  const pct = req.steps_total
-    ? Math.round((req.steps_completed / req.steps_total) * 100)
-    : 0;
-
-  return (
-    <button
-      onClick={onClick}
-      className={`w-full text-left px-3 py-3 rounded-xl transition-all duration-150 border ${
-        isSelected
-          ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-600/20'
-          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600 hover:shadow-sm'
-      }`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5 mb-0.5">
-            <span className={`text-xs font-bold font-mono ${isSelected ? 'text-blue-200' : 'text-blue-600 dark:text-blue-400'}`}>
-              {req.request_number}
-            </span>
-            <RequestStatusBadge status={req.status} />
-          </div>
-          <p className={`text-sm font-semibold truncate leading-tight ${isSelected ? 'text-white' : 'text-slate-800 dark:text-slate-100'}`}>
-            {req.device_name || '—'}
-          </p>
-          {req.customer && (
-            <p className={`text-xs truncate ${isSelected ? 'text-blue-200' : 'text-slate-400 dark:text-slate-500'}`}>
-              {req.customer}
-            </p>
-          )}
-        </div>
-        <ChevronRight className={`w-4 h-4 flex-shrink-0 mt-0.5 ${isSelected ? 'text-blue-200' : 'text-slate-300 dark:text-slate-600'}`} />
-      </div>
-
-      {/* Mini progress */}
-      {req.steps_total > 0 && (
-        <div className="mt-2">
-          <div className="flex justify-between text-xs mb-1">
-            <span className={isSelected ? 'text-blue-200' : 'text-slate-400'}>
-              {req.steps_completed}/{req.steps_total} steps
-            </span>
-            <span className={`font-semibold ${isSelected ? 'text-white' : 'text-slate-600 dark:text-slate-300'}`}>{pct}%</span>
-          </div>
-          <div className={`h-1.5 rounded-full overflow-hidden ${isSelected ? 'bg-blue-500' : 'bg-slate-200 dark:bg-slate-700'}`}>
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${isSelected ? 'bg-white' : 'bg-emerald-500'}`}
-              style={{ width: `${pct}%` }}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Leg count */}
-      <div className={`flex items-center gap-1 mt-1.5 text-xs ${isSelected ? 'text-blue-200' : 'text-slate-400'}`}>
-        <Layers className="w-3 h-3" />
-        {req.num_active_legs || req.num_legs || 1} leg{(req.num_active_legs || req.num_legs || 1) > 1 ? 's' : ''}
-        {req.steps_in_progress > 0 && (
-          <span className={`ml-auto inline-flex items-center gap-0.5 ${isSelected ? 'text-blue-200' : 'text-blue-600 dark:text-blue-400'}`}>
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-            {req.steps_in_progress} active
-          </span>
-        )}
-      </div>
-    </button>
-  );
-}
-
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function ProcessMonitoring() {
-  const [requests, setRequests] = useState([]);
-  const [employees, setEmployees] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [selectedId, setSelectedId] = useState(null);
-  const [listSearch, setListSearch] = useState('');
-  const [listStatusFilter, setListStatusFilter] = useState('all');
-  const [stepStatusFilter, setStepStatusFilter] = useState('all');
-  const [stepSearch, setStepSearch] = useState('');
-  const [legFilter, setLegFilter] = useState('all');
-  const [updatingKey, setUpdatingKey] = useState(null);
-  const [autoRefresh, setAutoRefresh] = useState(true);
-  const [lastRefresh, setLastRefresh] = useState(null);
-  const [updateError, setUpdateError] = useState('');
+  const [requests, setRequests]         = useState([]);
+  const [employees, setEmployees]       = useState([]);
+  const [loading, setLoading]           = useState(true);
+  const [error, setError]               = useState('');
+  const [updatingKey, setUpdatingKey]   = useState(null);
+  const [autoRefresh, setAutoRefresh]   = useState(true);
+  const [lastRefresh, setLastRefresh]   = useState(null);
+  const [updateError, setUpdateError]   = useState('');
+
+  // New table-view state
+  const [stepFilter, setStepFilter]         = useState('all');   // left sidebar filter
+  const [tableSearch, setTableSearch]       = useState('');       // search bar in table
+  const [tableStatusFilter, setTableStatus] = useState('all');    // all / pending / in_progress / completed
+  const [expandedRow, setExpandedRow]       = useState(null);     // "reqId-leg-stepNum"
+
   const intervalRef = useRef(null);
 
   // ── Load data ──────────────────────────────────────────────────────────────
@@ -503,14 +203,12 @@ export default function ProcessMonitoring() {
       setRequests(Array.isArray(mon) ? mon : []);
       setEmployees(emps.employees || []);
       setLastRefresh(new Date());
-      // Auto-select first request if nothing selected yet
-      if (!selectedId && mon.length > 0) setSelectedId(mon[0].id);
     } catch (e) {
       setError(e.message || 'Failed to load monitoring data');
     } finally {
       setLoading(false);
     }
-  }, [selectedId]);
+  }, []);
 
   useEffect(() => { load(); }, []);
 
@@ -523,57 +221,8 @@ export default function ProcessMonitoring() {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [autoRefresh, load]);
 
-  // ── Selected request ───────────────────────────────────────────────────────
-  const selectedReq = useMemo(() => requests.find(r => r.id === selectedId), [requests, selectedId]);
-
-  // ── Filtered request list ──────────────────────────────────────────────────
-  const filteredRequests = useMemo(() => {
-    return requests.filter(r => {
-      if (listStatusFilter !== 'all' && r.status !== listStatusFilter) return false;
-      if (!listSearch) return true;
-      const q = listSearch.toLowerCase();
-      return (
-        r.request_number?.toLowerCase().includes(q) ||
-        r.device_name?.toLowerCase().includes(q) ||
-        r.customer?.toLowerCase().includes(q) ||
-        r.lot_no?.toLowerCase().includes(q)
-      );
-    });
-  }, [requests, listSearch, listStatusFilter]);
-
-  // ── Available legs for selected request ───────────────────────────────────
-  const legNumbers = useMemo(() => {
-    if (!selectedReq) return [];
-    return [...new Set((selectedReq.steps || []).map(s => s.leg))].sort((a, b) => a - b);
-  }, [selectedReq]);
-
-  // ── Filtered steps ─────────────────────────────────────────────────────────
-  const filteredSteps = useMemo(() => {
-    if (!selectedReq) return [];
-    return (selectedReq.steps || []).filter(s => {
-      if (legFilter !== 'all' && s.leg !== Number(legFilter)) return false;
-      if (stepStatusFilter !== 'all' && s.status !== stepStatusFilter) return false;
-      if (stepSearch) {
-        const q = stepSearch.toLowerCase();
-        if (!s.step_name.toLowerCase().includes(q)) return false;
-      }
-      return true;
-    });
-  }, [selectedReq, legFilter, stepStatusFilter, stepSearch]);
-
-  // Group steps by leg
-  const stepsByLeg = useMemo(() => {
-    const map = new Map();
-    filteredSteps.forEach(s => {
-      if (!map.has(s.leg)) map.set(s.leg, []);
-      map.get(s.leg).push(s);
-    });
-    return map;
-  }, [filteredSteps]);
-
   // ── Global stats ───────────────────────────────────────────────────────────
   const globalStats = useMemo(() => {
-    let totalReqs = requests.length;
     let totalSteps = 0, inProgress = 0, completed = 0, pending = 0;
     requests.forEach(r => {
       totalSteps += r.steps_total || 0;
@@ -581,25 +230,70 @@ export default function ProcessMonitoring() {
       completed  += r.steps_completed || 0;
       pending    += r.steps_pending || 0;
     });
-    return { totalReqs, totalSteps, inProgress, completed, pending };
+    return { totalReqs: requests.length, totalSteps, inProgress, completed, pending };
   }, [requests]);
 
+  // ── Flatten all steps from all requests ───────────────────────────────────
+  const allFlatSteps = useMemo(() => {
+    const rows = [];
+    requests.forEach(req => {
+      (req.steps || []).forEach(step => {
+        rows.push({ ...step, _req: req });
+      });
+    });
+    return rows;
+  }, [requests]);
+
+  // ── Unique step names (for sidebar) ───────────────────────────────────────
+  const uniqueStepNames = useMemo(() => {
+    const seen = new Set();
+    const order = [];
+    allFlatSteps.forEach(s => {
+      const n = s.step_name || '';
+      if (!seen.has(n)) { seen.add(n); order.push(n); }
+    });
+    return order;
+  }, [allFlatSteps]);
+
+  // ── Filtered table rows ────────────────────────────────────────────────────
+  const filteredRows = useMemo(() => {
+    return allFlatSteps.filter(s => {
+      if (stepFilter !== 'all' && (s.step_name || '') !== stepFilter) return false;
+      if (tableStatusFilter !== 'all' && s.status !== tableStatusFilter) return false;
+      if (tableSearch) {
+        const q = tableSearch.toLowerCase();
+        const req = s._req;
+        return (
+          req.request_number?.toLowerCase().includes(q) ||
+          req.device_name?.toLowerCase().includes(q) ||
+          req.customer?.toLowerCase().includes(q) ||
+          req.lot_no?.toLowerCase().includes(q) ||
+          (s.step_name || '').toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  }, [allFlatSteps, stepFilter, tableStatusFilter, tableSearch]);
+
   // ── Step update handler ────────────────────────────────────────────────────
-  const handleStepUpdate = useCallback(async (stepNum, leg, payload) => {
-    if (!selectedId) return;
-    const key = `${leg}-${stepNum}`;
+  const handleStepUpdate = useCallback(async (reqId, stepNum, leg, payload) => {
+    const key = `${reqId}-${leg}-${stepNum}`;
     setUpdatingKey(key);
     setUpdateError('');
     try {
-      await api.updateStep(selectedId, stepNum, payload, leg);
-      // Refresh silently
+      await api.updateStep(reqId, stepNum, payload, leg);
       await load(true);
     } catch (e) {
       setUpdateError(e.message || 'Update failed');
     } finally {
       setUpdatingKey(null);
     }
-  }, [selectedId, load]);
+  }, [load]);
+
+  // ── Assign handler from table row ─────────────────────────────────────────
+  const handleAssignFromRow = useCallback(async (reqId, stepNum, leg, empId) => {
+    await handleStepUpdate(reqId, stepNum, leg, { operator_id: empId });
+  }, [handleStepUpdate]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   if (loading) {
@@ -625,20 +319,20 @@ export default function ProcessMonitoring() {
 
   return (
     <div className="flex flex-col h-full min-h-0">
+
       {/* ── Page Header ──────────────────────────────────────────────────────── */}
       <div className="flex-shrink-0 flex items-center justify-between px-6 pt-6 pb-4 gap-4 flex-wrap">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-violet-600 flex items-center justify-center shadow-md">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-violet-600 flex items-center justify-center shadow-lg shadow-blue-500/25">
             <Activity className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Process Monitoring</h1>
+            <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100 tracking-tight">Process Monitoring</h1>
             <p className="text-xs text-slate-400 dark:text-slate-500">
               {requests.length} active request{requests.length !== 1 ? 's' : ''} &mdash; real-time step tracking
             </p>
           </div>
         </div>
-
         <div className="flex items-center gap-2">
           {lastRefresh && (
             <span className="text-xs text-slate-400 dark:text-slate-500 hidden sm:inline">
@@ -647,10 +341,10 @@ export default function ProcessMonitoring() {
           )}
           <button
             onClick={() => setAutoRefresh(v => !v)}
-            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
               autoRefresh
-                ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-700'
-                : 'bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-sm shadow-blue-500/30'
+                : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700'
             }`}
           >
             <Zap className="w-3.5 h-3.5 inline mr-1" />
@@ -658,7 +352,7 @@ export default function ProcessMonitoring() {
           </button>
           <button
             onClick={() => load()}
-            className="p-2 rounded-lg bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:text-slate-700 dark:hover:text-white hover:border-slate-300 dark:hover:border-slate-500 transition-colors"
+            className="p-2 rounded-lg bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-300 transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
@@ -666,294 +360,527 @@ export default function ProcessMonitoring() {
       </div>
 
       {/* ── Summary Cards ─────────────────────────────────────────────────────── */}
-      <div className="flex-shrink-0 px-6 pb-4 grid grid-cols-2 md:grid-cols-4 gap-3">
-        <SummaryCard
-          label="Active Requests"
-          value={globalStats.totalReqs}
-          icon={FlaskConical}
-          color="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200"
-          sub={`${globalStats.totalSteps} total steps`}
-        />
-        <SummaryCard
-          label="Steps In Progress"
-          value={globalStats.inProgress}
-          icon={Activity}
-          color="bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300"
-          sub="currently active"
-        />
-        <SummaryCard
-          label="Steps Pending"
-          value={globalStats.pending}
-          icon={Clock}
-          color="bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300"
-          sub="waiting to start"
-        />
-        <SummaryCard
-          label="Steps Completed"
-          value={globalStats.completed}
-          icon={CheckCircle2}
-          color="bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300"
-          sub={`${globalStats.totalSteps ? Math.round((globalStats.completed / globalStats.totalSteps) * 100) : 0}% overall`}
-        />
+      <div className="flex-shrink-0 px-6 pb-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+        <SummaryCard label="Active Requests"   value={globalStats.totalReqs}  icon={FlaskConical}  color="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200"      sub={`${globalStats.totalSteps} total steps`} />
+        <SummaryCard label="Steps In Progress" value={globalStats.inProgress} icon={Activity}      color="bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300"       sub="currently active" />
+        <SummaryCard label="Steps Pending"     value={globalStats.pending}    icon={Clock}         color="bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300"   sub="waiting to start" />
+        <SummaryCard label="Steps Completed"   value={globalStats.completed}  icon={CheckCircle2}  color="bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300" sub={`${globalStats.totalSteps ? Math.round((globalStats.completed / globalStats.totalSteps) * 100) : 0}% overall`} />
       </div>
 
-      {/* ── Main split layout ─────────────────────────────────────────────────── */}
-      <div className="flex-1 min-h-0 flex gap-0 px-6 pb-6">
-        {/* ── Left: Request List ─────────────────────────────────────────────── */}
-        <div className="w-72 xl:w-80 flex-shrink-0 flex flex-col min-h-0 mr-4">
-          {/* Search + filter */}
-          <div className="space-y-2 mb-3 flex-shrink-0">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+      {/* ── Main table layout ─────────────────────────────────────────────────── */}
+      <div className="flex-1 min-h-0 flex gap-4 px-6 pb-6">
+
+        {/* ── Left: Step-name sidebar ───────────────────────────────────────── */}
+        <aside className="w-56 xl:w-64 flex-shrink-0 flex flex-col gap-1 min-h-0">
+          {/* Sidebar header */}
+          <div className="flex items-center gap-2 px-3 py-2 mb-1">
+            <Filter className="w-3.5 h-3.5 text-slate-400" />
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Process Steps</span>
+          </div>
+
+          <div className="flex-1 overflow-y-auto space-y-0.5 pr-1">
+            {/* All Steps button */}
+            <button
+              onClick={() => setStepFilter('all')}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium transition-all text-left group ${
+                stepFilter === 'all'
+                  ? 'bg-gradient-to-r from-blue-600 to-violet-600 text-white shadow-md shadow-blue-500/25'
+                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60'
+              }`}
+            >
+              <TableProperties className={`w-4 h-4 flex-shrink-0 ${stepFilter === 'all' ? 'text-blue-200' : 'text-slate-400 group-hover:text-blue-500'}`} />
+              <span className="truncate">All Steps</span>
+              <span className={`ml-auto text-xs font-bold rounded-full px-1.5 py-0.5 ${stepFilter === 'all' ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-600 text-slate-500 dark:text-slate-300'}`}>
+                {allFlatSteps.length}
+              </span>
+            </button>
+
+            {/* Per-step buttons */}
+            {uniqueStepNames.map(name => {
+              const count = allFlatSteps.filter(s => s.step_name === name).length;
+              const active = stepFilter === name;
+              const grad = getStepGradient(name);
+              return (
+                <button
+                  key={name}
+                  onClick={() => setStepFilter(active ? 'all' : name)}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium transition-all text-left group ${
+                    active
+                      ? 'bg-slate-800 dark:bg-slate-700 text-white shadow-sm'
+                      : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60'
+                  }`}
+                >
+                  <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 bg-gradient-to-br ${grad}`} />
+                  <span className="truncate flex-1 leading-tight">{name}</span>
+                  <span className={`text-xs font-bold rounded-full px-1.5 py-0.5 flex-shrink-0 ${active ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-600 text-slate-500 dark:text-slate-300'}`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </aside>
+
+        {/* ── Right: Table ──────────────────────────────────────────────────── */}
+        <div className="flex-1 min-w-0 flex flex-col min-h-0 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+
+          {/* Table toolbar */}
+          <div className="flex-shrink-0 flex items-center gap-3 px-4 py-3 border-b border-slate-200 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-800/80 backdrop-blur-sm">
+
+            {/* Search */}
+            <div className="relative flex-1 max-w-xs">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
               <input
-                value={listSearch}
-                onChange={e => setListSearch(e.target.value)}
-                placeholder="Search REL#, device, customer…"
-                className="w-full pl-9 pr-8 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-white placeholder-slate-400"
+                value={tableSearch}
+                onChange={e => setTableSearch(e.target.value)}
+                placeholder="Search RR#, device, customer…"
+                className="w-full pl-8 pr-7 py-1.5 text-sm bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-white placeholder-slate-400"
               />
-              {listSearch && (
-                <button onClick={() => setListSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2">
-                  <X className="w-3.5 h-3.5 text-slate-400" />
+              {tableSearch && (
+                <button onClick={() => setTableSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2">
+                  <X className="w-3 h-3 text-slate-400 hover:text-slate-600" />
                 </button>
               )}
             </div>
-            <div className="flex gap-1 flex-wrap">
+
+            {/* Status filter chips */}
+            <div className="flex gap-1">
               {[
-                { key: 'all', label: 'All' },
-                { key: 'incoming', label: 'Incoming' },
-                { key: 'review', label: 'Review' },
-                { key: 'approval', label: 'Approval' },
-                { key: 'testing', label: 'Testing' },
-                { key: 'analysis', label: 'Analysis' },
+                { key: 'all',         label: 'All' },
+                { key: 'pending',     label: 'Pending' },
+                { key: 'in_progress', label: 'In Progress' },
+                { key: 'completed',   label: 'Completed' },
               ].map(({ key, label }) => (
                 <button
                   key={key}
-                  onClick={() => setListStatusFilter(key)}
-                  className={`px-2 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                    listStatusFilter === key
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-blue-300'
+                  onClick={() => setTableStatus(key)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap ${
+                    tableStatusFilter === key
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                      : 'bg-white dark:bg-slate-700 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600 hover:border-blue-300'
                   }`}
                 >
                   {label}
                 </button>
               ))}
             </div>
+
+            <span className="ml-auto text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">
+              {filteredRows.length} row{filteredRows.length !== 1 ? 's' : ''}
+            </span>
           </div>
 
-          {/* List */}
-          <div className="flex-1 overflow-y-auto space-y-2 pr-1">
-            {filteredRequests.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-slate-400 gap-2">
-                <FlaskConical className="w-8 h-8 opacity-40" />
-                <p className="text-sm">No requests found</p>
+          {/* Update error banner */}
+          {updateError && (
+            <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-xs">
+              <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+              {updateError}
+              <button onClick={() => setUpdateError('')} className="ml-auto"><X className="w-3.5 h-3.5" /></button>
+            </div>
+          )}
+
+          {/* Table */}
+          <div className="flex-1 overflow-auto">
+            {filteredRows.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full py-20 text-slate-400 gap-3">
+                <ListChecks className="w-12 h-12 opacity-25" />
+                <p className="text-sm font-medium">No steps match the current filters</p>
+                <button onClick={() => { setStepFilter('all'); setTableSearch(''); setTableStatus('all'); }}
+                  className="text-xs text-blue-500 hover:underline">Clear all filters</button>
               </div>
             ) : (
-              filteredRequests.map(req => (
-                <RequestListItem
-                  key={req.id}
-                  req={req}
-                  isSelected={selectedId === req.id}
-                  onClick={() => {
-                    setSelectedId(req.id);
-                    setLegFilter('all');
-                    setStepStatusFilter('all');
-                    setStepSearch('');
-                  }}
-                />
-              ))
+              <table className="w-full text-sm border-collapse">
+                <thead className="sticky top-0 z-10">
+                  <tr className="bg-gradient-to-r from-slate-800 to-slate-900 dark:from-slate-900 dark:to-slate-950 text-white">
+                    <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-slate-300 whitespace-nowrap w-36">
+                      Request No. RR#
+                    </th>
+                    <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-slate-300 whitespace-nowrap w-28">
+                      Status
+                    </th>
+                    <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-slate-300 whitespace-nowrap">
+                      Process Step
+                    </th>
+                    <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-slate-300 whitespace-nowrap">
+                      Employee Assign
+                    </th>
+                    <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-slate-300 whitespace-nowrap w-40">
+                      Date to Start
+                    </th>
+                    <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-slate-300 whitespace-nowrap w-40">
+                      End Date
+                    </th>
+                    <th className="w-10 px-2 py-3" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRows.map((step, idx) => (
+                    <TableStepRow
+                      key={`${step._req.id}-${step.leg}-${step.step_number}-${idx}`}
+                      step={step}
+                      req={step._req}
+                      employees={employees}
+                      isUpdating={updatingKey === `${step._req.id}-${step.leg}-${step.step_number}`}
+                      isExpanded={expandedRow === `${step._req.id}-${step.leg}-${step.step_number}`}
+                      onToggleExpand={() =>
+                        setExpandedRow(prev =>
+                          prev === `${step._req.id}-${step.leg}-${step.step_number}` ? null
+                            : `${step._req.id}-${step.leg}-${step.step_number}`
+                        )
+                      }
+                      onUpdate={(stepNum, leg, payload) => handleStepUpdate(step._req.id, stepNum, leg, payload)}
+                      onAssign={(empId) => handleAssignFromRow(step._req.id, step.step_number, step.leg, empId)}
+                      isEven={idx % 2 === 0}
+                    />
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
-        </div>
-
-        {/* ── Right: Step Detail ─────────────────────────────────────────────── */}
-        <div className="flex-1 min-w-0 flex flex-col min-h-0">
-          {!selectedReq ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 gap-3">
-              <ListChecks className="w-12 h-12 opacity-30" />
-              <p className="text-sm">Select a request to view its process steps</p>
-            </div>
-          ) : (
-            <>
-              {/* Request header */}
-              <div className="flex-shrink-0 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 mb-4 shadow-sm">
-                <div className="flex items-start justify-between gap-3 flex-wrap">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <span className="text-xs font-bold font-mono text-blue-600 dark:text-blue-400">
-                        {selectedReq.request_number}
-                      </span>
-                      <RequestStatusBadge status={selectedReq.status} />
-                      {selectedReq.classification && (
-                        <span className="text-xs text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
-                          {selectedReq.classification}
-                        </span>
-                      )}
-                    </div>
-                    <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100 leading-tight truncate">
-                      {selectedReq.device_name || '—'}
-                    </h2>
-                    <div className="flex items-center gap-4 mt-1 flex-wrap text-xs text-slate-500 dark:text-slate-400">
-                      {selectedReq.customer && (
-                        <span className="flex items-center gap-1"><Users className="w-3 h-3" />{selectedReq.customer}</span>
-                      )}
-                      {selectedReq.plant && (
-                        <span className="flex items-center gap-1"><Building2 className="w-3 h-3" />{selectedReq.plant}</span>
-                      )}
-                      {selectedReq.lot_no && (
-                        <span className="flex items-center gap-1"><Tag className="w-3 h-3" />Lot: {selectedReq.lot_no}</span>
-                      )}
-                      {selectedReq.deadline && (
-                        <span className="flex items-center gap-1"><CalendarDays className="w-3 h-3" />Deadline: {formatDateOnly(selectedReq.deadline)}</span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Overall progress ring + counts */}
-                  <div className="flex items-center gap-3 flex-shrink-0">
-                    <div className="text-center">
-                      <div className="text-2xl font-bold text-slate-800 dark:text-slate-100">
-                        {selectedReq.steps_total
-                          ? Math.round((selectedReq.steps_completed / selectedReq.steps_total) * 100)
-                          : 0}%
-                      </div>
-                      <div className="text-xs text-slate-400">complete</div>
-                    </div>
-                    <div className="w-px h-10 bg-slate-200 dark:bg-slate-600" />
-                    <div className="space-y-0.5 text-xs">
-                      <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                        {selectedReq.steps_completed} completed
-                      </div>
-                      <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
-                        <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                        {selectedReq.steps_in_progress} in progress
-                      </div>
-                      <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
-                        <span className="w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-600" />
-                        {selectedReq.steps_pending} pending
-                      </div>
-                    </div>
-                    <Link
-                      to={`/requests/${selectedReq.id}`}
-                      className="p-2 rounded-lg bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 border border-slate-200 dark:border-slate-600 hover:border-blue-300 transition-colors"
-                      title="Open full request"
-                    >
-                      <Eye className="w-4 h-4" />
-                    </Link>
-                  </div>
-                </div>
-
-                {/* Overall progress bar */}
-                <div className="mt-3">
-                  <ProgressBar
-                    completed={selectedReq.steps_completed}
-                    inProgress={selectedReq.steps_in_progress}
-                    total={selectedReq.steps_total}
-                  />
-                </div>
-              </div>
-
-              {/* Update error */}
-              {updateError && (
-                <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2 mb-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm">
-                  <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                  {updateError}
-                  <button onClick={() => setUpdateError('')} className="ml-auto"><X className="w-4 h-4" /></button>
-                </div>
-              )}
-
-              {/* Step filters */}
-              <div className="flex-shrink-0 flex items-center gap-2 mb-4 flex-wrap">
-                {/* Leg filter */}
-                {legNumbers.length > 1 && (
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => setLegFilter('all')}
-                      className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                        legFilter === 'all'
-                          ? 'bg-violet-600 text-white border-violet-600'
-                          : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-violet-300'
-                      }`}
-                    >
-                      All Legs
-                    </button>
-                    {legNumbers.map(l => (
-                      <button
-                        key={l}
-                        onClick={() => setLegFilter(String(l))}
-                        className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                          legFilter === String(l)
-                            ? 'bg-violet-600 text-white border-violet-600'
-                            : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-violet-300'
-                        }`}
-                      >
-                        Leg {l}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {/* Status filter */}
-                <div className="flex gap-1">
-                  {['all', 'pending', 'in_progress', 'completed'].map(s => (
-                    <button
-                      key={s}
-                      onClick={() => setStepStatusFilter(s)}
-                      className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                        stepStatusFilter === s
-                          ? 'bg-blue-600 text-white border-blue-600'
-                          : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-blue-300'
-                      }`}
-                    >
-                      {s === 'all' ? 'All' : s === 'in_progress' ? 'In Progress' : s.charAt(0).toUpperCase() + s.slice(1)}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Step name search */}
-                <div className="relative ml-auto">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-                  <input
-                    value={stepSearch}
-                    onChange={e => setStepSearch(e.target.value)}
-                    placeholder="Filter steps…"
-                    className="pl-8 pr-7 py-1.5 text-xs w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 dark:text-white placeholder-slate-400"
-                  />
-                  {stepSearch && (
-                    <button onClick={() => setStepSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2">
-                      <X className="w-3 h-3 text-slate-400" />
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Steps area */}
-              <div className="flex-1 min-h-0 overflow-y-auto">
-                {stepsByLeg.size === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-16 text-slate-400 gap-2">
-                    <ClipboardCheck className="w-10 h-10 opacity-30" />
-                    <p className="text-sm">No steps match the current filters</p>
-                  </div>
-                ) : (
-                  <div className={`${legNumbers.length > 1 ? 'grid grid-cols-1 xl:grid-cols-2 gap-6' : ''}`}>
-                    {[...stepsByLeg.entries()].map(([leg, steps]) => (
-                      <LegPanel
-                        key={leg}
-                        legNum={leg}
-                        steps={steps}
-                        employees={employees}
-                        onUpdate={handleStepUpdate}
-                        updatingKey={updatingKey}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
         </div>
       </div>
     </div>
   );
 }
+
+// ── Table Row Component ───────────────────────────────────────────────────────
+function TableStepRow({ step, req, employees, isUpdating, isExpanded, onToggleExpand, onUpdate, onAssign, isEven }) {
+  const [showAssign, setShowAssign] = useState(false);
+  const [editingStart, setEditingStart] = useState(false);
+  const [editingEnd, setEditingEnd]     = useState(false);
+  const assignRef   = useRef(null);
+  const startRef    = useRef(null);
+  const endRef      = useRef(null);
+  const cfg  = STEP_STATUS_CONFIG[step.status] || STEP_STATUS_CONFIG.pending;
+  const grad = getStepGradient(step.step_name);
+  const emp  = employees.find(e => e.id === step.operator_id);
+
+  // Convert ISO → "YYYY-MM-DD" for <input type="date">
+  function toDateValue(iso) {
+    if (!iso) return '';
+    try {
+      return new Date(iso).toLocaleDateString('en-CA'); // "YYYY-MM-DD"
+    } catch { return ''; }
+  }
+
+  useEffect(() => {
+    if (!showAssign) return;
+    function handler(e) { if (assignRef.current && !assignRef.current.contains(e.target)) setShowAssign(false); }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showAssign]);
+
+  // Close date pickers on outside click
+  useEffect(() => {
+    function handler(e) {
+      if (startRef.current && !startRef.current.contains(e.target)) setEditingStart(false);
+      if (endRef.current   && !endRef.current.contains(e.target))   setEditingEnd(false);
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleStatusChange = async (newStatus) => {
+    if (newStatus === step.status) return;
+    const payload = { status: newStatus };
+    if (newStatus === 'in_progress' && !step.started_at) payload.started_at = new Date().toISOString();
+    await onUpdate(step.step_number, step.leg, payload);
+  };
+
+  const handleDateSave = async (field, dateValue) => {
+    // dateValue is "YYYY-MM-DD" or ""
+    const iso = dateValue ? new Date(dateValue + 'T00:00:00').toISOString() : null;
+    await onUpdate(step.step_number, step.leg, { [field]: iso });
+    if (field === 'started_at')   setEditingStart(false);
+    if (field === 'completed_at') setEditingEnd(false);
+  };
+
+  const handleToggleStepPriority = async () => {
+    await onUpdate(step.step_number, step.leg, { priority: step.priority ? 0 : 1 });
+  };
+
+  const rowBase = step.priority
+    ? 'bg-red-50 dark:bg-red-900/15 border-l-4 border-l-red-500'
+    : isEven
+      ? 'bg-white dark:bg-slate-800'
+      : 'bg-slate-50/60 dark:bg-slate-800/60';
+
+  return (
+    <>
+      <tr
+        className={`${rowBase} border-b border-slate-100 dark:border-slate-700/50 ${step.priority ? 'hover:bg-red-100/60 dark:hover:bg-red-900/25' : 'hover:bg-blue-50/40 dark:hover:bg-blue-900/10'} transition-colors group cursor-pointer`}
+        onClick={onToggleExpand}
+      >
+        {/* RR# */}
+        <td className="px-4 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
+          <div className="flex flex-col gap-0.5">
+            <Link
+              to={`/requests/${req.id}`}
+              className="text-xs font-bold font-mono text-blue-600 dark:text-blue-400 hover:underline leading-tight"
+            >
+              {req.request_number}
+            </Link>
+            <span className="text-xs text-slate-400 dark:text-slate-500 truncate max-w-[120px]" title={req.device_name}>
+              {req.device_name || '—'}
+            </span>
+            {req.num_legs > 1 && (
+              <span className="inline-flex items-center gap-0.5 text-xs text-slate-400">
+                <Layers className="w-3 h-3" /> Leg {step.leg}
+              </span>
+            )}
+          </div>
+        </td>
+
+        {/* Step Status */}
+        <td className="px-4 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center gap-1.5">
+            <StepStatusPill status={step.status} />
+            {isUpdating && <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />}
+          </div>
+          {/* Quick action buttons */}
+          <div className="flex items-center gap-1 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            {step.status === 'pending' && (
+              <button
+                onClick={() => handleStatusChange('in_progress')}
+                title="Start"
+                className="p-1 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-600 hover:bg-blue-200 transition-colors"
+              >
+                <Play className="w-3 h-3" />
+              </button>
+            )}
+            {step.status === 'in_progress' && (
+              <button
+                onClick={() => handleStatusChange('completed')}
+                title="Complete"
+                className="p-1 rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 hover:bg-emerald-200 transition-colors"
+              >
+                <CheckCircle2 className="w-3 h-3" />
+              </button>
+            )}
+            {step.status === 'completed' && (
+              <button
+                onClick={() => handleStatusChange('in_progress')}
+                title="Revert"
+                className="p-1 rounded bg-slate-100 dark:bg-slate-700 text-slate-500 hover:bg-slate-200 transition-colors"
+              >
+                <Square className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        </td>
+
+        {/* Process Step */}
+        <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 bg-gradient-to-br ${grad}`} />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className={`font-semibold leading-tight ${step.priority ? 'text-red-700 dark:text-red-400' : 'text-slate-800 dark:text-slate-100'}`}>
+                  {step.step_name}
+                </span>
+                {step.priority && (
+                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-bold bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-700 animate-pulse">
+                    <Flame className="w-2.5 h-2.5 fill-red-500 dark:fill-red-400" />
+                    Priority
+                  </span>
+                )}
+              </div>
+              {step.status === 'in_progress' && step.started_at && (
+                <span className="text-xs text-blue-500 dark:text-blue-400">{elapsed(step.started_at)} elapsed</span>
+              )}
+            </div>
+            {/* Flame priority toggle */}
+            <button
+              onClick={() => handleToggleStepPriority()}
+              title={step.priority ? 'Remove priority' : 'Mark as priority'}
+              className={`flex-shrink-0 p-1 rounded-lg transition-all hover:scale-110 ${
+                step.priority
+                  ? 'text-red-500 dark:text-red-400 bg-red-100 dark:bg-red-900/30'
+                  : 'text-slate-300 dark:text-slate-600 hover:text-red-400 dark:hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 opacity-0 group-hover:opacity-100'
+              }`}
+            >
+              <Flame className={`w-4 h-4 ${step.priority ? 'fill-red-500 dark:fill-red-400' : ''}`} />
+            </button>
+          </div>
+        </td>
+
+        {/* Employee Assign */}
+        <td className="px-4 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
+          <div className="relative" ref={assignRef}>
+            <button
+              onClick={() => setShowAssign(v => !v)}
+              className="flex items-center gap-1.5 text-xs hover:text-blue-600 dark:hover:text-blue-400 transition-colors group/emp"
+            >
+              {emp ? (
+                <>
+                  <div className={`w-6 h-6 rounded-full bg-gradient-to-br ${grad} flex items-center justify-center text-white text-xs font-bold shadow-sm`}>
+                    {emp.name.charAt(0).toUpperCase()}
+                  </div>
+                  <span className="font-medium text-slate-700 dark:text-slate-200">{emp.name}</span>
+                </>
+              ) : (
+                <>
+                  <div className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-600 flex items-center justify-center">
+                    <User className="w-3.5 h-3.5 text-slate-400" />
+                  </div>
+                  <span className="text-slate-400 italic">Unassigned</span>
+                </>
+              )}
+              <ChevronDown className="w-3 h-3 text-slate-400 opacity-0 group-hover/emp:opacity-100 transition-opacity" />
+            </button>
+            {showAssign && (
+              <AssignPopover
+                employees={employees}
+                currentId={step.operator_id}
+                onAssign={(id) => { setShowAssign(false); onAssign(id); }}
+                onClose={() => setShowAssign(false)}
+              />
+            )}
+          </div>
+        </td>
+
+        {/* Date to Start */}
+        <td className="px-4 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
+          <div ref={startRef}>
+            {editingStart ? (
+              <input
+                type="date"
+                autoFocus
+                defaultValue={toDateValue(step.started_at)}
+                onChange={e => { if (e.target.value) handleDateSave('started_at', e.target.value); }}
+                onBlur={e => handleDateSave('started_at', e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleDateSave('started_at', e.target.value);
+                  if (e.key === 'Escape') setEditingStart(false);
+                }}
+                className="text-sm px-2 py-1 rounded-lg border border-blue-400 dark:border-blue-500 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 w-36"
+              />
+            ) : (
+              <button
+                onClick={() => setEditingStart(true)}
+                className="group/date flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                title="Click to edit start date"
+              >
+                <CalendarDays className="w-3.5 h-3.5 text-slate-400 group-hover/date:text-blue-500 flex-shrink-0" />
+                {step.started_at ? (
+                  <span>{formatDateOnly(step.started_at)}</span>
+                ) : (
+                  <span className="text-slate-300 dark:text-slate-600 italic text-xs">Set date…</span>
+                )}
+              </button>
+            )}
+          </div>
+        </td>
+
+        {/* End Date */}
+        <td className="px-4 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
+          <div ref={endRef}>
+            {editingEnd ? (
+              <input
+                type="date"
+                autoFocus
+                defaultValue={toDateValue(step.completed_at)}
+                onChange={e => { if (e.target.value) handleDateSave('completed_at', e.target.value); }}
+                onBlur={e => handleDateSave('completed_at', e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleDateSave('completed_at', e.target.value);
+                  if (e.key === 'Escape') setEditingEnd(false);
+                }}
+                className="text-sm px-2 py-1 rounded-lg border border-emerald-400 dark:border-emerald-500 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 w-36"
+              />
+            ) : (
+              <button
+                onClick={() => setEditingEnd(true)}
+                className="group/date flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+                title="Click to edit end date"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 text-slate-400 group-hover/date:text-emerald-500 flex-shrink-0" />
+                {step.completed_at ? (
+                  <span>{formatDateOnly(step.completed_at)}</span>
+                ) : (
+                  <span className="text-slate-300 dark:text-slate-600 italic text-xs">Set date…</span>
+                )}
+              </button>
+            )}
+          </div>
+        </td>
+
+        {/* Expand toggle */}
+        <td className="px-2 py-3 text-center">
+          <button
+            onClick={onToggleExpand}
+            className="p-1 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+          >
+            {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+        </td>
+      </tr>
+
+      {/* Expanded detail row */}
+      {isExpanded && (
+        <tr className={`${rowBase} border-b border-slate-100 dark:border-slate-700/50`}>
+          <td colSpan={7} className="px-6 pb-4 pt-1">
+            <div className="rounded-xl bg-slate-50 dark:bg-slate-700/40 border border-slate-200 dark:border-slate-600/50 p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 text-xs">
+
+              <div>
+                <p className="text-slate-400 font-semibold uppercase tracking-wider mb-1">Customer</p>
+                <p className="text-slate-700 dark:text-slate-200 font-medium">{req.customer || '—'}</p>
+              </div>
+              <div>
+                <p className="text-slate-400 font-semibold uppercase tracking-wider mb-1">Lot No.</p>
+                <p className="text-slate-700 dark:text-slate-200 font-medium font-mono">{req.lot_no || '—'}</p>
+              </div>
+              <div>
+                <p className="text-slate-400 font-semibold uppercase tracking-wider mb-1">Machine No.</p>
+                <p className="text-slate-700 dark:text-slate-200 font-medium">{step.machine_no || '—'}</p>
+              </div>
+              <div>
+                <p className="text-slate-400 font-semibold uppercase tracking-wider mb-1">Rack / Tray</p>
+                <p className="text-slate-700 dark:text-slate-200 font-medium">
+                  {[step.rack_no && `Rack ${step.rack_no}`, step.tray_no && `Tray ${step.tray_no}`].filter(Boolean).join(' · ') || '—'}
+                </p>
+              </div>
+              <div>
+                <p className="text-slate-400 font-semibold uppercase tracking-wider mb-1">Qty In / Out</p>
+                <p className="text-slate-700 dark:text-slate-200 font-medium">
+                  {step.qty_in != null ? `${step.qty_in}${step.qty_out != null ? ` / ${step.qty_out}` : ''}` : '—'}
+                </p>
+              </div>
+
+              {step.notes && (
+                <div className="col-span-2 sm:col-span-3 lg:col-span-5">
+                  <p className="text-slate-400 font-semibold uppercase tracking-wider mb-1">Notes</p>
+                  <p className="text-slate-700 dark:text-slate-200 whitespace-pre-wrap">{step.notes}</p>
+                </div>
+              )}
+
+              {step.custom_fields && Object.keys(step.custom_fields).length > 0 && (
+                <div className="col-span-2 sm:col-span-3 lg:col-span-5">
+                  <p className="text-slate-400 font-semibold uppercase tracking-wider mb-1">Custom Fields</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {Object.entries(step.custom_fields).map(([k, v]) => v && (
+                      <span key={k} className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-600 border border-slate-200 dark:border-slate-500 text-slate-600 dark:text-slate-300">
+                        <span className="text-slate-400">{k}:</span> {v}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="col-span-2 sm:col-span-3 lg:col-span-5 flex justify-end">
+                <Link
+                  to={`/requests/${req.id}`}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 transition-colors shadow-sm"
+                >
+                  <Eye className="w-3.5 h-3.5" /> Open Full Request
+                </Link>
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+

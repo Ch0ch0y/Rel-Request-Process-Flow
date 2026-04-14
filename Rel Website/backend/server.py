@@ -414,6 +414,20 @@ async def init_db():
     except Exception:
         pass  # column already exists
 
+    # Add priority column if missing
+    try:
+        await db.execute("ALTER TABLE requests ADD COLUMN priority INTEGER DEFAULT 0")
+        await db.commit()
+    except Exception:
+        pass  # column already exists
+
+    # Add step-level priority column if missing
+    try:
+        await db.execute("ALTER TABLE process_steps ADD COLUMN priority INTEGER DEFAULT 0")
+        await db.commit()
+    except Exception:
+        pass  # column already exists
+
     # Seed machines table from defaults if empty
     cursor = await db.execute("SELECT COUNT(*) FROM machines")
     row = await cursor.fetchone()
@@ -856,6 +870,7 @@ class StepUpdate(BaseModel):
     notes: Optional[str] = None
     attachments: Optional[Any] = None  # dict of category->list[str], or legacy list[str]
     custom_fields: Optional[Dict[str, Any]] = None
+    priority: Optional[int] = None
 
 class DashboardStats(BaseModel):
     total_requests: int
@@ -2206,9 +2221,9 @@ async def get_process_monitoring(
         cursor = await db.execute(
             f"""SELECT id, request_number, device_name, customer, lot_no,
                        status, num_legs, created_at, updated_at,
-                       plant, classification, deadline, originator
+                       plant, classification, deadline, originator, priority
                 FROM requests WHERE status NOT IN ({excl_placeholders})
-                ORDER BY updated_at DESC""",
+                ORDER BY priority DESC, updated_at DESC""",
             EXCLUDE_STATUSES
         )
         req_rows = await cursor.fetchall()
@@ -2245,11 +2260,11 @@ async def get_process_monitoring(
                        ps.status, ps.started_at, ps.completed_at,
                        ps.machine_no, ps.rack_no, ps.operator_id, ps.tray_no,
                        ps.qty_in, ps.qty_out, ps.notes, ps.custom_fields,
-                       e.name AS operator_name
+                       e.name AS operator_name, ps.priority
                 FROM process_steps ps
                 LEFT JOIN employees e ON ps.operator_id = e.id
                 WHERE ps.request_id IN ({id_placeholders})
-                ORDER BY ps.request_id, ps.leg, ps.step_number""",
+                ORDER BY ps.priority DESC, ps.request_id, ps.leg, ps.step_number""",
             req_ids
         )
         step_rows = await cursor.fetchall()
@@ -2274,6 +2289,7 @@ async def get_process_monitoring(
                 'notes':          row[14],
                 'custom_fields':  json.loads(row[15]) if row[15] else {},
                 'operator_name':  row[16],
+                'priority':       bool(row[17]) if len(row) > 17 else False,
             })
 
         # ── Build response ───────────────────────────────────────────────────
@@ -2295,6 +2311,7 @@ async def get_process_monitoring(
                 'classification': r[10],
                 'deadline':       r[11],
                 'originator':     r[12],
+                'priority':       bool(r[13]),
                 'steps_total':    s['total'],
                 'steps_pending':  s['pending'],
                 'steps_in_progress': s['in_progress'],
@@ -4118,7 +4135,7 @@ async def update_step(
                 set_clauses.append(f"{field} = ?")
                 values.append(update_data[field])
 
-        for field in ['step_name', 'machine_no', 'rack_no', 'operator_id', 'tray_no', 'notes']:
+        for field in ['step_name', 'machine_no', 'rack_no', 'operator_id', 'tray_no', 'notes', 'priority']:
             if field in update_data:
                 set_clauses.append(f"{field} = ?")
                 values.append(update_data[field])
@@ -4236,6 +4253,30 @@ async def update_request(
         return {"message": "Request updated successfully", "request_id": request_id}
     finally:
         await db.close()
+
+
+@api_router.patch("/requests/{request_id}/priority")
+async def toggle_request_priority(
+    request_id: str,
+    current_user: User = Depends(require_permission('edit_request'))
+):
+    """Toggle the priority flag on a request (0 ↔ 1)."""
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT priority FROM requests WHERE id = ?", (request_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Request not found")
+        new_priority = 0 if row[0] else 1
+        await db.execute(
+            "UPDATE requests SET priority = ?, updated_at = ? WHERE id = ?",
+            (new_priority, datetime.now(timezone.utc).isoformat(), request_id)
+        )
+        await db.commit()
+        return {"priority": bool(new_priority)}
+    finally:
+        await db.close()
+
 
 class PlannerEstimationUpdate(BaseModel):
     planner_est_start: Optional[str] = None
@@ -6790,13 +6831,41 @@ def _parse_agile_excel(contents: bytes) -> dict:
     import openpyxl as _xl
 
     wb = _xl.load_workbook(io.BytesIO(contents), data_only=True)
-    # Use sheet 0 (Agile Export Report0) for both general info and test matrix
+    # Always prefer sheet 0 for general info; matrix scanning tries all sheets.
     ws = wb.worksheets[0]
 
-    def _cv(row_idx, col_idx):
+    def _cv(row_idx, col_idx, _ws=None):
         """Get cell value from 1-based row/col, return stripped string or ''."""
-        val = ws.cell(row=row_idx, column=col_idx).value
+        sheet = _ws if _ws is not None else ws
+        val = sheet.cell(row=row_idx, column=col_idx).value
         return str(val).strip() if val is not None else ''
+
+    def _find_matrix_header(sheet):
+        """Scan *sheet* for the Test Matrix header row.
+        Returns (header_row, col_map_dict) or (None, None)."""
+        for r in range(1, sheet.max_row + 1):
+            row_vals = [sheet.cell(row=r, column=c).value for c in range(1, 20)]
+            row_strs = [str(v).strip().lower() if v else '' for v in row_vals]
+            if 'leg' in row_strs and 'test type' in row_strs:
+                cm = {}
+                for i, s in enumerate(row_strs):
+                    col_i = i + 1
+                    if s == 'leg'                                              and 'leg'        not in cm: cm['leg']       = col_i
+                    elif s == 'assy lot no'                                    and 'lot'        not in cm: cm['lot']       = col_i
+                    elif s == 'other info'                                     and 'other'      not in cm: cm['other']     = col_i
+                    elif s == 'target device'                                  and 'target'     not in cm: cm['target']    = col_i
+                    elif s == 'test type'                                      and 'test_type'  not in cm: cm['test_type'] = col_i
+                    elif s in ('test item', 'test items')                      and 'test_item'  not in cm: cm['test_item'] = col_i
+                    elif s == 'test condition'                                 and 'condition'  not in cm: cm['condition'] = col_i
+                    elif s in ('reflow / reading point',
+                               'reflow/reading point', 'reading point')        and 'reading'    not in cm: cm['reading']   = col_i
+                    elif s == 'e/l'                                            and 'el'         not in cm: cm['el']        = col_i
+                    elif s == 'o/s'                                            and 'os'         not in cm: cm['os']        = col_i
+                    elif s == 'sat'                                            and 'sat'        not in cm: cm['sat']       = col_i
+                    elif s == 'ca'                                             and 'ca'         not in cm: cm['ca']        = col_i
+                    elif s == 'ss'                                             and 'ss'         not in cm: cm['ss']        = col_i
+                return r, cm
+        return None, None
 
     errors = []
 
@@ -6858,44 +6927,20 @@ def _parse_agile_excel(contents: bytes) -> dict:
             break
 
     # ── Test Matrix block ─────────────────────────────────────────────────
-    # Find the header row that contains 'Leg', 'Test Type', 'Test Item', etc.
+    # Scan every worksheet for the Test Matrix header; prefer the first sheet
+    # that contains one.  The Agile RSS Report has the same matrix in both
+    # 'Agile Export Report0' and 'Agile Export Report1' — whichever is found
+    # first is used.  This also ensures that files where sheet 0 lacks the
+    # header (rare variant exports) still parse correctly.
     matrix_header_row = None
-    col_leg = col_lot = col_other = col_target = col_test_type = None
-    col_test_item = col_condition = col_reading = col_el = col_os = col_sat = col_ca = col_ss = None
-
-    for r in range(1, ws.max_row + 1):
-        row_vals = [ws.cell(row=r, column=c).value for c in range(1, 20)]
-        row_strs = [str(v).strip().lower() if v else '' for v in row_vals]
-        if 'leg' in row_strs and 'test type' in row_strs:
-            matrix_header_row = r
-            for i, s in enumerate(row_strs):
-                col_i = i + 1
-                if s == 'leg' and col_leg is None:
-                    col_leg = col_i
-                elif s == 'assy lot no' and col_lot is None:
-                    col_lot = col_i
-                elif s == 'other info' and col_other is None:
-                    col_other = col_i
-                elif s == 'target device' and col_target is None:
-                    col_target = col_i
-                elif s == 'test type' and col_test_type is None:
-                    col_test_type = col_i
-                elif s in ('test item', 'test items') and col_test_item is None:
-                    col_test_item = col_i
-                elif s == 'test condition' and col_condition is None:
-                    col_condition = col_i
-                elif s in ('reflow / reading point', 'reflow/reading point', 'reading point') and col_reading is None:
-                    col_reading = col_i
-                elif s == 'e/l' and col_el is None:
-                    col_el = col_i
-                elif s == 'o/s' and col_os is None:
-                    col_os = col_i
-                elif s == 'sat' and col_sat is None:
-                    col_sat = col_i
-                elif s == 'ca' and col_ca is None:
-                    col_ca = col_i
-                elif s == 'ss' and col_ss is None:
-                    col_ss = col_i
+    _matrix_ws = None
+    _matrix_cm = None
+    for _sheet in wb.worksheets:
+        _hrow, _cmap = _find_matrix_header(_sheet)
+        if _hrow is not None:
+            matrix_header_row = _hrow
+            _matrix_ws = _sheet
+            _matrix_cm = _cmap
             break
 
     if matrix_header_row is None:
@@ -6914,34 +6959,64 @@ def _parse_agile_excel(contents: bytes) -> dict:
             'legs': [], 'errors': errors,
         }
 
-    # ── Parse test matrix data rows ───────────────────────────────────────
-    legs_map: dict = {}   # leg_num (int) → dict
+    col_leg       = _matrix_cm.get('leg')
+    col_lot       = _matrix_cm.get('lot')
+    col_other     = _matrix_cm.get('other')
+    col_target    = _matrix_cm.get('target')
+    col_test_type = _matrix_cm.get('test_type')
+    col_test_item = _matrix_cm.get('test_item')
+    col_condition = _matrix_cm.get('condition')
+    col_reading   = _matrix_cm.get('reading')
+    col_el        = _matrix_cm.get('el')
+    col_os        = _matrix_cm.get('os')
+    col_sat       = _matrix_cm.get('sat')
+    col_ca        = _matrix_cm.get('ca')
+    col_ss        = _matrix_cm.get('ss')
 
-    for r in range(matrix_header_row + 1, ws.max_row + 1):
-        # Stop if leading numeric column is empty AND second column is empty
-        c1 = _cv(r, 1)
-        leg_val = _cv(r, col_leg) if col_leg else ''
+    def _mcv(row_idx, col_idx):
+        """Cell value helper that reads from the matrix sheet."""
+        if col_idx is None:
+            return ''
+        val = _matrix_ws.cell(row=row_idx, column=col_idx).value
+        return str(val).strip() if val is not None else ''
+
+    # ── Parse test matrix data rows ───────────────────────────────────────
+    # Leg labels may be plain integers OR free-form text such as "Leg 1",
+    # "T0 LL", "MSL3", "MSL3 + TC500", etc.  We collect them in order and
+    # map each unique label to a sequential integer so downstream code that
+    # expects integer leg numbers continues to work.
+    leg_label_to_num: dict = {}   # label str → sequential int (1-based)
+    legs_map: dict = {}            # leg_num (int) → dict
+
+    for r in range(matrix_header_row + 1, _matrix_ws.max_row + 1):
+        c1      = _mcv(r, 1)
+        leg_val = _mcv(r, col_leg) if col_leg else ''
+        # Skip completely blank rows
         if not leg_val and not c1:
             continue
-
-        # Try to parse leg number — must be a digit
-        try:
-            leg_num = int(leg_val)
-        except (ValueError, TypeError):
+        # A row where leg_val is empty but c1 has a value is also a data row
+        # (sequential counter in col A with leg label in col B already read).
+        # If leg_val itself is empty, skip – there is nothing to group by.
+        if not leg_val:
             continue
 
-        lot_val    = _cv(r, col_lot)    if col_lot    else ''
-        other_val  = _cv(r, col_other)  if col_other  else ''
-        target_val = _cv(r, col_target) if col_target else ''
-        type_val   = _cv(r, col_test_type)  if col_test_type  else ''
-        item_val   = _cv(r, col_test_item)  if col_test_item  else ''
-        cond_val   = _cv(r, col_condition)  if col_condition  else ''
-        read_val   = _cv(r, col_reading)    if col_reading    else ''
-        el_val     = _cv(r, col_el)         if col_el         else ''
-        os_val     = _cv(r, col_os)         if col_os         else ''
-        sat_val    = _cv(r, col_sat)        if col_sat        else ''
-        ca_val     = _cv(r, col_ca)         if col_ca         else ''
-        ss_val     = _cv(r, col_ss)         if col_ss         else ''
+        # Map text leg labels to sequential integers (preserving first-seen order)
+        if leg_val not in leg_label_to_num:
+            leg_label_to_num[leg_val] = len(leg_label_to_num) + 1
+        leg_num = leg_label_to_num[leg_val]
+
+        lot_val    = _mcv(r, col_lot)
+        other_val  = _mcv(r, col_other)
+        target_val = _mcv(r, col_target)
+        type_val   = _mcv(r, col_test_type)
+        item_val   = _mcv(r, col_test_item)
+        cond_val   = _mcv(r, col_condition)
+        read_val   = _mcv(r, col_reading)
+        el_val     = _mcv(r, col_el)
+        os_val     = _mcv(r, col_os)
+        sat_val    = _mcv(r, col_sat)
+        ca_val     = _mcv(r, col_ca)
+        ss_val     = _mcv(r, col_ss)
 
         row_data = {
             'test_type':      type_val,
@@ -6957,11 +7032,12 @@ def _parse_agile_excel(contents: bytes) -> dict:
 
         if leg_num not in legs_map:
             legs_map[leg_num] = {
-                'leg_num':      leg_num,
-                'lot_no':       lot_val,
-                'other_info':   other_val,
+                'leg_num':       leg_num,
+                'leg_label':     leg_val,   # preserve original text label
+                'lot_no':        lot_val,
+                'other_info':    other_val,
                 'target_device': target_val,
-                'rows':         [],
+                'rows':          [],
             }
 
         legs_map[leg_num]['rows'].append(row_data)
@@ -7006,11 +7082,15 @@ def _parse_agile_excel(contents: bytes) -> dict:
         if has_mrt and not has_precon and not has_rel_with_pre and not has_rel_only:
             # Leg has only MRT rows → MRT Process
             steps, ptype = list(_AGILE_STEPS_MRT), 'MRT Process'
+        elif has_precon and not has_rel_with_pre and not has_rel_only:
+            # Precon detected (with or without MRT, but no RelWithPrecon) → MRT Process
+            # Preconditioning is part of the MRT flow, so select the MRT preset.
+            steps, ptype = list(_AGILE_STEPS_MRT), 'MRT Process'
         elif has_rel_with_pre:
             # Any leg containing RelWithPrecon (with or without Precon) → Precon + Long Term
             steps, ptype = list(_AGILE_STEPS_PRECON_LONG), 'Precon + Long Term'
         else:
-            # Explicit "Rel Only" / "RelOnly", Precon alone, or any other fallback → Rel Only
+            # Explicit "Rel Only" / "RelOnly" or any other fallback → Rel Only
             steps, ptype = list(_AGILE_STEPS_REL_ONLY), 'Rel Only'
 
         # Auto-remove O/S and/or SAT steps if the column has no "X" for this leg
@@ -8430,6 +8510,16 @@ class MasterlistPlannerFields(BaseModel):
     planner_est_start: Optional[str] = None
     planner_est_end: Optional[str] = None
     planner_note: Optional[str] = None
+    # Extended fields — all masterlist columns are now editable
+    ww: Optional[str] = None
+    date_received: Optional[str] = None   # stored in date_ltc
+    rrs_no: Optional[str] = None           # stored in request_number
+    purpose: Optional[str] = None
+    qual_type: Optional[str] = None        # stored in classification
+    customer: Optional[str] = None
+    pkg_type: Optional[str] = None         # stored in pkg_info
+    lc_bc: Optional[str] = None
+    rr_agile_no: Optional[str] = None      # stored in lot_no
 
 
 def _ml_compute_ww(date_str: str) -> str:
@@ -8598,16 +8688,30 @@ async def get_masterlist_requests(current_user: User = Depends(get_current_user)
 async def update_request_masterlist_fields(
     request_id: str,
     data: MasterlistPlannerFields,
-    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.PLANNER])),
+    current_user: User = Depends(get_current_user),
 ):
     """Update planner-specific masterlist fields on a request."""
     db = await get_db()
     try:
         db_field_map = {
-            'test_level': data.test_level,
-            'ml_qty': data.ml_qty, 'num_days': data.num_days, 'num_legs': data.num_legs,
-            'recommit': data.recommit, 'planner_est_start': data.planner_est_start,
-            'planner_est_end': data.planner_est_end, 'planner_note': data.planner_note,
+            'test_level':      data.test_level,
+            'ml_qty':          data.ml_qty,
+            'num_days':        data.num_days,
+            'num_legs':        data.num_legs,
+            'recommit':        data.recommit,
+            'planner_est_start': data.planner_est_start,
+            'planner_est_end': data.planner_est_end,
+            'planner_note':    data.planner_note,
+            # Extended columns
+            'ww':              data.ww,
+            'date_ltc':        data.date_received,
+            'request_number':  data.rrs_no,
+            'purpose':         data.purpose,
+            'classification':  data.qual_type,
+            'customer':        data.customer,
+            'pkg_info':        data.pkg_type,
+            'lc_bc':           data.lc_bc,
+            'lot_no':          data.rr_agile_no,
         }
         to_update = {col: val for col, val in db_field_map.items() if val is not None}
         if not to_update:
@@ -9662,6 +9766,125 @@ async def _load_relmon_sheet_names_for_site(site: str) -> tuple[list[str], str]:
     finally:
         if wb is not None:
             wb.close()
+
+
+_CUSTOMER_LIST_FILE = ROOT_DIR.parent / "Customer List.xls"
+_customer_list_cache: list[dict] | None = None
+
+_PKG_LIST_FILE = ROOT_DIR.parent / "Pkg List.xls"
+_pkg_list_cache: list[dict] | None = None
+
+_MATERIAL_LIST_FILE = ROOT_DIR.parent / "Material List.xls"
+_material_list_cache: list[dict] | None = None
+
+
+@api_router.get("/relmon/material-list")
+async def get_relmon_material_list():
+    """Return material records from Material List.xls for RELMON Materials tab autocomplete.
+    Columns: Material (code), Short Description, Full Description.
+    Each row: {material_code, short_desc, full_desc}
+    """
+    global _material_list_cache
+    if _material_list_cache is not None:
+        return {"materials": _material_list_cache}
+    if not _MATERIAL_LIST_FILE.exists():
+        return {"materials": []}
+    try:
+        import xlrd
+        wb = xlrd.open_workbook(str(_MATERIAL_LIST_FILE))
+        ws = wb.sheet_by_index(0)
+        materials = []
+        for r in range(1, ws.nrows):
+            def _sv(col):
+                v = ws.cell_value(r, col) if col < ws.ncols else ""
+                if isinstance(v, float):
+                    return str(int(v)) if v == int(v) else str(v)
+                return str(v).strip()
+            code = _sv(0)
+            if not code:
+                continue
+            materials.append({
+                "material_code": code,
+                "short_desc":    _sv(1),
+                "full_desc":     _sv(2),
+            })
+        _material_list_cache = materials
+        return {"materials": materials}
+    except Exception as exc:
+        return {"materials": [], "error": str(exc)}
+
+
+@api_router.get("/relmon/pkg-list")
+async def get_relmon_pkg_list():
+    """Return package records from Pkg List.xls for RELMON autocomplete.
+    Columns mapped:
+      Pkg Code   → pkg_code   (Package Code)
+      Sub-desc   → pkg_type   (Package Type)
+      Pkg Type   → pkg_group  (category label shown in dropdown)
+      Pin Count  → pin_count  (Lead/Ball Count)
+      Body Size  → body_size  (Package Size)
+      Pkg Thickness → pkg_thickness
+      LB Pitch   → lb_pitch   (Lead Pitch)
+    """
+    global _pkg_list_cache
+    if _pkg_list_cache is not None:
+        return {"packages": _pkg_list_cache}
+    if not _PKG_LIST_FILE.exists():
+        return {"packages": []}
+    try:
+        import xlrd
+        wb = xlrd.open_workbook(str(_PKG_LIST_FILE))
+        ws = wb.sheet_by_index(0)
+        packages = []
+        for r in range(1, ws.nrows):
+            def _sv(col):
+                v = ws.cell_value(r, col) if col < ws.ncols else ""
+                if isinstance(v, float):
+                    return str(int(v)) if v == int(v) else str(v)
+                return str(v).strip()
+            pkg_code = _sv(0)
+            if not pkg_code:
+                continue
+            packages.append({
+                "pkg_code":       pkg_code,
+                "pkg_description":_sv(1),
+                "pkg_type":       _sv(2),   # Sub-desc → Package Type field
+                "pkg_group":      _sv(3),   # Pkg Type → category
+                "pin_count":      _sv(4),   # Pin Count → Lead/Ball Count
+                "body_size":      _sv(5),   # Body Size → Package Size
+                "pkg_thickness":  _sv(6),   # Pkg Thickness
+                "lb_pitch":       _sv(7),   # LB Pitch → Lead Pitch
+            })
+        _pkg_list_cache = packages
+        return {"packages": packages}
+    except Exception as exc:
+        return {"packages": [], "error": str(exc)}
+
+
+@api_router.get("/relmon/customer-list")
+async def get_relmon_customer_list():
+    """Return customer no./name pairs from the Customer List Excel file."""
+    global _customer_list_cache
+    if _customer_list_cache is not None:
+        return {"customers": _customer_list_cache}
+    if not _CUSTOMER_LIST_FILE.exists():
+        return {"customers": []}
+    try:
+        import xlrd
+        wb = xlrd.open_workbook(str(_CUSTOMER_LIST_FILE))
+        ws = wb.sheet_by_index(0)
+        customers = []
+        for r in range(1, ws.nrows):
+            no_val = ws.cell_value(r, 0)
+            name_val = str(ws.cell_value(r, 1)).strip() if ws.ncols > 1 else ""
+            if not name_val:
+                continue
+            no_str = str(int(no_val)) if isinstance(no_val, float) else str(no_val).strip()
+            customers.append({"no": no_str, "name": name_val})
+        _customer_list_cache = customers
+        return {"customers": customers}
+    except Exception as exc:
+        return {"customers": [], "error": str(exc)}
 
 
 @api_router.get("/relmon/sheets")

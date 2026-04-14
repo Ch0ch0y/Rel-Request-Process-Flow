@@ -20,6 +20,7 @@ const allNavItems = [
   },
   { to: '/approval', icon: ShieldCheck, label: 'Approval Queue', guestAllowed: false, roles: ['Admin', 'Planner'] },
   { to: '/masterlist', icon: TableProperties, label: 'Masterlist', guestAllowed: false, roles: ['Admin', 'Planner'] },
+  { to: '/requests', icon: ClipboardList, label: 'All Requests', guestAllowed: true, roles: ['Technician'] },
   { to: '/loading-unloading', icon: PackageOpen, label: 'Loading / Unloading', guestAllowed: true, roles: ['Technician', 'Admin', 'Reliability Engineer', 'Planner'] },
   { to: '/process-monitoring', icon: ScanSearch, label: 'Process Monitoring', guestAllowed: false },
   { to: '/relmon', icon: Database, label: 'RELMON', guestAllowed: false },

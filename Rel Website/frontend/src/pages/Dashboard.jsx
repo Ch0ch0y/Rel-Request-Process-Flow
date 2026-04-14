@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import api from '../api';
 import CriticalBackupModal from '../components/CriticalBackupModal';
+import TechnicianDashboard from './TechnicianDashboard';
 import {
   Clock, AlertTriangle, ArrowRight,
   Calendar, BarChart3, MessageSquarePlus, Layers,
@@ -196,6 +197,11 @@ export default function Dashboard() {
     { name: 'Analysis', value: stats.analysis_requests,  color: CHART_COLORS_THEME.Analysis },
     { name: 'Completed',value: stats.completed_requests, color: CHART_COLORS_THEME.Completed },
   ];
+
+  // Technicians get their own dedicated dashboard
+  if (isTechnician) {
+    return <TechnicianDashboard stats={stats} />;
+  }
 
   return (
     <>
