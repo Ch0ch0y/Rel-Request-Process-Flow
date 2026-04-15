@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, Upload, FileText, CheckCircle2, AlertCircle, Loader2, Trash2 } from 'lucide-react';
+import { X, Upload, FileText, CheckCircle2, AlertCircle, Loader2, Trash2, Copy } from 'lucide-react';
 import api from '../api';
 
 const STEPS = {
   UPLOAD: 'upload',
   PROCESSING: 'processing',
+  DUPLICATE: 'duplicate',
   RESULTS: 'results',
 };
 
@@ -14,6 +15,8 @@ export default function ImportWordModal({ open, onClose, onImported }) {
   const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
+  const [pendingDuplicates, setPendingDuplicates] = useState([]);
+  const [duplicateActions, setDuplicateActions] = useState({});
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -30,6 +33,8 @@ export default function ImportWordModal({ open, onClose, onImported }) {
     setFiles([]);
     setError('');
     setResult(null);
+    setPendingDuplicates([]);
+    setDuplicateActions({});
   };
 
   const handleClose = () => {
@@ -76,20 +81,70 @@ export default function ImportWordModal({ open, onClose, onImported }) {
     setFiles(prev => prev.filter((_, i) => i !== idx));
   };
 
+  const setDupAction = (filename, action) => {
+    setDuplicateActions(prev => ({ ...prev, [filename]: action }));
+  };
+
   const handleImport = async () => {
     if (files.length === 0) return;
     setStep(STEPS.PROCESSING);
     setError('');
     try {
       const res = await api.importWord(files);
-      setResult(res);
-      setStep(STEPS.RESULTS);
-      if (res.created > 0) onImported();
+      if (res.duplicates?.length > 0) {
+        setResult(res);
+        setPendingDuplicates(res.duplicates);
+        setDuplicateActions({});
+        setStep(STEPS.DUPLICATE);
+        if (res.created > 0) onImported();
+      } else {
+        setResult(res);
+        setStep(STEPS.RESULTS);
+        if (res.created > 0) onImported();
+      }
     } catch (err) {
       setError(err.message);
       setStep(STEPS.UPLOAD);
     }
   };
+
+  const handleResolveDuplicates = async () => {
+    const actionsToSend = {};
+    const filesToProcess = [];
+
+    for (const dup of pendingDuplicates) {
+      const action = duplicateActions[dup.file];
+      if (action && action !== 'cancel') {
+        actionsToSend[dup.file] = action;
+        const f = files.find(file => file.name === dup.file);
+        if (f) filesToProcess.push(f);
+      }
+    }
+
+    if (filesToProcess.length === 0) {
+      setStep(STEPS.RESULTS);
+      return;
+    }
+
+    setStep(STEPS.PROCESSING);
+    try {
+      const res = await api.importWord(filesToProcess, actionsToSend);
+      setResult(prev => ({
+        total_files: (prev?.total_files || 0) + res.total_files,
+        created: (prev?.created || 0) + res.created,
+        failed: (prev?.failed || 0) + res.failed,
+        created_requests: [...(prev?.created_requests || []), ...(res.created_requests || [])],
+        errors: [...(prev?.errors || []), ...(res.errors || [])],
+      }));
+      setStep(STEPS.RESULTS);
+      if (res.created > 0) onImported();
+    } catch (err) {
+      setError(err.message);
+      setStep(STEPS.DUPLICATE);
+    }
+  };
+
+  const allDuplicatesResolved = pendingDuplicates.every(dup => duplicateActions[dup.file]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -174,6 +229,75 @@ export default function ImportWordModal({ open, onClose, onImported }) {
             </div>
           )}
 
+          {/* ── DUPLICATE STEP ── */}
+          {step === STEPS.DUPLICATE && (
+            <div className="space-y-4">
+              <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-amber-800">
+                  {pendingDuplicates.length} request{pendingDuplicates.length !== 1 ? 's' : ''} already exist{pendingDuplicates.length === 1 ? 's' : ''} in the system. Choose what to do for each:
+                </p>
+              </div>
+              <div className="space-y-3 max-h-72 overflow-y-auto">
+                {pendingDuplicates.map((dup) => {
+                  const selected = duplicateActions[dup.file];
+                  return (
+                    <div key={dup.file} className="border border-slate-200 rounded-lg overflow-hidden">
+                      <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
+                        <p className="font-mono text-sm font-bold text-blue-700">{dup.request_number}</p>
+                        <p className="text-xs text-slate-500 truncate">{dup.file}{dup.device_name ? ` — ${dup.device_name}` : ''}</p>
+                      </div>
+                      <div className="flex divide-x divide-slate-200">
+                        <button
+                          onClick={() => setDupAction(dup.file, 'duplicate')}
+                          className={`flex-1 flex flex-col items-center gap-1 px-3 py-2.5 text-xs font-medium transition-all ${
+                            selected === 'duplicate'
+                              ? 'bg-amber-500 text-white'
+                              : 'hover:bg-amber-50 text-slate-600'
+                          }`}
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                          Duplicate
+                          <span className={`text-[10px] font-normal ${selected === 'duplicate' ? 'text-amber-100' : 'text-slate-400'}`}>
+                            saves as {dup.request_number}-DUP
+                          </span>
+                        </button>
+                        <button
+                          onClick={() => setDupAction(dup.file, 'new_number')}
+                          className={`flex-1 flex flex-col items-center gap-1 px-3 py-2.5 text-xs font-medium transition-all ${
+                            selected === 'new_number'
+                              ? 'bg-blue-600 text-white'
+                              : 'hover:bg-blue-50 text-slate-600'
+                          }`}
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          New Number
+                          <span className={`text-[10px] font-normal ${selected === 'new_number' ? 'text-blue-100' : 'text-slate-400'}`}>
+                            auto assigns RMS#
+                          </span>
+                        </button>
+                        <button
+                          onClick={() => setDupAction(dup.file, 'cancel')}
+                          className={`flex-1 flex flex-col items-center gap-1 px-3 py-2.5 text-xs font-medium transition-all ${
+                            selected === 'cancel'
+                              ? 'bg-slate-600 text-white'
+                              : 'hover:bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          Cancel
+                          <span className={`text-[10px] font-normal ${selected === 'cancel' ? 'text-slate-300' : 'text-slate-400'}`}>
+                            skip this file
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* ── RESULTS STEP ── */}
           {step === STEPS.RESULTS && result && (
             <div className="space-y-4">
@@ -244,6 +368,19 @@ export default function ImportWordModal({ open, onClose, onImported }) {
               className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-medium text-sm transition-colors">
               Done
             </button>
+          ) : step === STEPS.DUPLICATE ? (
+            <>
+              <button onClick={handleClose}
+                className="px-4 py-2 text-slate-600 hover:text-slate-900 font-medium text-sm transition-colors">
+                Cancel All
+              </button>
+              <button
+                onClick={handleResolveDuplicates}
+                disabled={!allDuplicatesResolved}
+                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium text-sm transition-colors">
+                Confirm
+              </button>
+            </>
           ) : (
             <>
               <button onClick={handleClose}

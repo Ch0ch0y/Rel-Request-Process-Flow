@@ -8,7 +8,8 @@ import ImportWordModal from '../components/ImportWordModal';
 import ImportWhiskerModal from '../components/ImportWhiskerModal';
 import ImportAgileModal from '../components/ImportAgileModal';
 import ConfirmDialog from '../components/ConfirmDialog';
-import { Search, ChevronRight, Clock, FileText, FileSpreadsheet, Trash2, MessageSquarePlus } from 'lucide-react';
+import { Search, ChevronRight, Clock, FileText, FileSpreadsheet, Trash2, MessageSquarePlus, Plus } from 'lucide-react';
+import CreateRequestModal from '../components/CreateRequestModal';
 
 function StatusBadge({ status }) {
   const map = {
@@ -19,13 +20,14 @@ function StatusBadge({ status }) {
     testing:       'bg-orange-100 text-orange-700 border-orange-200',
     in_progress:   'bg-orange-100 text-orange-700 border-orange-200',
     analysis:      'bg-teal-100 text-teal-700 border-teal-200',
+    report:        'bg-cyan-100 text-cyan-700 border-cyan-200',
     completed:     'bg-emerald-100 text-emerald-700 border-emerald-200',
     discontinued:  'bg-rose-100 text-rose-700 border-rose-200',
   };
   const labels = {
     incoming: 'Request', pending: 'Request', review: 'Review',
     approval: 'Approval', testing: 'Testing', in_progress: 'Testing',
-    analysis: 'Analysis', completed: 'Completed', discontinued: 'Discontinued',
+    analysis: 'Analysis', report: 'Report', completed: 'Completed', discontinued: 'Discontinued',
   };
   return (
     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${map[status] || 'bg-slate-100 text-slate-600 border-slate-200'}`}>
@@ -44,7 +46,9 @@ export default function MyRequests() {
   const [showImportWord, setShowImportWord] = useState(false);
   const [showImportWhisker, setShowImportWhisker] = useState(false);
   const [showImportAgile, setShowImportAgile] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [statusFilter, setStatusFilter] = useState('');
 
   const canDeleteReq = (req) => {
     if (!hasPerm('delete_request')) return false;
@@ -84,19 +88,26 @@ export default function MyRequests() {
 
   useEffect(() => { loadRequests(); }, [user]);
 
-  const filtered = search.trim()
-    ? requests.filter(r => {
-        const q = search.toLowerCase();
-        return (
-          (r.request_number || '').toLowerCase().includes(q) ||
-          (r.device_name || '').toLowerCase().includes(q) ||
-          (r.customer || '').toLowerCase().includes(q) ||
-          (r.lot_no || '').toLowerCase().includes(q) ||
-          (r.classification || '').toLowerCase().includes(q) ||
-          (r.status || '').toLowerCase().includes(q)
-        );
-      })
-    : requests;
+  const filtered = (() => {
+    let list = requests;
+    if (statusFilter) {
+      if (statusFilter === 'request') list = list.filter(r => r.status === 'incoming' || r.status === 'pending');
+      else if (statusFilter === 'testing') list = list.filter(r => r.status === 'testing' || r.status === 'in_progress');
+      else list = list.filter(r => r.status === statusFilter);
+    }
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(r =>
+        (r.request_number || '').toLowerCase().includes(q) ||
+        (r.device_name || '').toLowerCase().includes(q) ||
+        (r.customer || '').toLowerCase().includes(q) ||
+        (r.lot_no || '').toLowerCase().includes(q) ||
+        (r.classification || '').toLowerCase().includes(q) ||
+        (r.status || '').toLowerCase().includes(q)
+      );
+    }
+    return list;
+  })();
 
   return (
     <div className="space-y-6 stagger-children">
@@ -132,6 +143,12 @@ export default function MyRequests() {
               </button>
             </div>
           )}
+          {hasPerm('create_request') && (
+            <button onClick={() => setShowCreate(true)}
+              className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg px-3.5 py-2 font-medium text-sm shadow-sm hover:shadow-md transition-all">
+              <Plus className="w-4 h-4" /> New Request
+            </button>
+          )}
         </div>
       </div>
 
@@ -150,12 +167,36 @@ export default function MyRequests() {
 
       {/* Stats bar */}
       {!loading && !error && (
-        <div className="flex items-center gap-4 text-sm">
-          <span className="text-slate-500 dark:text-slate-400">Total: <span className="font-semibold text-slate-800 dark:text-slate-100">{requests.length}</span></span>
-          <span className="text-amber-600">Incoming: <span className="font-semibold">{requests.filter(r => r.status === 'incoming').length}</span></span>
-          <span className="text-blue-600">In Progress: <span className="font-semibold">{requests.filter(r => r.status === 'in_progress').length}</span></span>
-          <span className="text-emerald-600">Completed: <span className="font-semibold">{requests.filter(r => r.status === 'completed').length}</span></span>
-          <span className="text-rose-600">Discontinued: <span className="font-semibold">{requests.filter(r => r.status === 'discontinued').length}</span></span>
+        <div className="flex items-center gap-2 text-sm flex-wrap">
+          {[
+            { label: 'Total',        value: '',             match: () => true,                                                              color: 'text-slate-500 dark:text-slate-400',   active: 'bg-slate-100 dark:bg-slate-700 ring-1 ring-slate-300 dark:ring-slate-600' },
+            { label: 'Request',      value: 'request',      match: r => r.status === 'incoming' || r.status === 'pending',                  color: 'text-amber-600',                        active: 'bg-amber-50 dark:bg-amber-900/30 ring-1 ring-amber-300' },
+            { label: 'Review',       value: 'review',       match: r => r.status === 'review',                                              color: 'text-blue-600',                         active: 'bg-blue-50 dark:bg-blue-900/30 ring-1 ring-blue-300' },
+            { label: 'Approval',     value: 'approval',     match: r => r.status === 'approval',                                            color: 'text-violet-600',                       active: 'bg-violet-50 dark:bg-violet-900/30 ring-1 ring-violet-300' },
+            { label: 'Testing',      value: 'testing',      match: r => r.status === 'testing' || r.status === 'in_progress',               color: 'text-orange-600',                       active: 'bg-orange-50 dark:bg-orange-900/30 ring-1 ring-orange-300' },
+            { label: 'Analysis',     value: 'analysis',     match: r => r.status === 'analysis',                                            color: 'text-teal-600',                         active: 'bg-teal-50 dark:bg-teal-900/30 ring-1 ring-teal-300' },
+            { label: 'Report',       value: 'report',       match: r => r.status === 'report',                                              color: 'text-cyan-600',                         active: 'bg-cyan-50 dark:bg-cyan-900/30 ring-1 ring-cyan-300' },
+            { label: 'Completed',    value: 'completed',    match: r => r.status === 'completed',                                           color: 'text-emerald-600',                      active: 'bg-emerald-50 dark:bg-emerald-900/30 ring-1 ring-emerald-300' },
+            { label: 'Discontinued', value: 'discontinued', match: r => r.status === 'discontinued',                                        color: 'text-rose-600',                         active: 'bg-rose-50 dark:bg-rose-900/30 ring-1 ring-rose-300' },
+          ].map(({ label, value, match, color, active }) => {
+            const count = value === '' ? requests.length : requests.filter(match).length;
+            return (
+              <button
+                key={label}
+                onClick={() => setStatusFilter(f => f === value ? '' : value)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full transition-all cursor-pointer ${color} ${
+                  statusFilter === value ? active : 'hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                }`}
+              >
+                {label}: <span className="font-semibold">{count}</span>
+              </button>
+            );
+          })}
+          {statusFilter && statusFilter !== '' && (
+            <span className="text-xs text-slate-400 italic ml-1">
+              Showing {filtered.length} result{filtered.length !== 1 ? 's' : ''} — click again to clear
+            </span>
+          )}
         </div>
       )}
 
@@ -170,7 +211,7 @@ export default function MyRequests() {
         <div className="text-center py-20">
           <FileText className="w-12 h-12 text-slate-300 mx-auto mb-3" />
           <p className="text-slate-400 text-lg">
-            {search ? 'No matching requests found.' : 'You have not created any requests yet.'}
+            {search || statusFilter ? 'No matching requests found.' : 'You have not created any requests yet.'}
           </p>
         </div>
       ) : (
@@ -257,6 +298,7 @@ export default function MyRequests() {
       <ImportWordModal open={showImportWord} onClose={() => setShowImportWord(false)} onImported={loadRequests} />
       <ImportWhiskerModal open={showImportWhisker} onClose={() => setShowImportWhisker(false)} onImported={loadRequests} />
       <ImportAgileModal open={showImportAgile} onClose={() => setShowImportAgile(false)} onImported={loadRequests} />
+      <CreateRequestModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={loadRequests} />
       <ConfirmDialog
         open={!!deleteConfirm}
         title="Delete Request"

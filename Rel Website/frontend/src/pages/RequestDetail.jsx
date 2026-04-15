@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api';
@@ -8,7 +8,7 @@ import {
   ChevronDown, ChevronUp, Edit3, X, ImagePlus, Trash2,
   GripVertical, PlusCircle, Plus, Settings2, Check, Download, FileSpreadsheet,
   MessageSquarePlus, Pencil, LayoutList, Archive,
-  Send, ShieldCheck, ThumbsUp, ThumbsDown, FileCheck
+  Send, ShieldCheck, ThumbsUp, ThumbsDown, FileCheck, Star
 } from 'lucide-react';
 import ConfirmDialog from '../components/ConfirmDialog';
 import EmployeeSelect from '../components/EmployeeSelect';
@@ -564,6 +564,21 @@ const DEFAULT_STEP_PRESETS = [
   'Reliability Test', 'Temperature Cycle', 'HTS', 'Moisture Resistance Test',
   'Preconditioning (Precon)', 'Forced Convection Reflow (FCR)', 'Whisker Test', 'Staging',
 ];
+
+// Maps alternate/alias names to the canonical step name
+const STEP_MERGE_ALIASES = {
+  't & h soak': 'T&H Soak',
+  't&h soak': 'T&H Soak',
+  'reflow': 'Forced Convection Reflow (FCR)',
+  'fcr': 'Forced Convection Reflow (FCR)',
+  'forced convection reflow': 'Forced Convection Reflow (FCR)',
+  'mrt': 'Moisture Resistance Test',
+  'moisture resistance test': 'Moisture Resistance Test',
+  'precon': 'Preconditioning (Precon)',
+  'preconditioning': 'Preconditioning (Precon)',
+  'preconditioning (precon)': 'Preconditioning (Precon)',
+  'hts': 'HTS',
+};
 // Electrical Test Step
 const ELECTRICAL_TEST_ITEMS = ['E-Test'];
 const ELECTRICAL_TEST_CONDITIONS = ['P4', 'P1', 'Customer Site', 'Other 3rd Party'];
@@ -721,6 +736,17 @@ function saveStepOpts(key, list) {
   try { localStorage.setItem(LS_STEP_OPTS_PREFIX + key, JSON.stringify(list)); } catch {}
 }
 
+const LS_STEP_DEFAULT_PREFIX = 'rel_step_default_';
+function loadStepDefault(stepOptKey, field) {
+  try {
+    const raw = localStorage.getItem(`${LS_STEP_DEFAULT_PREFIX}${stepOptKey}_${field}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function saveStepDefault(stepOptKey, field, value) {
+  try { localStorage.setItem(`${LS_STEP_DEFAULT_PREFIX}${stepOptKey}_${field}`, JSON.stringify(value)); } catch {}
+}
+
 const STATUS_OPTIONS = [
   { value: 'pending', label: 'Pending' },
   { value: 'in_progress', label: 'In Queue' },
@@ -821,6 +847,94 @@ function OptionsEditorModal({ title, options, onSave, onClose }) {
   );
 }
 
+function DefaultPickerModal({ title, options, currentDefault, onSelect, onClose }) {
+  const [newVal, setNewVal] = useState('');
+
+  const handlePick = (val) => {
+    onSelect(val, false);
+    onClose();
+  };
+
+  const handleAddAndPick = () => {
+    const t = newVal.trim();
+    if (!t) return;
+    onSelect(t, true);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm flex flex-col max-h-[80vh]">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <Star className="w-4 h-4 text-amber-500 fill-amber-400" />
+            <h4 className="font-semibold text-slate-800 text-sm">{title}</h4>
+          </div>
+          <button onClick={onClose} className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors" type="button">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {currentDefault && (
+          <div className="px-4 pt-3 pb-1">
+            <p className="text-xs text-slate-500">Current default: <span className="font-medium text-amber-600">{currentDefault}</span></p>
+          </div>
+        )}
+
+        <div className="p-3 space-y-0.5 overflow-y-auto flex-1">
+          {options.length === 0 && (
+            <p className="text-xs text-slate-400 text-center py-4">No options — add one below.</p>
+          )}
+          {options.map(opt => (
+            <button
+              key={opt}
+              onClick={() => handlePick(opt)}
+              type="button"
+              className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2
+                ${opt === currentDefault
+                  ? 'bg-amber-50 text-amber-700 font-medium border border-amber-200'
+                  : 'hover:bg-slate-50 text-slate-700 border border-transparent'}`}
+            >
+              <Star className={`w-3 h-3 flex-shrink-0 ${opt === currentDefault ? 'fill-amber-400 text-amber-400' : 'text-slate-300'}`} />
+              {opt}
+            </button>
+          ))}
+        </div>
+
+        <div className="p-3 border-t border-slate-100 space-y-2">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={newVal}
+              onChange={e => setNewVal(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleAddAndPick()}
+              placeholder="Add new & set as default…"
+              className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
+            />
+            <button
+              onClick={handleAddAndPick}
+              disabled={!newVal.trim()}
+              type="button"
+              className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+          </div>
+          {currentDefault && (
+            <button
+              onClick={() => { onSelect(null, false); onClose(); }}
+              type="button"
+              className="w-full text-xs text-slate-400 hover:text-red-500 transition-colors text-center py-0.5"
+            >
+              Clear default
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, leg = 1, totalSS, estimatedStart = null, steps = [] }) {
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
@@ -828,6 +942,9 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
   const [imageUploading, setImageUploading] = useState(null); // category key being uploaded, or null
   const [satImages, setSatImages] = useState({});             // { categoryKey: [url, ...] }
   const [employeeMap, setEmployeeMap] = useState({});
+  // Auto-save: track whether form has been initialised (skip save on first load)
+  const formInitialisedRef = useRef(false);
+  const autoSaveTimerRef = useRef(null);
 
   const isSATStep          = step.step_name?.toUpperCase() === 'SAT';
   const isBakeStep         = step.step_name?.toLowerCase() === 'bake';
@@ -929,6 +1046,8 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
 
   // State that tracks which options popover is open: null | { key, label, defaults }
   const [optionsEditor, setOptionsEditor] = useState(null);
+  // State for default picker modal: null | 'item' | 'cond'
+  const [defaultPicker, setDefaultPicker] = useState(null);
   // Refresh key increments when an options list is saved, forcing re-read from localStorage
   const [optsRefreshKey, setOptsRefreshKey] = useState(0);
 
@@ -936,6 +1055,11 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
   const activeItemOpts = stepOptKey ? loadStepOpts(`${stepOptKey}_items`, defaultItemOpts) : [];
   const activeCondOpts = stepOptKey ? loadStepOpts(`${stepOptKey}_conds`, defaultCondOpts) : [];
   void optsRefreshKey; // referenced so state update forces re-render to refresh above vars
+  // Which option is currently saved as default (for showing ★ in dropdown)
+  const defaultItemVal = stepOptKey ? loadStepDefault(stepOptKey, 'item') : null;
+  const defaultCondVal = stepOptKey ? loadStepDefault(stepOptKey, 'cond') : null;
+  const iDisp = (v) => v === defaultItemVal ? `★ ${v}` : v;
+  const cDisp = (v, transform) => { const t = transform ? transform(v) : v; return v === defaultCondVal ? `★ ${t}` : t; };
 
   // For Temperature Cycle: show only conditions relevant to the selected TC type
   const tcVisibleConds = isTCStep
@@ -1080,6 +1204,15 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
     const isBake         = step.step_name?.toLowerCase() === 'bake';
     const isDryBake      = step.step_name?.toLowerCase() === 'dry bake';
     const isTC           = step.step_name?.toLowerCase() === 'temperature cycle';
+    const stepOptKeyInit = isBake ? 'bake' : isDryBake ? 'dry_bake' : isVisual ? 'visual'
+      : isInspection ? 'inspection' : isSerialize ? 'serialize' : isOS ? 'os' : isSAT ? 'sat'
+      : isReliability ? 'reliability' : isMAD ? 'mad' : isMRTStep ? 'mrt' : isPreconStep ? 'precon'
+      : isFCR ? 'fcr' : isTC ? 'tc' : isWhiskerTestStep ? 'whisker_test' : isElectricalStep ? 'electrical_test'
+      : isTHSoakStep ? 'th_soak' : isStagingStep ? 'staging' : null;
+    const savedDefaultItem = stepOptKeyInit && !step.custom_fields?.test_item
+      ? loadStepDefault(stepOptKeyInit, 'item') : null;
+    const savedDefaultCond = stepOptKeyInit && !step.custom_fields?.test_condition && !test_condition_init
+      ? loadStepDefault(stepOptKeyInit, 'cond') : null;
     setForm({
       status: step.status,
       machine_no: step.machine_no || '',
@@ -1089,8 +1222,8 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
       qty_in: step.qty_in ?? '',
       qty_out: step.qty_out ?? '',
       notes: step.notes || '',
-      test_item: step.custom_fields?.test_item || (isVisual ? 'Visual' : isInspection ? 'Inspection' : isSerialize ? 'Serialize' : isOS ? 'Open/Short' : isSAT ? 'SAT' : isReliability ? 'High Temp Storage (HTS)' : isMAD ? 'MAD' : isFCR ? 'Reflow' : isBake ? 'Bake' : isDryBake ? 'DRY BAKE' : isTC ? 'TC A -55/+85' : ''),
-      test_condition: test_condition_init || (isVisual ? 'X40' : isInspection ? 'Note if units are in Jedec tray, Canister, TNR, etc.' : isSerialize ? serializeCondition : isOS ? 'Open/Short' : isSAT ? 'T&C Scan' : ''),
+      test_item: step.custom_fields?.test_item || savedDefaultItem || (isVisual ? 'Visual' : isInspection ? 'Inspection' : isSerialize ? 'Serialize' : isOS ? 'Open/Short' : isSAT ? 'SAT' : isReliability ? 'High Temp Storage (HTS)' : isMAD ? 'MAD' : isFCR ? 'Reflow' : isBake ? 'Bake' : isDryBake ? 'DRY BAKE' : isTC ? 'TC A -55/+85' : ''),
+      test_condition: test_condition_init || savedDefaultCond || (isVisual ? 'X40' : isInspection ? 'Note if units are in Jedec tray, Canister, TNR, etc.' : isSerialize ? serializeCondition : isOS ? 'Open/Short' : isSAT ? 'T&C Scan' : ''),
       bake_custom_hrs: bake_custom_hrs_init,
       hts_custom_hrs: hts_custom_hrs_init,
       // Extract datetime-local format (YYYY-MM-DDTHH:mm) directly without timezone conversion
@@ -1106,9 +1239,26 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
       setSatImages({});
     }
     setMessage('');
+    // Mark form as initialised AFTER this load completes so the auto-save
+    // useEffect doesn't fire for the initial population
+    formInitialisedRef.current = false;
+    setTimeout(() => { formInitialisedRef.current = true; }, 0);
   }, [step]);
 
-  const handleSave = async () => {
+  // Auto-save: debounce any form changes (except "completing" — that stays manual)
+  useEffect(() => {
+    if (!formInitialisedRef.current) return;
+    if (!canUpdate) return;
+    // Don't auto-save when marking as completed (requires validation, user intent)
+    if (form.status === 'completed') return;
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      handleSave(true); // pass flag: auto-save mode
+    }, 1500);
+    return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); };
+  }, [form, satImages]);
+
+  const handleSave = async (isAutoSave = false) => {
     setSaving(true);
     setMessage('');
     // Validate required fields when completing a step
@@ -1182,7 +1332,7 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
       }
 
       if (Object.keys(updateData).length === 0) {
-        setMessage('No changes to save.');
+        if (!isAutoSave) setMessage('No changes to save.');
         setSaving(false);
         return;
       }
@@ -1198,7 +1348,8 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
           }
         }
       }
-      setMessage('Step updated successfully!');
+      setMessage(isAutoSave ? '✓ Auto-saved' : 'Step updated successfully!');
+      if (isAutoSave) setTimeout(() => setMessage(''), 2000);
       onUpdated();
     } catch (err) {
       setMessage(`Error: ${err.message}`);
@@ -1290,33 +1441,48 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-xs font-medium uppercase tracking-wider text-slate-500">Test Item</label>
-                {stepOptKey && (
-                  <button
-                    onClick={() => setOptionsEditor({ key: `${stepOptKey}_items`, label: 'Edit Test Item Options', defaults: defaultItemOpts })}
-                    className="p-0.5 rounded hover:bg-blue-100 text-slate-400 hover:text-blue-600 transition-colors"
-                    title="Edit options"
-                    type="button"
-                  >
-                    <Pencil className="w-3 h-3" />
-                  </button>
-                )}
+                <div className="flex items-center gap-1">
+                  {stepOptKey && (
+                    <button
+                      onClick={() => setDefaultPicker('item')}
+                      className={`p-0.5 rounded hover:bg-amber-100 transition-colors ${loadStepDefault(stepOptKey, 'item') ? 'text-amber-500' : 'text-slate-400 hover:text-amber-600'}`}
+                      title="Choose default Test Item"
+                      type="button"
+                    >
+                      <Star className={`w-3.5 h-3.5 ${loadStepDefault(stepOptKey, 'item') ? 'fill-amber-400' : ''}`} />
+                    </button>
+                  )}
+                  {stepOptKey && (
+                    <button
+                      onClick={() => setOptionsEditor({ key: `${stepOptKey}_items`, label: 'Edit Test Item Options', defaults: defaultItemOpts })}
+                      className="p-0.5 rounded hover:bg-blue-100 text-slate-400 hover:text-blue-600 transition-colors"
+                      title="Edit options"
+                      type="button"
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
               </div>
               {isElectricalStep ? (
                 <select value={form.test_item || 'E-Test'}
-                  onChange={e => setForm(f => ({ ...f, test_item: e.target.value }))}
+                  onChange={e => { if (e.target.value && stepOptKey) saveStepDefault(stepOptKey, 'item', e.target.value); setForm(f => ({ ...f, test_item: e.target.value })); }}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2.5 bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm">
-                  {activeItemOpts.map(item => <option key={item} value={item}>{item}</option>)}
+                  {activeItemOpts.map(item => <option key={item} value={item}>{iDisp(item)}</option>)}
                 </select>
               ) : stepOptKey ? (
                 <select value={form.test_item}
-                  onChange={e => setForm(f => ({
-                    ...f,
-                    test_item: e.target.value,
-                    ...((isReliabilityStep || isMRTStep || isPreconStep || isWhiskerTestStep || isTHSoakStep) ? { test_condition: '', th_soak_custom_hrs: '', hts_custom_hrs: '' } : {}),
-                  }))}
+                  onChange={e => {
+                    if (e.target.value) saveStepDefault(stepOptKey, 'item', e.target.value);
+                    setForm(f => ({
+                      ...f,
+                      test_item: e.target.value,
+                      ...((isReliabilityStep || isMRTStep || isPreconStep || isWhiskerTestStep || isTHSoakStep) ? { test_condition: '', th_soak_custom_hrs: '', hts_custom_hrs: '' } : {}),
+                    }));
+                  }}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2.5 bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm">
                   <option value="">— Select item —</option>
-                  {activeItemOpts.map(item => <option key={item} value={item}>{item}</option>)}
+                  {activeItemOpts.map(item => <option key={item} value={item}>{iDisp(item)}</option>)}
                 </select>
               ) : (
                 <input type="text" value={form.test_item} onChange={e => setForm(f => ({ ...f, test_item: e.target.value }))}
@@ -1327,45 +1493,57 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-xs font-medium uppercase tracking-wider text-slate-500">Test Condition</label>
-                {(stepOptKey && !isMRTStep) && (
-                  <button
-                    onClick={() => setOptionsEditor({ key: `${stepOptKey}_conds`, label: 'Edit Test Condition Options', defaults: defaultCondOpts })}
-                    className="p-0.5 rounded hover:bg-blue-100 text-slate-400 hover:text-blue-600 transition-colors"
-                    title="Edit options"
-                    type="button"
-                  >
-                    <Pencil className="w-3 h-3" />
-                  </button>
-                )}
-                {(isMRTStep && mrtCondKey) && (
-                  <button
-                    onClick={() => setOptionsEditor({ key: `${mrtCondKey}_conds`, label: 'Edit Test Condition Options', defaults: mrtCondDefaults })}
-                    className="p-0.5 rounded hover:bg-blue-100 text-slate-400 hover:text-blue-600 transition-colors"
-                    title="Edit options"
-                    type="button"
-                  >
-                    <Pencil className="w-3 h-3" />
-                  </button>
-                )}
+                <div className="flex items-center gap-1">
+                  {stepOptKey && (
+                    <button
+                      onClick={() => setDefaultPicker('cond')}
+                      className={`p-0.5 rounded hover:bg-amber-100 transition-colors ${loadStepDefault(stepOptKey, 'cond') ? 'text-amber-500' : 'text-slate-400 hover:text-amber-600'}`}
+                      title="Choose default Test Condition"
+                      type="button"
+                    >
+                      <Star className={`w-3.5 h-3.5 ${loadStepDefault(stepOptKey, 'cond') ? 'fill-amber-400' : ''}`} />
+                    </button>
+                  )}
+                  {(stepOptKey && !isMRTStep) && (
+                    <button
+                      onClick={() => setOptionsEditor({ key: `${stepOptKey}_conds`, label: 'Edit Test Condition Options', defaults: defaultCondOpts })}
+                      className="p-0.5 rounded hover:bg-blue-100 text-slate-400 hover:text-blue-600 transition-colors"
+                      title="Edit options"
+                      type="button"
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </button>
+                  )}
+                  {(isMRTStep && mrtCondKey) && (
+                    <button
+                      onClick={() => setOptionsEditor({ key: `${mrtCondKey}_conds`, label: 'Edit Test Condition Options', defaults: mrtCondDefaults })}
+                      className="p-0.5 rounded hover:bg-blue-100 text-slate-400 hover:text-blue-600 transition-colors"
+                      title="Edit options"
+                      type="button"
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
               </div>
               {isElectricalStep ? (
                 <select value={form.test_condition}
-                  onChange={e => setForm(f => ({ ...f, test_condition: e.target.value }))}
+                  onChange={e => { if (e.target.value && stepOptKey) saveStepDefault(stepOptKey, 'cond', e.target.value); setForm(f => ({ ...f, test_condition: e.target.value })); }}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2.5 bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm">
                   <option value="">— Select condition —</option>
                   {activeCondOpts.map(c => (
-                    <option key={c} value={c}>{c}</option>
+                    <option key={c} value={c}>{cDisp(c)}</option>
                   ))}
                 </select>
               ) : isBakeStep ? (
                 <div className="space-y-2">
                   <select value={form.test_condition}
-                    onChange={e => setForm(f => ({ ...f, test_condition: e.target.value, bake_custom_hrs: '' }))}
+                    onChange={e => { if (e.target.value) saveStepDefault(stepOptKey, 'cond', e.target.value); setForm(f => ({ ...f, test_condition: e.target.value, bake_custom_hrs: '' })); }}
                     className="w-full border border-slate-200 rounded-lg px-3 py-2.5 bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm">
                     <option value="">— Select condition —</option>
                     {activeCondOpts.map(c => (
                       <option key={c} value={c}>
-                        {c === '125°C / custom_hrs' ? '125°C / (enter hrs)' : c === '150°C / custom_hrs' ? '150°C / (enter hrs)' : c}
+                        {cDisp(c, v => v === '125°C / custom_hrs' ? '125°C / (enter hrs)' : v === '150°C / custom_hrs' ? '150°C / (enter hrs)' : v)}
                       </option>
                     ))}
                   </select>
@@ -1382,14 +1560,14 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
               ) : isDryBakeStep ? (
                 <div className="space-y-2">
                   <select value={form.test_condition}
-                    onChange={e => setForm(f => ({ ...f, test_condition: e.target.value, bake_custom_hrs: '' }))}
+                    onChange={e => { if (e.target.value) saveStepDefault(stepOptKey, 'cond', e.target.value); setForm(f => ({ ...f, test_condition: e.target.value, bake_custom_hrs: '' })); }}
                     className="w-full border border-slate-200 rounded-lg px-3 py-2.5 bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm">
                     <option value="">— Select condition —</option>
                     {activeCondOpts.map(c => (
                       <option key={c} value={c}>
-                        {c === 'DRY BAKE 125°C / custom_hrs' ? 'DRY BAKE 125°C / (enter hrs)'
-                          : c === 'DRY BAKE 150°C / custom_hrs' ? 'DRY BAKE 150°C / (enter hrs)'
-                          : c}
+                        {cDisp(c, v => v === 'DRY BAKE 125°C / custom_hrs' ? 'DRY BAKE 125°C / (enter hrs)'
+                          : v === 'DRY BAKE 150°C / custom_hrs' ? 'DRY BAKE 150°C / (enter hrs)'
+                          : v)}
                       </option>
                     ))}
                   </select>
@@ -1410,12 +1588,12 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
                   )}
                   {form.test_item && (
                   <select value={form.test_condition}
-                    onChange={e => setForm(f => ({ ...f, test_condition: e.target.value, hts_custom_hrs: '' }))}
+                    onChange={e => { if (e.target.value) saveStepDefault(stepOptKey, 'cond', e.target.value); setForm(f => ({ ...f, test_condition: e.target.value, hts_custom_hrs: '' })); }}
                     className="w-full border border-slate-200 rounded-lg px-3 py-2.5 bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm">
                     <option value="">— Select condition —</option>
                     {reliabilityVisibleConds.map(c => (
                       <option key={c} value={c}>
-                        {c.replace('/ custom_hrs', '/ (enter hrs)')}
+                        {cDisp(c, v => v.replace('/ custom_hrs', '/ (enter hrs)'))}
                       </option>
                     ))}
                   </select>
@@ -1437,12 +1615,12 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
                   )}
                   {form.test_item && (
                   <select value={form.test_condition}
-                    onChange={e => setForm(f => ({ ...f, test_condition: e.target.value, hts_custom_hrs: '' }))}
+                    onChange={e => { if (e.target.value) saveStepDefault(stepOptKey, 'cond', e.target.value); setForm(f => ({ ...f, test_condition: e.target.value, hts_custom_hrs: '' })); }}
                     className="w-full border border-slate-200 rounded-lg px-3 py-2.5 bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm">
                     <option value="">— Select condition —</option>
                     {mrtVisibleConds.map(c => (
                       <option key={c} value={c}>
-                        {c.replace('-custom_hrs', '-(enter hrs)').replace(' custom_cyc', ' (enter cycles)')}
+                        {cDisp(c, v => v.replace('-custom_hrs', '-(enter hrs)').replace(' custom_cyc', ' (enter cycles)'))}
                       </option>
                     ))}
                   </select>
@@ -1476,11 +1654,11 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
                   )}
                   {form.test_item && !['Visual', 'Reflow'].includes(form.test_item) && (
                     <select value={form.test_condition}
-                      onChange={e => setForm(f => ({ ...f, test_condition: e.target.value, hts_custom_hrs: '' }))}
+                      onChange={e => { if (e.target.value) saveStepDefault(stepOptKey, 'cond', e.target.value); setForm(f => ({ ...f, test_condition: e.target.value, hts_custom_hrs: '' })); }}
                       className="w-full border border-slate-200 rounded-lg px-3 py-2.5 bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm">
                       <option value="">— Select condition —</option>
                       {whiskerVisibleConds.map(c => (
-                        <option key={c} value={c}>{c}</option>
+                        <option key={c} value={c}>{cDisp(c)}</option>
                       ))}
                     </select>
                   )}
@@ -1501,11 +1679,11 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
                   )}
                   {form.test_item && (
                   <select value={form.test_condition}
-                    onChange={e => setForm(f => ({ ...f, test_condition: e.target.value, th_soak_custom_hrs: '' }))}
+                    onChange={e => { if (e.target.value) saveStepDefault(stepOptKey, 'cond', e.target.value); setForm(f => ({ ...f, test_condition: e.target.value, th_soak_custom_hrs: '' })); }}
                     className="w-full border border-slate-200 rounded-lg px-3 py-2.5 bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm">
                     <option value="">— Select condition —</option>
                     {activeCondOpts.map(c => (
-                      <option key={c} value={c}>{c === '30/60-Xhrs' ? '30/60-(enter hrs)' : c}</option>
+                      <option key={c} value={c}>{cDisp(c, v => v === '30/60-Xhrs' ? '30/60-(enter hrs)' : v)}</option>
                     ))}
                   </select>
                   )}
@@ -1523,12 +1701,12 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
                 <div className="space-y-2">
                   {form.test_item && (
                   <select value={form.test_condition}
-                    onChange={e => setForm(f => ({ ...f, test_condition: e.target.value, hts_custom_hrs: '' }))}
+                    onChange={e => { if (e.target.value) saveStepDefault(stepOptKey, 'cond', e.target.value); setForm(f => ({ ...f, test_condition: e.target.value, hts_custom_hrs: '' })); }}
                     className="w-full border border-slate-200 rounded-lg px-3 py-2.5 bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm">
                     <option value="">— Select condition —</option>
                     {activeCondOpts.map(c => (
                       <option key={c} value={c}>
-                        {c === '30/60-custom_hrs' ? '30/60-(enter hrs)' : c}
+                        {cDisp(c, v => v === '30/60-custom_hrs' ? '30/60-(enter hrs)' : v)}
                       </option>
                     ))}
                   </select>
@@ -1550,11 +1728,11 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
                   )}
                   {form.test_item && (
                     <select value={form.test_condition}
-                      onChange={e => setForm(f => ({ ...f, test_condition: e.target.value, hts_custom_hrs: '' }))}
+                      onChange={e => { if (e.target.value) saveStepDefault(stepOptKey, 'cond', e.target.value); setForm(f => ({ ...f, test_condition: e.target.value, hts_custom_hrs: '' })); }}
                       className="w-full border border-slate-200 rounded-lg px-3 py-2.5 bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm">
                       <option value="">— Select cycles —</option>
                       {tcVisibleConds.map(c => (
-                        <option key={c} value={c}>{c}</option>
+                        <option key={c} value={c}>{cDisp(c)}</option>
                       ))}
                     </select>
                   )}
@@ -1571,12 +1749,12 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
               ) : isFCRStep ? (
                 <div className="space-y-2">
                   <select value={form.test_condition}
-                    onChange={e => setForm(f => ({ ...f, test_condition: e.target.value, hts_custom_hrs: '' }))}
+                    onChange={e => { if (e.target.value) saveStepDefault(stepOptKey, 'cond', e.target.value); setForm(f => ({ ...f, test_condition: e.target.value, hts_custom_hrs: '' })); }}
                     className="w-full border border-slate-200 rounded-lg px-3 py-2.5 bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm">
                     <option value="">— Select condition —</option>
                     {activeCondOpts.map(c => (
                       <option key={c} value={c}>
-                        {c.replace(' custom_cyc', ' (enter cycles)')}
+                        {cDisp(c, v => v.replace(' custom_cyc', ' (enter cycles)'))}
                       </option>
                     ))}
                   </select>
@@ -1591,10 +1769,10 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
                   )}
                 </div>
               ) : stepOptKey ? (
-                <select value={form.test_condition} onChange={e => setForm(f => ({ ...f, test_condition: e.target.value }))}
+                <select value={form.test_condition} onChange={e => { if (e.target.value) saveStepDefault(stepOptKey, 'cond', e.target.value); setForm(f => ({ ...f, test_condition: e.target.value })); }}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2.5 bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm">
                   <option value="">— Select condition —</option>
-                  {activeCondOpts.map(c => <option key={c} value={c}>{c}</option>)}
+                  {activeCondOpts.map(c => <option key={c} value={c}>{cDisp(c)}</option>)}
                 </select>
               ) : (
                 <input type="text" value={form.test_condition} onChange={e => setForm(f => ({ ...f, test_condition: e.target.value }))}
@@ -1932,6 +2110,35 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
           onClose={() => setOptionsEditor(null)}
         />
       )}
+
+      {defaultPicker && stepOptKey && (
+        <DefaultPickerModal
+          title={defaultPicker === 'item' ? 'Default Test Item' : 'Default Test Condition'}
+          options={defaultPicker === 'item' ? activeItemOpts : activeCondOpts}
+          currentDefault={loadStepDefault(stepOptKey, defaultPicker === 'item' ? 'item' : 'cond')}
+          onSelect={(val, addToList) => {
+            const field = defaultPicker === 'item' ? 'item' : 'cond';
+            const oKey = defaultPicker === 'item' ? `${stepOptKey}_items` : `${stepOptKey}_conds`;
+            const oDefaults = defaultPicker === 'item' ? defaultItemOpts : defaultCondOpts;
+            if (addToList && val) {
+              const current = loadStepOpts(oKey, oDefaults);
+              if (!current.includes(val)) {
+                saveStepOpts(oKey, [...current, val]);
+                setOptsRefreshKey(k => k + 1);
+              }
+            }
+            if (val === null) {
+              try { localStorage.removeItem(`${LS_STEP_DEFAULT_PREFIX}${stepOptKey}_${field}`); } catch {}
+              setMessage('Default cleared!');
+            } else {
+              saveStepDefault(stepOptKey, field, val);
+              setMessage(`Default ${field === 'item' ? 'Test Item' : 'Test Condition'} set to "${val}"!`);
+            }
+            setTimeout(() => setMessage(''), 2500);
+          }}
+          onClose={() => setDefaultPicker(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1954,6 +2161,8 @@ export default function RequestDetail() {
   const [selectedLeg, setSelectedLeg] = useState(1);
   const [addingStep, setAddingStep] = useState(false);
   const [customStepInput, setCustomStepInput] = useState('');
+  const [stepSuggestions, setStepSuggestions] = useState([]);
+  const [stepMergeWarning, setStepMergeWarning] = useState('');
   const [downloadingReport, setDownloadingReport] = useState(false);
   const [downloadingSatReport, setDownloadingSatReport] = useState(false);
   const [downloadingLtc, setDownloadingLtc] = useState(false);
@@ -2307,6 +2516,7 @@ export default function RequestDetail() {
       pkg_info: request.pkg_info || '',
       purpose: request.purpose || '',
       deadline: request.deadline || '',
+      rrs_no: request.rrs_no || '',
     });
     setEditing(true);
   };
@@ -2405,8 +2615,17 @@ export default function RequestDetail() {
   };
 
   const handleQuickAddStep = async (stepName) => {
-    const name = (stepName || customStepInput).trim();
-    if (!name) return;
+    const rawName = (stepName || customStepInput).trim();
+    if (!rawName) return;
+    // Resolve alias
+    const alias = STEP_MERGE_ALIASES[rawName.toLowerCase().trim()];
+    const name = alias && alias.toLowerCase() !== rawName.toLowerCase() ? alias : rawName;
+    if (alias && alias.toLowerCase() !== rawName.toLowerCase()) {
+      setStepMergeWarning(`"${rawName}" resolved to "${alias}". Added as "${alias}".`);
+      setTimeout(() => setStepMergeWarning(''), 4000);
+    } else {
+      setStepMergeWarning('');
+    }
     setStepSaving(true);
     try {
       const currentNames = legSteps.map(s => s.step_name);
@@ -2415,6 +2634,7 @@ export default function RequestDetail() {
       if (!stepPresets.includes(name)) savePresets([...stepPresets, name]);
       setAddingStep(false);
       setCustomStepInput('');
+      setStepSuggestions([]);
       loadRequest();
       setSaveMsg('Step added!');
       setTimeout(() => setSaveMsg(''), 2000);
@@ -2422,6 +2642,23 @@ export default function RequestDetail() {
       setSaveMsg(`Error: ${err.message}`);
     } finally {
       setStepSaving(false);
+    }
+  };
+
+  const handleCustomStepInputChange = (value) => {
+    setCustomStepInput(value);
+    if (value.trim().length >= 1) {
+      const q = value.toLowerCase();
+      const filtered = DEFAULT_STEP_PRESETS.filter(s => s.toLowerCase().includes(q));
+      const aliasMatches = Object.entries(STEP_MERGE_ALIASES)
+        .filter(([k]) => k.includes(q))
+        .map(([, v]) => v)
+        .filter(v => !filtered.includes(v));
+      // Also check current stepPresets
+      const customMatches = stepPresets.filter(s => s.toLowerCase().includes(q) && !filtered.includes(s));
+      setStepSuggestions([...new Set([...filtered, ...aliasMatches, ...customMatches])].slice(0, 8));
+    } else {
+      setStepSuggestions([]);
     }
   };
 
@@ -3204,6 +3441,13 @@ export default function RequestDetail() {
                       className="w-full border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 focus:bg-white focus:border-blue-500 text-sm" />
                   </div>
                 ))}
+                <div>
+                  <label className="block text-xs font-medium uppercase tracking-wider text-slate-400 mb-1">RRS #</label>
+                  <input type="text"
+                    value={editForm.rrs_no || ''} onChange={e => setEditForm(f => ({ ...f, rrs_no: e.target.value }))}
+                    placeholder="Enter RRS number..."
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 focus:bg-white focus:border-blue-500 text-sm" />
+                </div>
                 <div className="sm:col-span-2">
                   <label className="block text-xs font-medium uppercase tracking-wider text-slate-400 mb-1">Purpose</label>
                   <textarea value={editForm.purpose || ''} onChange={e => setEditForm(f => ({ ...f, purpose: e.target.value }))} rows={2}
@@ -3229,14 +3473,20 @@ export default function RequestDetail() {
                   <InfoRow label="Automotive" value={request.automotive} />
                 </div>
                 <div>
-                  {request.original_rr_number && (
-                    <div className="flex items-center gap-3 mb-3 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-700/50">
-                      <div className="flex-shrink-0">
-                        <span className="block text-xs font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 mb-0.5">RR#</span>
-                        <span className="font-mono text-base font-bold text-amber-800 dark:text-amber-300 tracking-tight">{request.request_number}</span>
+                  <div className="flex items-start gap-3 mb-3 flex-wrap">
+                    {request.original_rr_number && (
+                      <div className="flex-shrink-0 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200">
+                        <span className="block text-xs font-semibold uppercase tracking-wider text-amber-600 mb-0.5">RR#</span>
+                        <span className="font-mono text-base font-bold text-amber-800 tracking-tight">{request.request_number}</span>
                       </div>
-                    </div>
-                  )}
+                    )}
+                    {request.rrs_no && (
+                      <div className="flex-shrink-0 px-3 py-2.5 rounded-lg bg-violet-50 border border-violet-200">
+                        <span className="block text-xs font-semibold uppercase tracking-wider text-violet-600 mb-0.5">RRS#</span>
+                        <span className="font-mono text-base font-bold text-violet-800 tracking-tight">{request.rrs_no}</span>
+                      </div>
+                    )}
+                  </div>
                   <InfoRow label="Date LTC" value={request.date_ltc} />
                   <InfoRow label="Product Hierarchy" value={request.product_hierarchy} />
                   <InfoRow label="PDL" value={request.pdl} />
@@ -3428,7 +3678,7 @@ export default function RequestDetail() {
             {canManageSteps && !editingSteps && (
               <div className="flex items-center gap-1">
                 <button
-                  onClick={() => { setAddingStep(v => !v); setCustomStepInput(''); }}
+                  onClick={() => { setAddingStep(v => !v); setCustomStepInput(''); setStepSuggestions([]); }}
                   title="Add Step"
                   className={`p-1.5 rounded transition-colors ${
                     addingStep
@@ -3523,23 +3773,46 @@ export default function RequestDetail() {
                       </button>
                     ))}
                   </div>
+                  {stepMergeWarning && (
+                    <div className="px-3 py-2 bg-amber-50 border border-amber-200 text-amber-700 rounded-lg text-xs flex items-start gap-1.5">
+                      <span className="mt-0.5">⚠️</span>
+                      <span>{stepMergeWarning}</span>
+                    </div>
+                  )}
                   <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={customStepInput}
-                      onChange={e => setCustomStepInput(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && handleQuickAddStep()}
-                      placeholder="Custom step name..."
-                      className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 text-sm"
-                    />
+                    <div className="flex-1 relative">
+                      <input
+                        type="text"
+                        value={customStepInput}
+                        onChange={e => handleCustomStepInputChange(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') { handleQuickAddStep(); setStepSuggestions([]); }
+                          if (e.key === 'Escape') setStepSuggestions([]);
+                        }}
+                        onBlur={() => setTimeout(() => setStepSuggestions([]), 150)}
+                        placeholder="Type to search or add custom step..."
+                        className="w-full border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 text-sm"
+                      />
+                      {stepSuggestions.length > 0 && (
+                        <div className="absolute left-0 right-0 top-full z-10 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+                          {stepSuggestions.map(s => (
+                            <button key={s} type="button"
+                              onMouseDown={() => { handleQuickAddStep(s); setCustomStepInput(''); setStepSuggestions([]); }}
+                              className="w-full text-left px-3 py-1.5 text-sm text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 transition-colors">
+                              {s}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                     <button
-                      onClick={() => handleQuickAddStep()}
+                      onClick={() => { handleQuickAddStep(); setStepSuggestions([]); }}
                       disabled={!customStepInput.trim() || stepSaving}
                       className="px-3 py-1.5 bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg text-xs font-medium disabled:opacity-50 transition-colors">
                       {stepSaving ? '...' : 'Add'}
                     </button>
                     <button
-                      onClick={() => { setAddingStep(false); setCustomStepInput(''); setEditingPresets(false); }}
+                      onClick={() => { setAddingStep(false); setCustomStepInput(''); setStepSuggestions([]); setEditingPresets(false); }}
                       className="px-3 py-1.5 bg-white border border-slate-200 text-slate-500 hover:bg-slate-50 rounded-lg text-xs font-medium">
                       Cancel
                     </button>

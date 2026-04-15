@@ -310,6 +310,7 @@ export default function Settings() {
   const [editingPresetId, setEditingPresetId] = useState(null);
   const [editPresetSteps, setEditPresetSteps] = useState([]);
   const [editPresetInput, setEditPresetInput] = useState('');
+  const [editPresetLabel, setEditPresetLabel] = useState('');
   const [presetsSaving, setPresetsSaving] = useState(false);
   const [stepsOpen, setStepsOpen] = useState(false);
 
@@ -684,8 +685,10 @@ export default function Settings() {
 
   const handleSavePreset = async (presetId) => {
     setPresetsSaving(true);
-    // Only update the edited preset's steps — leave all other presets unchanged
-    const updatedPresets = presetsState.map(p => p.id === presetId ? { ...p, steps: editPresetSteps } : p);
+    // Only update the edited preset's steps/label — leave all other presets unchanged
+    const updatedPresets = presetsState.map(p => p.id === presetId
+      ? { ...p, steps: editPresetSteps, label: editPresetLabel.trim() || p.label }
+      : p);
     const newSteps = editPresetSteps;
     try {
       // Save the preset definition AND set these steps as the active process_steps (default for all users)
@@ -696,7 +699,8 @@ export default function Settings() {
       setEditingPresetId(null);
       setEditPresetSteps([]);
       setEditPresetInput('');
-      setStepsMsg(`Preset "${presetsState.find(p => p.id === presetId)?.label}" saved and set as default for all users!`);
+      setEditPresetLabel('');
+      setStepsMsg(`Preset "${updatedPresets.find(p => p.id === presetId)?.label}" saved and set as default for all users!`);
     } catch (err) {
       setStepsMsg(`Error saving preset: ${err.message}`);
     } finally {
@@ -1328,9 +1332,9 @@ export default function Settings() {
                         <button type="button" title={isEditing ? 'Cancel' : 'Edit preset steps'}
                           onClick={() => {
                             if (isEditing) {
-                              setEditingPresetId(null); setEditPresetSteps([]); setEditPresetInput('');
+                              setEditingPresetId(null); setEditPresetSteps([]); setEditPresetInput(''); setEditPresetLabel('');
                             } else {
-                              setEditingPresetId(preset.id); setEditPresetSteps([...preset.steps]); setEditPresetInput('');
+                              setEditingPresetId(preset.id); setEditPresetSteps([...preset.steps]); setEditPresetInput(''); setEditPresetLabel(preset.label);
                             }
                           }}
                           className={`p-1.5 rounded transition-colors ${
@@ -1365,10 +1369,10 @@ export default function Settings() {
                 return (
                   <div className="border border-amber-300 rounded-lg bg-amber-50 p-4 space-y-3">
                     <div className="flex items-center justify-between">
-                      <p className="text-xs font-semibold text-amber-800">Editing: {preset?.label}</p>
+                      <p className="text-xs font-semibold text-amber-800">Editing Preset</p>
                       <div className="flex items-center gap-2">
                         <button type="button"
-                          onClick={() => { setEditingPresetId(null); setEditPresetSteps([]); setEditPresetInput(''); }}
+                          onClick={() => { setEditingPresetId(null); setEditPresetSteps([]); setEditPresetInput(''); setEditPresetLabel(''); }}
                           className="text-xs text-slate-500 hover:text-slate-700 border border-slate-200 rounded px-2.5 py-1 bg-white hover:bg-slate-50">
                           Cancel
                         </button>
@@ -1379,6 +1383,17 @@ export default function Settings() {
                           {presetsSaving ? 'Saving…' : 'Save Preset'}
                         </button>
                       </div>
+                    </div>
+                    {/* Rename input */}
+                    <div>
+                      <label className="block text-[10px] text-amber-700 font-medium uppercase tracking-wider mb-1">Preset Name</label>
+                      <input
+                        type="text"
+                        value={editPresetLabel}
+                        onChange={e => setEditPresetLabel(e.target.value)}
+                        placeholder="Enter preset name..."
+                        className="w-full border border-amber-200 rounded px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-amber-300"
+                      />
                     </div>
                     <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
                       {editPresetSteps.map((step, i) => (

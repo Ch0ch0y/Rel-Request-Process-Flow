@@ -47,13 +47,14 @@ function StatusBadge({ status }) {
     testing:       'bg-orange-100 text-orange-700 border-orange-200',
     in_progress:   'bg-orange-100 text-orange-700 border-orange-200',
     analysis:      'bg-teal-100 text-teal-700 border-teal-200',
+    report:        'bg-cyan-100 text-cyan-700 border-cyan-200',
     completed:     'bg-emerald-100 text-emerald-700 border-emerald-200',
     discontinued:  'bg-rose-100 text-rose-700 border-rose-200',
   };
   const labels = {
     incoming: 'Request', pending: 'Request', review: 'Review',
     approval: 'Approval', testing: 'Testing', in_progress: 'Testing',
-    analysis: 'Analysis', completed: 'Completed', discontinued: 'Discontinued',
+    analysis: 'Analysis', report: 'Report', completed: 'Completed', discontinued: 'Discontinued',
   };
   return (
     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${map[status] || 'bg-slate-100 text-slate-600 border-slate-200'}`}>
@@ -62,6 +63,7 @@ function StatusBadge({ status }) {
   );
 }
 
+// DEFAULT_PROCESS_PRESETS moved to CreateRequestModal.jsx
 const DEFAULT_PROCESS_PRESETS = [
   {
     id: 'default',
@@ -116,6 +118,25 @@ const AVAILABLE_STEPS = [
   'Moisture Absorption and Desorption',
 ];
 
+// Maps alternate/alias names to the canonical step name
+const STEP_MERGE_ALIASES = {
+  't & h soak': 'T&H Soak',
+  't&h soak': 'T&H Soak',
+  'reflow': 'Forced Convection Reflow (FCR)',
+  'fcr': 'Forced Convection Reflow (FCR)',
+  'forced convection reflow': 'Forced Convection Reflow (FCR)',
+  'mrt': 'Moisture Resistance Test',
+  'moisture resistance test': 'Moisture Resistance Test',
+  'precon': 'Preconditioning (Precon)',
+  'preconditioning': 'Preconditioning (Precon)',
+  'preconditioning (precon)': 'Preconditioning (Precon)',
+  'hts': 'HTS',
+};
+
+function resolveStepAlias(name) {
+  return STEP_MERGE_ALIASES[name.toLowerCase().trim()] || null;
+}
+
 function CreateRequestModal({ open, onClose, onCreated }) {
   const [form, setForm] = useState({});
   const [selectedSteps, setSelectedSteps] = useState([...DEFAULT_PROCESS_PRESETS[0].steps]);
@@ -126,6 +147,9 @@ function CreateRequestModal({ open, onClose, onCreated }) {
   const [selectedPresetId, setSelectedPresetId] = useState('default');
   const [nextNumber, setNextNumber] = useState('');
   const [customStep, setCustomStep] = useState('');
+  const [rrsSuggestions, setRrsSuggestions] = useState([]);
+  const [stepMergeWarning, setStepMergeWarning] = useState('');
+  const [stepSuggestions, setStepSuggestions] = useState([]);
 
   useEffect(() => {
     if (!open) return;
@@ -141,6 +165,7 @@ function CreateRequestModal({ open, onClose, onCreated }) {
         setSelectedSteps([...chosen.steps]);
       }
     }).catch(() => {});
+    api.getRrsSuggestions().then(setRrsSuggestions).catch(() => {});
     if (requestType) {
       api.getNextRequestNumber(requestType).then(r => setNextNumber(r.next_number || '')).catch(() => {});
     } else {
@@ -173,7 +198,31 @@ function CreateRequestModal({ open, onClose, onCreated }) {
   const update = (key, value) => setForm(f => ({ ...f, [key]: value }));
 
   const addStep = (stepName) => {
-    setSelectedSteps(prev => [...prev, stepName]);
+    const alias = resolveStepAlias(stepName);
+    const canonical = alias || stepName;
+    if (alias && alias.toLowerCase() !== stepName.toLowerCase()) {
+      setStepMergeWarning(`"${stepName}" is the same as "${alias}". Added as "${alias}".`);
+      setTimeout(() => setStepMergeWarning(''), 4000);
+    } else {
+      setStepMergeWarning('');
+    }
+    setSelectedSteps(prev => [...prev, canonical]);
+  };
+
+  const handleCustomStepChange = (value) => {
+    setCustomStep(value);
+    if (value.trim().length >= 1) {
+      const q = value.toLowerCase();
+      const filtered = AVAILABLE_STEPS.filter(s => s.toLowerCase().includes(q));
+      // Also add alias matches
+      const aliasMatches = Object.entries(STEP_MERGE_ALIASES)
+        .filter(([k]) => k.includes(q))
+        .map(([, v]) => v)
+        .filter(v => !filtered.includes(v));
+      setStepSuggestions([...new Set([...filtered, ...aliasMatches])].slice(0, 8));
+    } else {
+      setStepSuggestions([]);
+    }
   };
 
   const removeStep = (idx) => {
@@ -216,6 +265,22 @@ function CreateRequestModal({ open, onClose, onCreated }) {
               <option value="REL">REL</option>
               <option value="RMS">RMS</option>
             </select>
+          </div>
+          {/* RRS field */}
+          <div className="mb-4">
+            <label className="block text-xs font-medium uppercase tracking-wider text-slate-500 mb-1">RRS #</label>
+            <input
+              type="text"
+              list="rrs-suggestions-list"
+              value={form.rrs_no || ''}
+              onChange={e => update('rrs_no', e.target.value)}
+              placeholder="Enter or search RRS number..."
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm transition-all"
+              disabled={fieldsDisabled}
+            />
+            <datalist id="rrs-suggestions-list">
+              {rrsSuggestions.map(rrs => <option key={rrs} value={rrs} />)}
+            </datalist>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 opacity-" style={{ opacity: fieldsDisabled ? 0.5 : 1 }}>
             {FIELDS.map(f => (
@@ -306,24 +371,47 @@ function CreateRequestModal({ open, onClose, onCreated }) {
                 </button>
               ))}
             </div>
+            {stepMergeWarning && (
+              <div className="mb-2 px-3 py-2 bg-amber-50 border border-amber-200 text-amber-700 rounded-lg text-xs flex items-start gap-1.5">
+                <span className="mt-0.5">⚠️</span>
+                <span>{stepMergeWarning}</span>
+              </div>
+            )}
             {/* Custom step input */}
-            <div className="flex gap-2 mt-2">
-              <input
-                type="text"
-                value={customStep}
-                onChange={e => setCustomStep(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && customStep.trim()) {
-                    e.preventDefault();
-                    addStep(customStep.trim());
-                    setCustomStep('');
-                  }
-                }}
-                placeholder="Custom step name..."
-                className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 text-xs"
-                disabled={fieldsDisabled}
-              />
-              <button type="button" onClick={() => { if (customStep.trim()) { addStep(customStep.trim()); setCustomStep(''); } }}
+            <div className="flex gap-2 mt-2 relative">
+              <div className="flex-1 relative">
+                <input
+                  type="text"
+                  value={customStep}
+                  onChange={e => handleCustomStepChange(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && customStep.trim()) {
+                      e.preventDefault();
+                      addStep(customStep.trim());
+                      setCustomStep('');
+                      setStepSuggestions([]);
+                    } else if (e.key === 'Escape') {
+                      setStepSuggestions([]);
+                    }
+                  }}
+                  onBlur={() => setTimeout(() => setStepSuggestions([]), 150)}
+                  placeholder="Type to search or add custom step..."
+                  className="w-full border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 text-xs"
+                  disabled={fieldsDisabled}
+                />
+                {stepSuggestions.length > 0 && (
+                  <div className="absolute left-0 right-0 top-full z-10 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+                    {stepSuggestions.map(s => (
+                      <button key={s} type="button"
+                        onMouseDown={() => { addStep(s); setCustomStep(''); setStepSuggestions([]); }}
+                        className="w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-blue-50 hover:text-blue-700 transition-colors">
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button type="button" onClick={() => { if (customStep.trim()) { addStep(customStep.trim()); setCustomStep(''); setStepSuggestions([]); } }}
                 disabled={!customStep.trim() || fieldsDisabled}
                 className="px-3 py-1.5 bg-blue-600 text-white hover:bg-blue-700 rounded-lg text-xs font-medium disabled:opacity-50 transition-colors">
                 Add

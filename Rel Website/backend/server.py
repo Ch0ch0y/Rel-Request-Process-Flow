@@ -1,4 +1,4 @@
-﻿from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Request
+﻿from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Request, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
@@ -390,6 +390,12 @@ async def init_db():
 
     try:
         await db.execute("ALTER TABLE requests ADD COLUMN original_rr_number TEXT DEFAULT NULL")
+        await db.commit()
+    except Exception:
+        pass  # column already exists
+
+    try:
+        await db.execute("ALTER TABLE requests ADD COLUMN rrs_no TEXT DEFAULT NULL")
         await db.commit()
     except Exception:
         pass  # column already exists
@@ -819,6 +825,7 @@ class RelRequest(BaseModel):
     discontinued_by: Optional[str] = None
     discontinued_reason: Optional[str] = None
     original_rr_number: Optional[str] = None
+    rrs_no: Optional[str] = None
     steps: List[ProcessStep]
 
 class RequestCreate(BaseModel):
@@ -854,6 +861,7 @@ class RequestCreate(BaseModel):
     planner_est_end: Optional[str] = None
     planner_note: Optional[str] = None
     original_rr_number: Optional[str] = None
+    rrs_no: Optional[str] = None
     custom_steps: Optional[List[str]] = None  # e.g. ["Incoming Inspection", "Visual", "SAT"]
 
 class StepUpdate(BaseModel):
@@ -1124,7 +1132,7 @@ REQ_COLS = [
     'planner_est_start', 'planner_est_end', 'planner_note',
     'discontinued_at', 'discontinued_by', 'discontinued_reason',
     'ww', 'lc_bc', 'test_level', 'ml_qty', 'num_days', 'num_legs', 'recommit',
-    'original_rr_number',
+    'original_rr_number', 'rrs_no',
 ]
 
 def _safe_isoparse(value):
@@ -2011,6 +2019,24 @@ async def get_next_request_number(
     finally:
         await db.close()
 
+@api_router.get("/requests/rrs-suggestions")
+async def get_rrs_suggestions(
+    q: str = "",
+    current_user: User = Depends(get_current_user)
+):
+    """Return distinct RRS numbers matching the query string for autocomplete."""
+    db = await get_db()
+    try:
+        like = f"%{q}%" if q else "%"
+        cursor = await db.execute(
+            "SELECT DISTINCT rrs_no FROM requests WHERE rrs_no IS NOT NULL AND rrs_no != '' AND rrs_no LIKE ? ORDER BY rrs_no LIMIT 20",
+            (like,)
+        )
+        rows = await cursor.fetchall()
+        return [row[0] for row in rows]
+    finally:
+        await db.close()
+
 @api_router.post("/requests", response_model=RelRequest)
 async def create_request(
     request_create: RequestCreate,
@@ -2075,8 +2101,8 @@ async def create_request(
                product_hierarchy, pdl, body_size_x, body_size_y, package_thickness,
                ball_pitch, ball_count, lead_pitch, lead_count, total_ss, purpose,
                engineer_special_instruction, deadline, created_by, created_by_username,
-               created_at, updated_at, status, current_step)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               created_at, updated_at, status, current_step, rrs_no)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (request_obj.id, request_obj.request_number, request_obj.request_type,
              request_obj.classification or '', request_obj.originator or '',
              request_obj.plant or '', request_obj.device_name or '',
@@ -2089,7 +2115,7 @@ async def create_request(
              request_obj.purpose or '', request_obj.engineer_special_instruction,
              request_obj.deadline, request_obj.created_by, request_obj.created_by_username,
              request_obj.created_at.isoformat(), request_obj.updated_at.isoformat(),
-             request_obj.status, request_obj.current_step)
+             request_obj.status, request_obj.current_step, request_obj.rrs_no)
         )
 
         # Default test items and conditions for step names
@@ -2152,7 +2178,7 @@ async def get_requests(
                 'request_number', 'device_name', 'customer', 'lot_no',
                 'classification', 'originator', 'plant', 'pkg_info',
                 'product_hierarchy', 'pdl', 'total_ss', 'purpose',
-                'engineer_special_instruction', 'status',
+                'engineer_special_instruction', 'status', 'rrs_no',
             ]
             or_clauses = ' OR '.join(f"{f} LIKE ?" for f in search_fields)
             conditions.append(f"({or_clauses})")
@@ -4240,6 +4266,7 @@ async def update_request(
             'analysis_notes': 'analysis_notes',
             'planner_est_start': 'planner_est_start', 'planner_est_end': 'planner_est_end',
             'planner_note': 'planner_note',
+            'rrs_no': 'rrs_no',
         }
 
         for key, col in field_map.items():
@@ -4796,7 +4823,7 @@ async def duplicate_leg(
             await db.execute(
                 """INSERT INTO process_steps (request_id, leg, step_number, step_name, status,
                    started_at, completed_at, machine_no, rack_no, operator_id, tray_no, notes, attachments, custom_fields)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (request_id, new_leg, step_num, step_name, 'pending',
                  None, None, None, None, None, None, None, '[]', custom_fields_raw or '{}'))
 
@@ -6066,13 +6093,21 @@ def _clean_dt(v):
 @api_router.post("/requests/import")
 async def import_requests_from_excel(
     files: List[UploadFile] = File(...),
+    duplicate_actions: Optional[str] = Form(default='{}'),
     current_user: User = Depends(require_permission('import_requests'))
 ):
     """Import requests from Reliability Test Request Sheet Excel files.
-    Each .xlsx file is one request. Multiple files can be uploaded at once."""
+    Each .xlsx file is one request. Multiple files can be uploaded at once.
+    duplicate_actions: JSON string mapping filename -> 'duplicate'|'new_number' (omit to flag as duplicate for review)"""
+
+    try:
+        actions: Dict[str, str] = json.loads(duplicate_actions or '{}')
+    except Exception:
+        actions = {}
 
     results_created = []
     results_errors = []
+    results_duplicates = []
 
     for file in files:
         fname = file.filename or 'unknown'
@@ -6143,11 +6178,29 @@ async def import_requests_from_excel(
                 "SELECT id FROM requests WHERE request_number = ?", (request_number,)
             )
             if await dup_cursor.fetchone():
-                results_errors.append({
-                    'file': fname,
-                    'errors': [f"Request '{request_number}' already exists in the system."]
-                })
-                continue
+                action = actions.get(fname)
+                if action == 'duplicate':
+                    # Find a unique suffix: try -DUP, -DUP-2, -DUP-3 …
+                    suffix = 1
+                    while True:
+                        candidate = f"{request_number}-DUP" if suffix == 1 else f"{request_number}-DUP-{suffix}"
+                        chk = await db.execute("SELECT id FROM requests WHERE request_number = ?", (candidate,))
+                        if not await chk.fetchone():
+                            request_number = candidate
+                            request_data['request_number'] = request_number
+                            break
+                        suffix += 1
+                elif action == 'new_number':
+                    request_number = auto_rel_number
+                    request_data['request_number'] = request_number
+                else:
+                    # No action specified — return to frontend for user resolution
+                    results_duplicates.append({
+                        'file': fname,
+                        'request_number': request_data.get('request_number', request_number),
+                        'device_name': request_data.get('device_name', ''),
+                    })
+                    continue
 
             steps = [ProcessStep(**step) for step in DEFAULT_STEPS]
             request_data['status'] = 'incoming'
@@ -6246,19 +6299,28 @@ async def import_requests_from_excel(
         'failed': len(results_errors),
         'created_requests': results_created,
         'errors': results_errors,
+        'duplicates': results_duplicates,
     }
 
 
 @api_router.post("/requests/import-word")
 async def import_requests_from_word(
     files: List[UploadFile] = File(...),
+    duplicate_actions: Optional[str] = Form(default='{}'),
     current_user: User = Depends(require_permission('import_requests'))
 ):
     """Import requests from Word Reliability Test Traveller (.docx) files.
-    Each .docx file is treated as one request. Multiple files can be uploaded at once."""
+    Each .docx file is treated as one request. Multiple files can be uploaded at once.
+    duplicate_actions: JSON string mapping filename -> 'duplicate'|'new_number' (omit to flag as duplicate for review)"""
+
+    try:
+        actions: Dict[str, str] = json.loads(duplicate_actions or '{}')
+    except Exception:
+        actions = {}
 
     results_created = []
     results_errors = []
+    results_duplicates = []
 
     for file in files:
         fname = file.filename or 'unknown'
@@ -6309,11 +6371,29 @@ async def import_requests_from_word(
                 "SELECT id FROM requests WHERE request_number = ?", (request_number,)
             )
             if await dup_cursor.fetchone():
-                results_errors.append({
-                    'file': fname,
-                    'errors': [f"Request '{request_number}' already exists in the system."]
-                })
-                continue
+                action = actions.get(fname)
+                if action == 'duplicate':
+                    # Find a unique suffix: try -DUP, -DUP-2, -DUP-3 …
+                    suffix = 1
+                    while True:
+                        candidate = f"{request_number}-DUP" if suffix == 1 else f"{request_number}-DUP-{suffix}"
+                        chk = await db.execute("SELECT id FROM requests WHERE request_number = ?", (candidate,))
+                        if not await chk.fetchone():
+                            request_number = candidate
+                            request_data['request_number'] = request_number
+                            break
+                        suffix += 1
+                elif action == 'new_number':
+                    request_number = auto_rms_number
+                    request_data['request_number'] = request_number
+                else:
+                    # No action specified — return to frontend for user resolution
+                    results_duplicates.append({
+                        'file': fname,
+                        'request_number': request_data.get('request_number', request_number),
+                        'device_name': request_data.get('device_name', ''),
+                    })
+                    continue
 
             steps = [ProcessStep(**step) for step in DEFAULT_STEPS]
             request_data['request_type'] = 'RMS'
@@ -6411,6 +6491,7 @@ async def import_requests_from_word(
         'failed': len(results_errors),
         'created_requests': results_created,
         'errors': results_errors,
+        'duplicates': results_duplicates,
     }
 
 

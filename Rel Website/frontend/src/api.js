@@ -90,6 +90,7 @@ class ApiClient {
   }
   getRequest(id) { return this.get(`/requests/${id}`); }
   getNextRequestNumber(request_type = 'REL') { return this.get(`/requests/next-number?request_type=${encodeURIComponent(request_type)}`); }
+  getRrsSuggestions(q = '') { return this.get(`/requests/rrs-suggestions?q=${encodeURIComponent(q)}`); }
   createRequest(data) { return this.post('/requests', data); }
   updateRequest(id, data) { return this.patch(`/requests/${id}`, data); }
   deleteRequest(id) { return this.delete(`/requests/${id}`); }
@@ -138,10 +139,13 @@ class ApiClient {
   completeReport(id, notes) { return this.post(`/requests/${id}/complete-report`, { notes }); }
 
   // Import
-  async importExcel(files) {
+  async importExcel(files, duplicateActions = {}) {
     const formData = new FormData();
     for (const file of files) {
       formData.append('files', file);
+    }
+    if (Object.keys(duplicateActions).length > 0) {
+      formData.append('duplicate_actions', JSON.stringify(duplicateActions));
     }
     const headers = {};
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
@@ -153,10 +157,13 @@ class ApiClient {
     return res.json();
   }
 
-  async importWord(files) {
+  async importWord(files, duplicateActions = {}) {
     const formData = new FormData();
     for (const file of files) {
       formData.append('files', file);
+    }
+    if (Object.keys(duplicateActions).length > 0) {
+      formData.append('duplicate_actions', JSON.stringify(duplicateActions));
     }
     const headers = {};
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
