@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Loader2, Trash2, Eye } from 'lucide-react';
+import { X, Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Loader2, Trash2, Eye, Copy } from 'lucide-react';
 import api from '../api';
 
 const STEPS = {
   UPLOAD: 'upload',
   PREVIEW: 'preview',
   PROCESSING: 'processing',
+  DUPLICATE: 'duplicate',
   RESULTS: 'results',
 };
 
@@ -16,6 +17,8 @@ export default function ImportAgileModal({ open, onClose, onImported }) {
   const [error, setError] = useState('');
   const [preview, setPreview] = useState(null);
   const [result, setResult] = useState(null);
+  const [duplicateRR, setDuplicateRR] = useState('');
+  const [duplicateAction, setDuplicateAction] = useState(null);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -33,6 +36,8 @@ export default function ImportAgileModal({ open, onClose, onImported }) {
     setError('');
     setPreview(null);
     setResult(null);
+    setDuplicateRR('');
+    setDuplicateAction(null);
   };
 
   const handleClose = () => { reset(); onClose(); };
@@ -85,19 +90,33 @@ export default function ImportAgileModal({ open, onClose, onImported }) {
   };
 
   // ── Step 2: Confirm & import ─────────────────────────────────────────────────
-  const handleImport = async () => {
+  const handleImport = async (action = null) => {
     if (!file) return;
     setStep(STEPS.PROCESSING);
     setError('');
     try {
-      const res = await api.importAgileExcel(file);
+      const res = await api.importAgileExcel(file, action);
       setResult(res);
       setStep(STEPS.RESULTS);
       if (res.request_number) onImported();
     } catch (err) {
-      setError(err.message || 'Import failed.');
-      setStep(STEPS.PREVIEW);
+      if (err.status === 409) {
+        // Extract the RR# from the error message: "Request 'XXXX' already exists"
+        const m = err.message.match(/'([^']+)'/);
+        setDuplicateRR(m ? m[1] : preview?.request_number || '');
+        setDuplicateAction(null);
+        setStep(STEPS.DUPLICATE);
+      } else {
+        setError(err.message || 'Import failed.');
+        setStep(STEPS.PREVIEW);
+      }
     }
+  };
+
+  const handleResolveDuplicate = () => {
+    if (!duplicateAction) return;
+    if (duplicateAction === 'cancel') { setStep(STEPS.PREVIEW); return; }
+    handleImport(duplicateAction);
   };
 
   // ── Preview table helper ─────────────────────────────────────────────────────
@@ -260,6 +279,66 @@ export default function ImportAgileModal({ open, onClose, onImported }) {
             </div>
           )}
 
+          {/* ── DUPLICATE ── */}
+          {step === STEPS.DUPLICATE && (
+            <div className="space-y-5">
+              <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-amber-800">Request already exists</p>
+                  <p className="text-sm text-amber-700 mt-0.5">
+                    <span className="font-mono font-bold">{duplicateRR}</span> is already in the system.
+                    How would you like to proceed?
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                {/* Duplicate */}
+                <button
+                  onClick={() => setDuplicateAction('duplicate')}
+                  className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all text-center ${
+                    duplicateAction === 'duplicate'
+                      ? 'border-violet-500 bg-violet-50 text-violet-800'
+                      : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <Copy className="w-5 h-5" />
+                  <span className="text-sm font-semibold">Duplicate</span>
+                  <span className="text-xs text-slate-500 leading-tight">Save as {duplicateRR}-DUP</span>
+                </button>
+
+                {/* New Number */}
+                <button
+                  onClick={() => setDuplicateAction('new_number')}
+                  className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all text-center ${
+                    duplicateAction === 'new_number'
+                      ? 'border-emerald-500 bg-emerald-50 text-emerald-800'
+                      : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <FileSpreadsheet className="w-5 h-5" />
+                  <span className="text-sm font-semibold">New Number</span>
+                  <span className="text-xs text-slate-500 leading-tight">Auto-assign new REL#</span>
+                </button>
+
+                {/* Cancel */}
+                <button
+                  onClick={() => setDuplicateAction('cancel')}
+                  className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all text-center ${
+                    duplicateAction === 'cancel'
+                      ? 'border-red-400 bg-red-50 text-red-700'
+                      : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <X className="w-5 h-5" />
+                  <span className="text-sm font-semibold">Cancel</span>
+                  <span className="text-xs text-slate-500 leading-tight">Go back to preview</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* ── RESULTS ── */}
           {step === STEPS.RESULTS && result && (
             <div className="flex flex-col items-center justify-center py-10 gap-4 text-center">
@@ -309,9 +388,24 @@ export default function ImportAgileModal({ open, onClose, onImported }) {
                 className="px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200 rounded-lg transition-colors">
                 Back
               </button>
-              <button onClick={handleImport}
+              <button onClick={() => handleImport(null)}
                 className="inline-flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium rounded-lg transition-colors">
                 <Upload className="w-4 h-4" /> Import Request
+              </button>
+            </>
+          )}
+
+          {step === STEPS.DUPLICATE && (
+            <>
+              <button onClick={() => setStep(STEPS.PREVIEW)}
+                className="px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200 rounded-lg transition-colors">
+                Back
+              </button>
+              <button
+                onClick={handleResolveDuplicate}
+                disabled={!duplicateAction}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors">
+                Confirm
               </button>
             </>
           )}
