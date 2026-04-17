@@ -2204,7 +2204,7 @@ async def create_request(
             await db.execute(
                 """INSERT INTO process_steps (request_id, leg, step_number, step_name, status,
                    started_at, completed_at, machine_no, rack_no, operator_id, tray_no, notes, attachments, custom_fields)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (request_obj.id, 1, step.step_number, step.step_name, step.status.value,
                  step.started_at.isoformat() if step.started_at else None,
                  step.completed_at.isoformat() if step.completed_at else None,
@@ -4912,7 +4912,7 @@ async def add_leg(
             await db.execute(
                 """INSERT INTO process_steps (request_id, leg, step_number, step_name, status,
                    started_at, completed_at, machine_no, rack_no, operator_id, tray_no, notes, attachments, custom_fields)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (request_id, new_leg, i + 1, step_name, 'pending',
                  None, None, None, None, None, None, None, '[]', '{}'))
 
