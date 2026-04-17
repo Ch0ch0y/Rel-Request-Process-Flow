@@ -10174,7 +10174,7 @@ async def _load_relmon_sheet_names_for_site(site: str) -> tuple[list[str], str]:
             wb.close()
 
 
-_DOCS_LIST_DIR = ROOT_DIR.parent.parent / "Docs List"
+_DOCS_LIST_DIR = Path(__file__).resolve().parent.parent.parent / "Docs List"
 
 _CUSTOMER_LIST_FILE = _DOCS_LIST_DIR / "Customer List.xls"
 _customer_list_cache: list[dict] | None = None
