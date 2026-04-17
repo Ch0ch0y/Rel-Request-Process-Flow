@@ -1,4 +1,4 @@
-﻿from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Request, Form
+﻿from fastapi import FastAPI, APIRouter, BackgroundTasks, HTTPException, Depends, status, UploadFile, File, Request, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
@@ -114,7 +114,19 @@ load_dotenv(ROOT_DIR / '.env')
 DB_PATH = os.environ.get('DB_PATH', str(ROOT_DIR / 'rel_database.db'))
 
 # JWT Configuration
-SECRET_KEY = os.environ.get('JWT_SECRET', 'your-secret-key-change-in-production')
+import secrets as _secrets
+_JWT_DEFAULT = 'your-secret-key-change-in-production'
+SECRET_KEY = os.environ.get('JWT_SECRET', _JWT_DEFAULT)
+if SECRET_KEY == _JWT_DEFAULT:
+    if os.environ.get('ENVIRONMENT', '').lower() == 'production':
+        raise RuntimeError(
+            "FATAL: JWT_SECRET is still set to the default insecure value. "
+            "Set the JWT_SECRET environment variable before starting in production."
+        )
+    logging.warning(
+        "⚠️  SECURITY: JWT_SECRET is using the default insecure key. "
+        "Set the JWT_SECRET environment variable for production use."
+    )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 
@@ -134,6 +146,7 @@ async def get_db():
     db.row_factory = aiosqlite.Row
     await db.execute("PRAGMA journal_mode=WAL")
     await db.execute("PRAGMA foreign_keys=ON")
+    await db.execute("PRAGMA busy_timeout=5000")
     return db
 
 async def init_db():
@@ -413,6 +426,13 @@ async def init_db():
     except Exception:
         pass  # columns already exist
 
+    # Add test_matrix_json column if missing (stores Agile RSS test matrix rows per leg)
+    try:
+        await db.execute("ALTER TABLE requests ADD COLUMN test_matrix_json TEXT DEFAULT NULL")
+        await db.commit()
+    except Exception:
+        pass  # column already exists
+
     # Add request_type column if missing
     try:
         await db.execute("ALTER TABLE requests ADD COLUMN request_type TEXT DEFAULT 'REL'")
@@ -579,14 +599,15 @@ async def init_db():
     cursor = await db.execute("SELECT id FROM users WHERE email = ?", ("admin@amkor.com",))
     if not await cursor.fetchone():
         admin_id = str(uuid.uuid4())
-        admin_pw = hash_password("Adminn")
+        _initial_pw = _secrets.token_urlsafe(12)
+        admin_pw = hash_password(_initial_pw)
         now = datetime.now(timezone.utc).isoformat()
         await db.execute(
             "INSERT INTO users (id, email, username, password, role, approved, created_at) VALUES (?,?,?,?,?,?,?)",
             (admin_id, "admin@amkor.com", "Admin", admin_pw, "Admin", 1, now)
         )
         await db.commit()
-        logging.info("Default admin account created: admin@amkor.com")
+        logging.warning(f"\U0001f511 Default admin created. Email: admin@amkor.com  Password: {_initial_pw}  \u2190 CHANGE THIS PASSWORD IMMEDIATELY!")
 
     # --- Seed default role permissions ---
     ALL_PERMISSIONS = [
@@ -1132,7 +1153,7 @@ REQ_COLS = [
     'planner_est_start', 'planner_est_end', 'planner_note',
     'discontinued_at', 'discontinued_by', 'discontinued_reason',
     'ww', 'lc_bc', 'test_level', 'ml_qty', 'num_days', 'num_legs', 'recommit',
-    'original_rr_number', 'rrs_no',
+    'original_rr_number', 'rrs_no', 'test_matrix_json',
 ]
 
 def _safe_isoparse(value):
@@ -1205,7 +1226,15 @@ async def register(user_create: UserCreate):
         await db.close()
 
 @api_router.post("/auth/login", response_model=Token)
-async def login(user_login: UserLogin):
+async def login(user_login: UserLogin, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    _now = _time.time()
+    _win_start = _now - _LOGIN_WINDOW
+    _bucket = _login_attempts[client_ip]
+    _bucket[:] = [t for t in _bucket if t > _win_start]
+    if len(_bucket) >= _LOGIN_MAX:
+        raise HTTPException(status_code=429, detail="Too many login attempts. Please wait 5 minutes before trying again.")
+    _bucket.append(_now)
     db = await get_db()
     try:
         cursor = await db.execute(
@@ -1579,15 +1608,51 @@ async def toggle_block_user(user_id: str, current_user: User = Depends(require_r
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
     new_password: str
+    reset_token: str  # server-issued one-time token
+
+# In-memory store for password-reset tokens: {token: (email, expires_ts)}
+_reset_tokens: dict = {}
+
+@api_router.post("/auth/request-reset")
+async def request_password_reset(body: dict, request: Request):
+    """Issue a one-time reset token for the given email (valid 15 minutes)."""
+    email = (body.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required")
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT id FROM users WHERE LOWER(email) = ?", (email,))
+        row = await cursor.fetchone()
+    finally:
+        await db.close()
+    # Always return 200 to avoid email enumeration
+    if row:
+        token = _secrets.token_urlsafe(32)
+        _reset_tokens[token] = (email, _time.time() + 900)  # 15 min
+        logging.info(f"Password reset token issued for {email} (token omitted from logs)")
+        return {"reset_token": token}
+    return {"reset_token": None, "message": "If that email is registered, a reset token was issued."}
 
 @api_router.post("/auth/forgot-password")
 async def forgot_password(body: ForgotPasswordRequest):
-    """Reset password for the given email. Math verification is handled client-side."""
-    if len(body.new_password) < 6:
-        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+    """Reset password using a valid server-issued reset token."""
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
+    # Validate the reset token
+    entry = _reset_tokens.get(body.reset_token)
+    if not entry:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token. Please request a new one.")
+    stored_email, expires_ts = entry
+    if _time.time() > expires_ts:
+        _reset_tokens.pop(body.reset_token, None)
+        raise HTTPException(status_code=400, detail="Reset token has expired. Please request a new one.")
+    if stored_email.lower() != body.email.strip().lower():
+        raise HTTPException(status_code=400, detail="Invalid reset token for this email.")
+    # Consume the token (one-time use)
+    _reset_tokens.pop(body.reset_token, None)
     db = await get_db()
     try:
-        cursor = await db.execute("SELECT id FROM users WHERE email = ?", (body.email,))
+        cursor = await db.execute("SELECT id FROM users WHERE LOWER(email) = ?", (body.email.strip().lower(),))
         row = await cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="No account found with that email address")
@@ -3552,59 +3617,128 @@ def _generate_ltc_excel(req: dict) -> bytes:  # noqa: C901
 
     # ── TEST MATRIX ────────────────────────────────────────────────────────────
     row = 26
-    for lot_idx, lot_n in enumerate(lots):
-        lot_label  = f"Lot {lot_idx + 1}"
-        odd_leg_n  = lot_idx * 2 + 1
-        even_leg_n = lot_idx * 2 + 2
+    _tm_json_raw = req.get('test_matrix_json')
+    _agile_tm = []
+    if _tm_json_raw:
+        try:
+            _agile_tm = json.loads(_tm_json_raw) if isinstance(_tm_json_raw, str) else _tm_json_raw
+        except Exception:
+            _agile_tm = []
 
-        odd_normal  = [s for s in legs.get(odd_leg_n,  []) if not _is_rr_step(s) and not _is_footer_step(s)]
-        even_normal = [s for s in legs.get(even_leg_n, []) if not _is_rr_step(s) and not _is_footer_step(s)]
-
-        if odd_normal:
-            tnh  = _find_step(odd_normal, "T&H")
-            refl = _find_step(odd_normal, "Reflow")
-            _wv(row, 2,  str(odd_leg_n))
-            _wv(row, 3,  lot_n)
-            _wv(row, 4,  lot_label)
-            _wv(row, 6,  "MRT")
-            _wv(row, 8,  "L3")
-            _wv(row, 10, _tc(tnh)  if tnh  else "")
-            _wv(row, 13, _tc(refl) if refl else "")
-            _wv(row, 18, "X")
-            _wv(row, 20, total_ss)
+    # Use test_matrix_json only when it covers all legs; otherwise reconstruct per-leg from steps
+    if _agile_tm and len(_agile_tm) >= len(leg_nums):
+        # Complete Agile test matrix: render rows directly from stored data
+        for tr in _agile_tm:
+            _leg_n = tr.get('leg_num', '')
+            _wv(row, 2,  str(_leg_n) if _leg_n else '')
+            _wv(row, 3,  tr.get('lot_no', ''))
+            _wv(row, 4,  tr.get('leg_label', ''))
+            _wv(row, 6,  tr.get('test_type', ''))
+            _wv(row, 8,  tr.get('test_item', ''))
+            _wv(row, 10, tr.get('test_condition', ''))
+            _wv(row, 13, tr.get('reading_point', ''))
+            if tr.get('e_l'):  _wv(row, 16, 'X')
+            if tr.get('o_s'):  _wv(row, 17, 'X')
+            if tr.get('sat'):  _wv(row, 18, 'X')
+            if tr.get('ca'):   _wv(row, 19, 'X')
+            _ss = tr.get('ss')
+            if _ss is not None:
+                _wv(row, 20, str(_ss))
             _style_matrix_row(row)
             row += 1
 
-        if even_normal:
-            tnh_e  = _find_step(even_normal, "T&H")
-            refl_e = _find_step(even_normal, "Reflow")
-            tc_s   = _find_step(even_normal, "T/C B", "T/C C", "T/C")
-            _wv(row, 2,  str(even_leg_n))
-            _wv(row, 3,  lot_n)
-            _wv(row, 4,  lot_label)
-            _wv(row, 6,  "Precon")
-            _wv(row, 8,  "L3")
-            _wv(row, 10, _tc(tnh_e)  if tnh_e  else "")
-            _wv(row, 13, _tc(refl_e) if refl_e else "")
-            _wv(row, 17, "X")
-            _wv(row, 18, "X")
-            _wv(row, 20, total_ss)
+    elif leg_nums:
+        # Reconstruct one test matrix row per leg from stored process steps.
+        # This handles: Agile imports with incomplete/missing test_matrix_json,
+        # and manually-created requests with any number of legs.
+        # Build lot_no / leg_label lookup from any partial test_matrix_json data.
+        _tm_lot_map   = {tr['leg_num']: tr.get('lot_no',    '') for tr in _agile_tm if tr.get('leg_num')}
+        _tm_other_map = {tr['leg_num']: tr.get('leg_label', '') for tr in _agile_tm if tr.get('leg_num')}
+        _default_lot  = lots[0] if lots else ''
+
+        for leg_num in leg_nums:
+            leg_steps_all = legs[leg_num]
+            leg_normal = [s for s in leg_steps_all
+                          if not _is_rr_step(s) and not _is_footer_step(s)]
+            if not leg_normal:
+                continue
+
+            # Identify characteristic test steps
+            mrt_s    = _find_step(leg_normal, 'Moisture Resistance Test')
+            precon_s = _find_step(leg_normal, 'Preconditioning (Precon)')
+            rel_s    = _find_step(leg_normal, 'Reliability Test')
+
+            mrt_cf    = (mrt_s.get('custom_fields')    or {}) if mrt_s    else {}
+            precon_cf = (precon_s.get('custom_fields') or {}) if precon_s else {}
+            rel_cf    = (rel_s.get('custom_fields')    or {}) if rel_s    else {}
+
+            # Infer test_type from which step has populated custom_fields
+            if mrt_cf.get('test_condition') or mrt_cf.get('test_item'):
+                test_type = 'MRT'
+                test_item = mrt_cf.get('test_item', '')
+                test_cond = mrt_cf.get('test_condition', '')
+                read_pt   = mrt_cf.get('read_points', '')
+            elif precon_cf.get('test_condition') or precon_cf.get('test_item'):
+                test_type = 'Precon'
+                test_item = precon_cf.get('test_item', '')
+                test_cond = precon_cf.get('test_condition', '')
+                read_pt   = precon_cf.get('read_points', '')
+            elif rel_cf.get('test_condition') or rel_cf.get('test_item'):
+                test_type = 'RelWithPrecon'
+                test_item = rel_cf.get('test_item', '')
+                test_cond = rel_cf.get('test_condition', '')
+                read_pt   = rel_cf.get('read_points', '')
+            elif rel_s:
+                # REL Only: Reliability Test step present but no CF stored (older import)
+                test_type = 'REL Only'
+                test_item = ''
+                test_cond = ''
+                read_pt   = ''
+            else:
+                # Manual request fallback: infer from step presence
+                tnh  = _find_step(leg_normal, 'T&H', 'T & H Soak')
+                refl = _find_step(leg_normal, 'Reflow', 'Forced Convection Reflow')
+                _has_mrt_step = bool(_find_step(leg_normal, 'Moisture Resistance Test'))
+                test_type = 'MRT' if _has_mrt_step else ('Precon' if tnh else '')
+                test_item = 'L3'
+                test_cond = _tc(tnh)  if tnh  else ''
+                read_pt   = _tc(refl) if refl else ''
+
+            leg_has_el  = any(s.get('step_name', '') in ('E/L', 'Electrical Test')
+                              for s in leg_normal)
+            leg_has_os  = any(s.get('step_name') == 'O/S'  for s in leg_normal)
+            leg_has_sat = any(s.get('step_name') == 'SAT'  for s in leg_normal)
+            leg_has_ca  = any(s.get('step_name') in ('CA', 'C/A') for s in leg_normal)
+
+            # SS: use per-step qty_in, fall back to request total_ss
+            ss_val = ''
+            for _s in leg_normal:
+                if _s.get('qty_in') is not None:
+                    try:
+                        ss_val = str(int(_s['qty_in']))
+                        break
+                    except (ValueError, TypeError):
+                        pass
+            if not ss_val:
+                ss_val = total_ss
+
+            leg_lot   = _tm_lot_map.get(leg_num, _default_lot)
+            leg_other = _tm_other_map.get(leg_num, '')
+
+            _wv(row, 2,  str(leg_num))
+            _wv(row, 3,  leg_lot)
+            _wv(row, 4,  leg_other)
+            _wv(row, 6,  test_type)
+            _wv(row, 8,  test_item)
+            _wv(row, 10, test_cond)
+            _wv(row, 13, read_pt)
+            if leg_has_el:  _wv(row, 16, 'X')
+            if leg_has_os:  _wv(row, 17, 'X')
+            if leg_has_sat: _wv(row, 18, 'X')
+            if leg_has_ca:  _wv(row, 19, 'X')
+            if ss_val:      _wv(row, 20, ss_val)
             _style_matrix_row(row)
             row += 1
-
-            if tc_s:
-                _wv(row, 2,  str(even_leg_n))
-                _wv(row, 3,  lot_n)
-                _wv(row, 4,  lot_label)
-                _wv(row, 6,  "RelWithPrecon")
-                _wv(row, 8,  tc_s.get("step_name", "T/C B"))
-                _wv(row, 10, _tc(tc_s))
-                _wv(row, 13, "1000X")
-                _wv(row, 17, "X")
-                _wv(row, 18, "X")
-                _wv(row, 20, total_ss)
-                _style_matrix_row(row)
-                row += 1
 
     # ── blank + Page 1 indicator ───────────────────────────────────────────────
     traveller_legs = [n for n in leg_nums
@@ -3846,11 +3980,18 @@ async def download_ltc_report(
         raise HTTPException(status_code=500, detail=f"LTC generation failed: {str(e)}")
 
     rr = req.get("request_number", request_id)
-    filename = f"LTC_{rr}.xlsx"
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"LTC_{rr}_{ts}.xlsx"
     return StreamingResponse(
         io.BytesIO(excel_bytes),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "X-LTC-Generated-At": ts,
+        }
     )
 
 
@@ -3944,6 +4085,7 @@ async def download_step_report(
 
 @api_router.get('/reports/presentation')
 async def download_presentation_report(
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user)
 ):
     """Generate and download the project timeline overview PowerPoint presentation."""
@@ -3971,6 +4113,7 @@ async def download_presentation_report(
         logging.error(f"Presentation generation failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail='Presentation generation failed')
 
+    background_tasks.add_task(os.unlink, pptx_path)
     return FileResponse(
         pptx_path,
         media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation',
@@ -5308,14 +5451,34 @@ async def public_stats():
     finally:
         await db.close()
 
+import time as _time
+from collections import defaultdict as _defaultdict
+_tech_code_attempts: dict = _defaultdict(list)
+_TECH_CODE_MAX = 10
+_TECH_CODE_WINDOW = 60  # seconds per rate-limit window
+
+_login_attempts: dict = _defaultdict(list)
+_LOGIN_MAX = 10
+_LOGIN_WINDOW = 300  # 5-minute sliding window
+
 @api_router.post("/verify-tech-code")
-async def verify_tech_code(data: dict):
+async def verify_tech_code(data: dict, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    now_ts = _time.time()
+    window_start = now_ts - _TECH_CODE_WINDOW
+    bucket = _tech_code_attempts[client_ip]
+    bucket[:] = [t for t in bucket if t > window_start]
+    if len(bucket) >= _TECH_CODE_MAX:
+        raise HTTPException(status_code=429, detail="Too many attempts. Please wait before trying again.")
+    bucket.append(now_ts)
     code = data.get("code", "")
     db = await get_db()
     try:
         cursor = await db.execute("SELECT tech_auth_code FROM settings WHERE id = 1")
         row = await cursor.fetchone()
-        stored = row[0] if row and row[0] else "735522"
+        stored = row[0] if row and row[0] else None
+        if stored is None:
+            return {"valid": False}
         return {"valid": code == stored}
     finally:
         await db.close()
@@ -7008,21 +7171,31 @@ def _parse_agile_excel(contents: bytes) -> dict:
             break
 
     # ── Test Matrix block ─────────────────────────────────────────────────
-    # Scan every worksheet for the Test Matrix header; prefer the first sheet
-    # that contains one.  The Agile RSS Report has the same matrix in both
-    # 'Agile Export Report0' and 'Agile Export Report1' — whichever is found
-    # first is used.  This also ensures that files where sheet 0 lacks the
-    # header (rare variant exports) still parse correctly.
+    # Scan EVERY worksheet for a Test Matrix header and pick the sheet that
+    # has the most data rows.  Agile RSS exports often have multiple sheets
+    # (Agile Export Report0, Report1, …) where the first sheet may contain
+    # only a partial / summary matrix while a later sheet holds the full
+    # 24-leg table.  Choosing by row-count ensures we always get the richest
+    # data regardless of sheet order.
     matrix_header_row = None
     _matrix_ws = None
     _matrix_cm = None
+    _best_row_count = -1
     for _sheet in wb.worksheets:
         _hrow, _cmap = _find_matrix_header(_sheet)
-        if _hrow is not None:
+        if _hrow is None:
+            continue
+        # Count non-empty data rows after the header
+        _data_rows = sum(
+            1 for _r in range(_hrow + 1, _sheet.max_row + 1)
+            if any(_sheet.cell(row=_r, column=_c).value is not None
+                   for _c in range(1, min(_sheet.max_column + 1, 20)))
+        )
+        if _data_rows > _best_row_count:
+            _best_row_count   = _data_rows
             matrix_header_row = _hrow
-            _matrix_ws = _sheet
-            _matrix_cm = _cmap
-            break
+            _matrix_ws        = _sheet
+            _matrix_cm        = _cmap
 
     if matrix_header_row is None:
         errors.append('Could not find Test Matrix header row in the Excel file.')
@@ -7062,42 +7235,109 @@ def _parse_agile_excel(contents: bytes) -> dict:
         return str(val).strip() if val is not None else ''
 
     # ── Parse test matrix data rows ───────────────────────────────────────
-    # Leg labels may be plain integers OR free-form text such as "Leg 1",
-    # "T0 LL", "MSL3", "MSL3 + TC500", etc.  We collect them in order and
-    # map each unique label to a sequential integer so downstream code that
-    # expects integer leg numbers continues to work.
-    leg_label_to_num: dict = {}   # label str → sequential int (1-based)
-    legs_map: dict = {}            # leg_num (int) → dict
+    # ── Data row scanning strategy ────────────────────────────────────────
+    #
+    # Agile RSS reports export test matrix rows in two distinct layouts:
+    #
+    #   LAYOUT A — one row per leg (numeric leg IDs in col B)
+    #     col A:  sequential counter  → same as col B leg number
+    #     col B:  leg number          → unique per row ("1","2","3"...)
+    #     col C:  Assy Lot No         → actual lot ID
+    #     RR00143476 (15 legs × 1 item) is this layout.
+    #
+    #   LAYOUT B — many rows per lot-group (lot name in col B)
+    #     col A:  sequential counter  → globally unique row number (1…N)
+    #     col B:  Leg/lot group name  → repeats for all rows in a lot
+    #     col C:  Assy Lot No         → actual lot ID
+    #     RR00139248 (24 rows, 2 lot groups) is this layout.
+    #
+    # In BOTH layouts the physically meaningful "leg" that RELDMS tracks
+    # is each INDIVIDUAL TEST ROW — a row represents a distinct test setup
+    # (its own test item, condition, reading point, SS quantity) that runs
+    # as one traveller in the lab.  The col-B lot-group name is metadata
+    # (the "leg label") that tells you which lot the row belongs to.
+    #
+    # Therefore: use the sequential counter in col A as the primary leg key.
+    # This correctly gives 24 legs for RR00139248 and 15 for RR00143476.
+    #
+    # Termination: the test matrix section always ends before a blank row
+    # (Agile puts blank spacers between sections).  Stop immediately on any
+    # row where col A, col B, AND the test-type/item columns are all empty
+    # — this prevents picking up the "6.0 TEST RESULTS" header rows that
+    # follow the matrix in some exports.
+    #
+    # Guard: skip secondary header rows where col-B contains the literal
+    # text "Leg" or "Assy Lot No" (i.e. we accidentally hit a second
+    # header block such as the SAT/O-S results table).
+
+    leg_label_to_num: dict = {}   # key str → sequential int (1-based)
+    legs_map: dict = {}
 
     for r in range(matrix_header_row + 1, _matrix_ws.max_row + 1):
         c1      = _mcv(r, 1)
         leg_val = _mcv(r, col_leg) if col_leg else ''
-        # Skip completely blank rows
-        if not leg_val and not c1:
-            continue
-        # A row where leg_val is empty but c1 has a value is also a data row
-        # (sequential counter in col A with leg label in col B already read).
-        # If leg_val itself is empty, skip – there is nothing to group by.
-        if not leg_val:
+
+        # ── Termination: blank row signals end of the matrix block ────────
+        type_val_check = _mcv(r, col_test_type)
+        item_val_check = _mcv(r, col_test_item)
+        row_is_blank   = not c1 and not leg_val and not type_val_check and not item_val_check
+        if row_is_blank:
+            break   # Agile test matrix ends here; anything below is results/comments
+
+        # ── Guard: skip secondary header rows ─────────────────────────────
+        # A row whose col-B value is literally "Leg" or "Assy Lot No" is a
+        # results-section header, not a data row.
+        if leg_val.lower() in ('leg', 'assy lot no', 'leg no', 'leg no.'):
+            break
+
+        # ── Determine the leg key ─────────────────────────────────────────
+        # Prefer the sequential counter in col A (when numeric) as the leg
+        # identifier.  This expands lot-group rows (Layout B) into individual
+        # legs.  Fall back to the col-B leg label when col A is absent.
+        try:
+            c1_num = int(float(c1)) if c1 else None
+        except (ValueError, TypeError):
+            c1_num = None
+
+        if c1_num is not None:
+            # Layout A or B: each row is a separate leg.
+            # col B (the "Leg" header column) becomes the leg_label (lot name).
+            # col C (Assy Lot No) becomes the actual lot ID.
+            leg_key    = str(c1_num)
+            leg_label  = leg_val                    # lot group / descriptive label
+            lot_val    = _mcv(r, col_lot)
+            other_val  = _mcv(r, col_other)
+            target_val = _mcv(r, col_target)
+        elif leg_val:
+            # No sequential counter — use col B as the grouping key
+            # (e.g. files where col A is truly empty but col B has unique labels)
+            leg_key    = leg_val
+            leg_label  = leg_val
+            lot_val    = _mcv(r, col_lot)
+            other_val  = _mcv(r, col_other)
+            target_val = _mcv(r, col_target)
+        else:
+            # Completely empty identifying columns — skip
             continue
 
-        # Map text leg labels to sequential integers (preserving first-seen order)
-        if leg_val not in leg_label_to_num:
-            leg_label_to_num[leg_val] = len(leg_label_to_num) + 1
-        leg_num = leg_label_to_num[leg_val]
+        # Skip rows with no test content (lot-header-only rows)
+        if not item_val_check and not type_val_check:
+            continue
 
-        lot_val    = _mcv(r, col_lot)
-        other_val  = _mcv(r, col_other)
-        target_val = _mcv(r, col_target)
-        type_val   = _mcv(r, col_test_type)
-        item_val   = _mcv(r, col_test_item)
-        cond_val   = _mcv(r, col_condition)
-        read_val   = _mcv(r, col_reading)
-        el_val     = _mcv(r, col_el)
-        os_val     = _mcv(r, col_os)
-        sat_val    = _mcv(r, col_sat)
-        ca_val     = _mcv(r, col_ca)
-        ss_val     = _mcv(r, col_ss)
+        # Map leg key → sequential integer
+        if leg_key not in leg_label_to_num:
+            leg_label_to_num[leg_key] = len(leg_label_to_num) + 1
+        leg_num = leg_label_to_num[leg_key]
+
+        type_val = _mcv(r, col_test_type)
+        item_val = _mcv(r, col_test_item)
+        cond_val = _mcv(r, col_condition)
+        read_val = _mcv(r, col_reading)
+        el_val   = _mcv(r, col_el)
+        os_val   = _mcv(r, col_os)
+        sat_val  = _mcv(r, col_sat)
+        ca_val   = _mcv(r, col_ca)
+        ss_val   = _mcv(r, col_ss)
 
         row_data = {
             'test_type':      type_val,
@@ -7114,7 +7354,7 @@ def _parse_agile_excel(contents: bytes) -> dict:
         if leg_num not in legs_map:
             legs_map[leg_num] = {
                 'leg_num':       leg_num,
-                'leg_label':     leg_val,   # preserve original text label
+                'leg_label':     leg_label,
                 'lot_no':        lot_val,
                 'other_info':    other_val,
                 'target_device': target_val,
@@ -7188,8 +7428,24 @@ def _parse_agile_excel(contents: bytes) -> dict:
     for leg_num in sorted(legs_map.keys()):
         leg = dict(legs_map[leg_num])
         steps, process_type = _steps_for_leg(leg['rows'])
-        leg['steps'] = steps
+        leg['steps']        = steps
         leg['process_type'] = process_type
+
+        # ── Aggregated detection flags (used by preview UI) ────────────────
+        leg['has_os']  = any(r.get('has_os',  False) for r in leg['rows'])
+        leg['has_sat'] = any(r.get('has_sat', False) for r in leg['rows'])
+        leg['has_el']  = any(r.get('has_el',  False) for r in leg['rows'])
+        leg['has_ca']  = any(r.get('has_ca',  False) for r in leg['rows'])
+
+        # Sum all numeric SS values across every test item in the leg
+        _ss_nums = []
+        for r in leg['rows']:
+            try:
+                _ss_nums.append(int(r['ss']))
+            except (ValueError, TypeError):
+                pass
+        leg['total_ss'] = sum(_ss_nums) if _ss_nums else None
+
         legs_list.append(leg)
 
     return {
@@ -7244,11 +7500,13 @@ async def preview_agile_import(
 @api_router.post("/requests/import-agile")
 async def import_agile_request(
     file: UploadFile = File(...),
+    duplicate_action: Optional[str] = Form(default=None),
     current_user: User = Depends(require_permission('import_requests'))
 ):
     """
     Parse an Agile RSS Report Excel file and create a new REL request
     with process steps derived from the test matrix.
+    duplicate_action: 'duplicate' | 'new_number' | None
     """
     fname = file.filename or 'unknown'
     if not fname.lower().endswith(('.xlsx', '.xls')):
@@ -7310,7 +7568,19 @@ async def import_agile_request(
 
         dup = await db.execute("SELECT id FROM requests WHERE request_number = ?", (request_number,))
         if await dup.fetchone():
-            raise HTTPException(status_code=409, detail=f"Request '{request_number}' already exists")
+            if duplicate_action == 'duplicate':
+                suffix = 1
+                while True:
+                    candidate = f"{request_number}-DUP" if suffix == 1 else f"{request_number}-DUP-{suffix}"
+                    chk = await db.execute("SELECT id FROM requests WHERE request_number = ?", (candidate,))
+                    if not await chk.fetchone():
+                        request_number = candidate
+                        break
+                    suffix += 1
+            elif duplicate_action == 'new_number':
+                request_number = auto_rel_number
+            else:
+                raise HTTPException(status_code=409, detail=f"Request '{request_number}' already exists")
 
         req_id = str(uuid.uuid4())
 
@@ -7363,7 +7633,13 @@ async def import_agile_request(
             cf_by_step: dict = {}
             for row in leg.get('rows', []):
                 tt = row['test_type'].lower().strip()
-                if tt == 'relwithprecon' and 'Reliability Test' not in cf_by_step:
+                if tt in ('relwithprecon', 'rel with precon') and 'Reliability Test' not in cf_by_step:
+                    cf_by_step['Reliability Test'] = {
+                        'test_item':      row['test_item'],
+                        'test_condition': row['test_condition'],
+                        'read_points':    row['reading_point'],
+                    }
+                if tt in ('rel only', 'relonly', 'rel_only') and 'Reliability Test' not in cf_by_step:
                     cf_by_step['Reliability Test'] = {
                         'test_item':      row['test_item'],
                         'test_condition': row['test_condition'],
@@ -7412,6 +7688,30 @@ async def import_agile_request(
                      json.dumps([]), json.dumps(cf))
                 )
 
+        # ── Save Agile test matrix rows for LTC generation ─────────────────────
+        tm_rows = []
+        for _tm_leg in legs_data:
+            for _tm_row in _tm_leg.get('rows', []):
+                tm_rows.append({
+                    'leg_num':        _tm_leg['leg_num'],
+                    'leg_label':      _tm_leg.get('leg_label', ''),
+                    'lot_no':         _tm_leg.get('lot_no', ''),
+                    'test_type':      _tm_row.get('test_type', ''),
+                    'test_item':      _tm_row.get('test_item', ''),
+                    'test_condition': _tm_row.get('test_condition', ''),
+                    'reading_point':  _tm_row.get('reading_point', ''),
+                    'e_l':            bool(_tm_row.get('has_el', False)),
+                    'o_s':            bool(_tm_row.get('has_os', False)),
+                    'sat':            bool(_tm_row.get('has_sat', False)),
+                    'ca':             bool(_tm_row.get('has_ca', False)),
+                    'ss':             _tm_row.get('ss'),
+                })
+        if tm_rows:
+            await db.execute(
+                "UPDATE requests SET test_matrix_json = ? WHERE id = ?",
+                (json.dumps(tm_rows), req_id)
+            )
+
         await db.commit()
 
         return {
@@ -7443,21 +7743,46 @@ async def import_agile_request(
 # ========================
 # File Upload Route
 # ========================
+_ALLOWED_IMAGE_SIGS: list = [
+    (b'\xff\xd8\xff', 'image/jpeg'),
+    (b'\x89PNG\r\n\x1a\n', 'image/png'),
+    (b'GIF87a', 'image/gif'),
+    (b'GIF89a', 'image/gif'),
+    (b'PK\x03\x04', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+    (b'PK\x05\x06', 'application/zip'),
+    (b'RIFF', None),  # catch-all — RIFF container (not blocked)
+]
+_ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.xlsx', '.xls'}
+
+def _validate_upload(file_bytes: bytes, filename: str) -> None:
+    """Raise HTTPException if file type is not permitted."""
+    ext = Path(filename).suffix.lower() if filename else ''
+    if ext not in _ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"File type '{ext}' is not allowed. Permitted: {', '.join(_ALLOWED_EXTENSIONS)}")
+    # Verify magic bytes match expected image/xlsx types
+    is_known = any(file_bytes[:len(sig)] == sig for sig, _ in _ALLOWED_IMAGE_SIGS)
+    if not is_known:
+        raise HTTPException(status_code=400, detail="File content does not match an allowed type.")
+
 @api_router.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user)
 ):
     try:
+        contents = await file.read()
+        _validate_upload(contents, file.filename or '')
         upload_dir = ROOT_DIR / "uploads"
         upload_dir.mkdir(exist_ok=True)
-        file_extension = Path(file.filename).suffix
+        file_extension = Path(file.filename).suffix.lower()
         unique_filename = f"{uuid.uuid4()}{file_extension}"
         file_path = upload_dir / unique_filename
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            buffer.write(contents)
         return {"filename": unique_filename, "original_filename": file.filename,
                 "url": f"/uploads/{unique_filename}"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
 
@@ -9849,13 +10174,15 @@ async def _load_relmon_sheet_names_for_site(site: str) -> tuple[list[str], str]:
             wb.close()
 
 
-_CUSTOMER_LIST_FILE = ROOT_DIR.parent / "Customer List.xls"
+_DOCS_LIST_DIR = ROOT_DIR.parent.parent / "Docs List"
+
+_CUSTOMER_LIST_FILE = _DOCS_LIST_DIR / "Customer List.xls"
 _customer_list_cache: list[dict] | None = None
 
-_PKG_LIST_FILE = ROOT_DIR.parent / "Pkg List.xls"
+_PKG_LIST_FILE = _DOCS_LIST_DIR / "Pkg List.xls"
 _pkg_list_cache: list[dict] | None = None
 
-_MATERIAL_LIST_FILE = ROOT_DIR.parent / "Material List.xls"
+_MATERIAL_LIST_FILE = _DOCS_LIST_DIR / "Material List.xls"
 _material_list_cache: list[dict] | None = None
 
 
@@ -10606,6 +10933,39 @@ async def get_relmon_request_sheet_data(site: str, req_no: str):
         await db.close()
 
 
+@api_router.get("/relmon/rms-form")
+async def get_relmon_rms_form(req_no: str):
+    """Return the saved RELMON form_data for a single RMS request number.
+
+    Used by the Request Detail page to display Pkg/Lot, Materials, REL Test
+    and Long-Term Test fields that were entered in the RELMON - New RMS Entry
+    modal without requiring the full sheet-data payload.
+    """
+    if not req_no or not req_no.strip():
+        raise HTTPException(status_code=400, detail="req_no is required")
+
+    db = await aiosqlite.connect(DB_PATH)
+    db.row_factory = aiosqlite.Row
+    try:
+        # The form is saved with sheet = req_no (the RMS request number)
+        cursor = await db.execute(
+            "SELECT form_json, updated_at, updated_by FROM relmon_sheet_data WHERE sheet = ?",
+            (req_no.strip(),),
+        )
+        row = await cursor.fetchone()
+        if not row or not row["form_json"]:
+            return {"form_data": {}, "found": False}
+        form = _safe_relmon_json_load(row["form_json"], {})
+        return {
+            "form_data": form if isinstance(form, dict) else {},
+            "found": True,
+            "updated_at": row["updated_at"],
+            "updated_by": row["updated_by"],
+        }
+    finally:
+        await db.close()
+
+
 @api_router.delete("/relmon/saved-data")
 async def clear_relmon_saved_data(
     site: Optional[str] = None,
@@ -10640,9 +11000,15 @@ upload_dir = ROOT_DIR / "uploads"
 upload_dir.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(upload_dir)), name="uploads")
 
+_REL_ALLOWED_ORIGINS = [
+    o.strip() for o in os.environ.get(
+        'CORS_ORIGINS',
+        'http://localhost:3000,http://localhost:5173'
+    ).split(',') if o.strip()
+]
 app.add_middleware(
     CORSMiddleware, allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=_REL_ALLOWED_ORIGINS,
     allow_methods=["*"], allow_headers=["*"],
 )
 

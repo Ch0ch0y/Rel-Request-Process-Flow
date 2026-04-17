@@ -242,7 +242,9 @@ function CustomerAutocompleteField({ field, value, onChange, customers, onPairFi
   const [query, setQuery] = useState(value ?? '');
   const [open, setOpen] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
   const containerRef = useRef(null);
+  const inputRef = useRef(null);
 
   // Keep local query in sync when external value changes (e.g. autofill from partner field)
   useEffect(() => { setQuery(value ?? ''); }, [value]);
@@ -257,6 +259,14 @@ function CustomerAutocompleteField({ field, value, onChange, customers, onPairFi
           ? c.no.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)
           : c.name.toLowerCase().includes(q) || c.no.toLowerCase().includes(q);
       }).slice(0, 80);
+
+  const openDropdown = () => {
+    if (inputRef.current) {
+      const rect = inputRef.current.getBoundingClientRect();
+      setDropdownPos({ top: rect.bottom + 2, left: rect.left, width: rect.width });
+    }
+    setOpen(true);
+  };
 
   const handleSelect = (customer) => {
     setOpen(false);
@@ -275,7 +285,7 @@ function CustomerAutocompleteField({ field, value, onChange, customers, onPairFi
     const v = e.target.value;
     setQuery(v);
     onChange(field.key, v);
-    setOpen(true);
+    openDropdown();
   };
 
   // Close dropdown on outside click
@@ -290,20 +300,24 @@ function CustomerAutocompleteField({ field, value, onChange, customers, onPairFi
   }, []);
 
   return (
-    <label className="flex flex-col gap-1 relative" ref={containerRef}>
+    <label className="flex flex-col gap-1" ref={containerRef}>
       <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">{field.label}</span>
       <input
+        ref={inputRef}
         type="text"
         value={query}
         onChange={handleInput}
-        onFocus={() => { setFocused(true); setOpen(true); }}
+        onFocus={() => { setFocused(true); openDropdown(); }}
         onBlur={() => setFocused(false)}
         autoComplete="off"
         placeholder={isNoField ? 'No. or name…' : 'Customer name…'}
         className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-xs text-slate-700 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-400"
       />
       {open && filtered.length > 0 && (
-        <ul className="absolute top-full left-0 right-0 z-50 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 shadow-lg text-xs">
+        <ul
+          style={{ position: 'fixed', top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width }}
+          className="z-[9999] max-h-52 overflow-y-auto rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 shadow-lg text-xs"
+        >
           {filtered.map((c) => (
             <li
               key={c.no}
@@ -324,7 +338,9 @@ function CustomerAutocompleteField({ field, value, onChange, customers, onPairFi
 function MaterialAutocompleteField({ field, value, onChange, materials }) {
   const [query, setQuery] = useState(value ?? '');
   const [open, setOpen] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
   const containerRef = useRef(null);
+  const inputRef = useRef(null);
 
   useEffect(() => { setQuery(value ?? ''); }, [value]);
 
@@ -338,6 +354,14 @@ function MaterialAutocompleteField({ field, value, onChange, materials }) {
                m.full_desc.toLowerCase().includes(q);
       }).slice(0, 100);
 
+  const openDropdown = () => {
+    if (inputRef.current) {
+      const rect = inputRef.current.getBoundingClientRect();
+      setDropdownPos({ top: rect.bottom + 2, left: rect.left, width: rect.width });
+    }
+    setOpen(true);
+  };
+
   const handleSelect = (mat) => {
     const val = mat.short_desc || mat.full_desc;
     setQuery(val);
@@ -349,7 +373,7 @@ function MaterialAutocompleteField({ field, value, onChange, materials }) {
     const v = e.target.value;
     setQuery(v);
     onChange(field.key, v);
-    setOpen(true);
+    openDropdown();
   };
 
   useEffect(() => {
@@ -361,19 +385,23 @@ function MaterialAutocompleteField({ field, value, onChange, materials }) {
   }, []);
 
   return (
-    <label className="flex flex-col gap-1 relative" ref={containerRef}>
+    <label className="flex flex-col gap-1" ref={containerRef}>
       <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">{field.label}</span>
       <input
+        ref={inputRef}
         type="text"
         value={query}
         onChange={handleInput}
-        onFocus={() => setOpen(true)}
+        onFocus={() => openDropdown()}
         autoComplete="off"
         placeholder={`Search ${field.label.toLowerCase()}\u2026`}
         className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-xs text-slate-700 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-400"
       />
       {open && filtered.length > 0 && (
-        <ul className="absolute top-full left-0 right-0 z-50 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 shadow-lg text-xs">
+        <ul
+          style={{ position: 'fixed', top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width }}
+          className="z-[9999] max-h-52 overflow-y-auto rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 shadow-lg text-xs"
+        >
           {filtered.map((m, i) => (
             <li
               key={`${m.material_code}-${m.short_desc}-${i}`}
@@ -396,7 +424,9 @@ function MaterialAutocompleteField({ field, value, onChange, materials }) {
 function PackageAutocompleteField({ field, value, onChange, packages, onPkgFill }) {
   const [query, setQuery] = useState(value ?? '');
   const [open, setOpen] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
   const containerRef = useRef(null);
+  const inputRef = useRef(null);
   const pkgField = field.pkgField ?? 'pkg_code';
 
   useEffect(() => { setQuery(value ?? ''); }, [value]);
@@ -410,6 +440,14 @@ function PackageAutocompleteField({ field, value, onChange, packages, onPkgFill 
         const type = (p.pkg_type ?? p.pkg_description ?? '').toLowerCase();
         return primary.includes(q) || code.includes(q) || type.includes(q);
       }).slice(0, 100);
+
+  const openDropdown = () => {
+    if (inputRef.current) {
+      const rect = inputRef.current.getBoundingClientRect();
+      setDropdownPos({ top: rect.bottom + 2, left: rect.left, width: rect.width });
+    }
+    setOpen(true);
+  };
 
   const handleSelect = (pkg) => {
     setOpen(false);
@@ -430,7 +468,7 @@ function PackageAutocompleteField({ field, value, onChange, packages, onPkgFill 
     const v = e.target.value;
     setQuery(v);
     onChange(field.key, v);
-    setOpen(true);
+    openDropdown();
   };
 
   useEffect(() => {
@@ -442,19 +480,23 @@ function PackageAutocompleteField({ field, value, onChange, packages, onPkgFill 
   }, []);
 
   return (
-    <label className="flex flex-col gap-1 relative" ref={containerRef}>
+    <label className="flex flex-col gap-1" ref={containerRef}>
       <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">{field.label}</span>
       <input
+        ref={inputRef}
         type="text"
         value={query}
         onChange={handleInput}
-        onFocus={() => setOpen(true)}
+        onFocus={() => openDropdown()}
         autoComplete="off"
         placeholder={`Search ${field.label.toLowerCase()}\u2026`}
         className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-xs text-slate-700 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-400"
       />
       {open && filtered.length > 0 && (
-        <ul className="absolute top-full left-0 right-0 z-50 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 shadow-lg text-xs">
+        <ul
+          style={{ position: 'fixed', top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width }}
+          className="z-[9999] max-h-52 overflow-y-auto rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 shadow-lg text-xs"
+        >
           {filtered.map((p, i) => (
             <li
               key={`${p.pkg_code}-${i}`}
@@ -993,6 +1035,13 @@ export default function RelMon() {
   const [deviceTypeData, setDeviceTypeData] = useState(null);
   const abortRef = useRef(null);
 
+  // ── New RMS Modal ─────────────────────────────────────────────────────────
+  const [showNewRmsModal, setShowNewRmsModal] = useState(false);
+  const [newRmsFormData, setNewRmsFormData] = useState(() => buildDefaultFormData());
+  const [newRmsActiveTab, setNewRmsActiveTab] = useState('pkg_lot');
+  const [newRmsSaving, setNewRmsSaving] = useState(false);
+  const [newRmsError, setNewRmsError] = useState(null);
+
   const handleOverviewCellEdit = useCallback((reqNum, col, val) => {
     setOverviewEdits((prev) => ({ ...prev, [`${reqNum}__${col}`]: val }));
   }, []);
@@ -1441,6 +1490,115 @@ export default function RelMon() {
     setShowDeviceTypeModal(false);
   }, []);
 
+  // ── New RMS Handlers ───────────────────────────────────────────────────────
+  const handleNewRmsChange = useCallback((key, value) => {
+    setNewRmsFormData(prev => ({ ...prev, [key]: value }));
+  }, []);
+
+  const handleNewRmsPairFill = useCallback((key, value) => {
+    setNewRmsFormData(prev => ({ ...prev, [key]: value }));
+  }, []);
+
+  const handleNewRmsPkgFill = useCallback((fields) => {
+    setNewRmsFormData(prev => ({ ...prev, ...fields }));
+  }, []);
+
+  const handleCreateRms = async () => {
+    setNewRmsSaving(true);
+    setNewRmsError(null);
+    try {
+      const fd = newRmsFormData;
+
+      // Parse lead/ball count
+      const lbc = parseInt(fd.lead_ball_count, 10);
+
+      // Parse body size from "4.8x4.8 mm" or "4.8x4.8" format
+      let bsx, bsy;
+      if (fd.package_size) {
+        const szMatch = fd.package_size.match(/([\d.]+)\s*[xX×\u00d7]\s*([\d.]+)/);
+        if (szMatch) {
+          bsx = parseFloat(szMatch[1]);
+          bsy = parseFloat(szMatch[2]);
+        }
+      }
+
+      // Parse numeric fields
+      const pkgThick = fd.package_thickness ? parseFloat(fd.package_thickness) : undefined;
+      const leadPitch = fd.lead_pitch ? parseFloat(fd.lead_pitch) : undefined;
+
+      // pkg_info drives the RELMON site/device-type inference — include package code & type
+      const pkgInfo = [fd.package_code, fd.package_type].filter(Boolean).join(' ') || undefined;
+
+      const requestData = {
+        request_type: 'RMS',
+        // Only pass request_number if user explicitly typed one; otherwise backend auto-generates
+        ...(fd.rms_no && fd.rms_no.trim() ? { request_number: fd.rms_no.trim() } : {}),
+        originator:    fd.enrolled_by    || undefined,
+        plant:         fd.assembly_site  || undefined,
+        customer:      fd.customer       || undefined,
+        customer_no:   fd.customer_no    || undefined,
+        pkg_info:      pkgInfo,
+        // product_hierarchy is the device-type label used in RELMON grouping
+        product_hierarchy: fd.package_type || fd.package_code || undefined,
+        device_name:   fd.device_number  || undefined,
+        lot_no:        fd.lot_number     || undefined,
+        date_code:     fd.date_code      || undefined,
+        total_ss:      fd.unit_quantity  || undefined,
+        date_ltc:      fd.date_received  || undefined,
+        deadline:      fd.date_reported  || undefined,
+        classification: fd.type === 'Customer Specific' ? 'Customer Specific' : 'Standard',
+        // Numeric fields
+        ...(!isNaN(lbc) && lbc > 0 ? { lead_count: lbc } : {}),
+        ...(leadPitch  && !isNaN(leadPitch)  ? { lead_pitch: leadPitch }  : {}),
+        ...(pkgThick   && !isNaN(pkgThick)   ? { package_thickness: pkgThick } : {}),
+        ...(bsx && !isNaN(bsx) ? { body_size_x: bsx, body_size_y: bsy ?? bsx } : {}),
+        // Purpose / notes from summary tab
+        purpose: [fd.remarks_special_instruction, fd.delamination_summary]
+          .filter(Boolean).join('\n') || undefined,
+        engineer_special_instruction: fd.mrt_lt_remarks || undefined,
+      };
+
+      // 1. Create the RMS request in the requests DB
+      const result = await api.createRequest(requestData);
+      const newReqNo = result.request_number;
+
+      // 2. Persist the full RELMON form data so the Sheets view pre-fills everything
+      if (newReqNo) {
+        const savedForm = { ...fd, rms_no: newReqNo };
+        try {
+          await api.put('/relmon/data', {
+            site: activeSite,
+            sheet: newReqNo,
+            rows: [],
+            merges: [],
+            form_data: savedForm,
+          });
+        } catch { /* non-fatal — form data will be regenerated on next load */ }
+      }
+
+      // 3. Close modal, refresh request lists
+      setShowNewRmsModal(false);
+      setReqSearch('');
+      loadRequestList();
+      // Also reload request-sheets so the new entry appears in the Sheets sidebar
+      api.get('/relmon/request-sheets')
+        .then(res => {
+          setSites(res);
+          // If new req is in a known site, update active site
+          const inferredSite = Object.keys(res).find(s => (res[s] || []).some(sh => sh.includes(`(${newReqNo})`)));
+          if (inferredSite) setActiveSite(inferredSite);
+        })
+        .catch(() => {});
+
+      // 4. Stay on Request Overview so user immediately sees the new row
+      setViewMode('requests');
+    } catch (e) {
+      setNewRmsError(e?.message || 'Failed to create RMS request');
+    } finally {
+      setNewRmsSaving(false);
+    }
+  };
+
   const handleSelectSheetFromModal = useCallback((sheetName, familyName) => {
     setSearch('');
     setExpandedFamilies({ [familyName]: true });
@@ -1491,6 +1649,24 @@ export default function RelMon() {
               >
                 <Database className="w-3.5 h-3.5" />
                 Sheets
+              </button>
+              <button
+                onClick={async () => {
+                  const fresh = buildDefaultFormData();
+                  // Pre-fill the RMS No. with the next auto-generated number
+                  try {
+                    const res = await api.getNextRequestNumber('RMS');
+                    fresh.rms_no = res.next_number || '';
+                  } catch { /* leave blank if unavailable */ }
+                  setNewRmsFormData(fresh);
+                  setNewRmsActiveTab('pkg_lot');
+                  setNewRmsError(null);
+                  setShowNewRmsModal(true);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold transition-all border-l border-white/30 bg-emerald-500/80 text-white hover:bg-emerald-500"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                New RMS
               </button>
               <button
                 onClick={() => setViewMode('requests')}
@@ -1897,6 +2073,120 @@ export default function RelMon() {
         </main>
         </>) } {/* end viewMode === 'sheets' */}
       </div>
+
+      {/* ── New RMS Modal ──────────────────────────────────────────────── */}
+      {showNewRmsModal && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-[2px] flex items-center justify-center p-4">
+          <div className="w-full max-w-3xl max-h-[92vh] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-2xl overflow-hidden flex flex-col">
+
+            {/* Modal header */}
+            <div
+              className="flex-shrink-0 flex items-center justify-between px-4 py-3 border-b border-white/20"
+              style={{ background: 'linear-gradient(135deg, #1d4ed8 0%, #2563eb 50%, #38bdf8 100%)' }}
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center border border-white/30">
+                  <Plus className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-white tracking-wide uppercase">New RMS Entry</h3>
+                  <p className="text-xs text-sky-100 font-medium">ATP Reliability Monitor Database</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowNewRmsModal(false)}
+                className="p-1.5 rounded-lg border border-white/30 text-white hover:bg-white/20 transition-colors"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal body */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+
+              {/* Common fields */}
+              <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30 p-3">
+                <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">General</p>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                  {RELMON_FORM_SCHEMA.common.map((field) => (
+                    <RelMonFormField
+                      key={field.key}
+                      field={field}
+                      value={newRmsFormData[field.key]}
+                      onChange={handleNewRmsChange}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Tab navigation */}
+              <div className="flex flex-wrap gap-1.5">
+                {RELMON_TABS.map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setNewRmsActiveTab(tab.id)}
+                    className={`px-2.5 py-1 rounded text-xs border transition-colors ${
+                      newRmsActiveTab === tab.id
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-slate-100 dark:bg-slate-700/70 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab content */}
+              <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {(RELMON_FORM_SCHEMA[newRmsActiveTab] ?? []).map((field) => (
+                    <RelMonFormField
+                      key={field.key}
+                      field={field}
+                      value={newRmsFormData[field.key]}
+                      onChange={handleNewRmsChange}
+                      customers={customerList}
+                      onPairFill={handleNewRmsPairFill}
+                      packages={pkgList}
+                      onPkgFill={handleNewRmsPkgFill}
+                      materials={materialList}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {newRmsError && (
+                <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg text-sm text-red-700 dark:text-red-300">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <span>{newRmsError}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Modal footer */}
+            <div className="flex-shrink-0 px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex items-center justify-end gap-2 bg-slate-50 dark:bg-slate-900/30">
+              <button
+                onClick={() => setShowNewRmsModal(false)}
+                disabled={newRmsSaving}
+                className="px-4 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateRms}
+                disabled={newRmsSaving}
+                className="flex items-center gap-1.5 px-5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors disabled:opacity-50 shadow-md"
+              >
+                {newRmsSaving
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  : <Plus className="w-3.5 h-3.5" />}
+                {newRmsSaving ? 'Creating…' : 'Create RMS'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showDeviceTypeModal && (
         <div className="fixed inset-0 z-40 bg-slate-900/55 backdrop-blur-[1px] flex items-center justify-center p-4">
