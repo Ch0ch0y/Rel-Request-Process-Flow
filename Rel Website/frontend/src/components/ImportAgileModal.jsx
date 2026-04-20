@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Loader2, Trash2, Eye, Copy } from 'lucide-react';
+import { X, Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Loader2, Trash2, Eye, Copy, ChevronDown, ChevronRight } from 'lucide-react';
 import api from '../api';
 
 const STEPS = {
@@ -19,7 +19,11 @@ export default function ImportAgileModal({ open, onClose, onImported }) {
   const [result, setResult] = useState(null);
   const [duplicateRR, setDuplicateRR] = useState('');
   const [duplicateAction, setDuplicateAction] = useState(null);
+  const [expandedLegs, setExpandedLegs] = useState({});
   const fileInputRef = useRef(null);
+
+  const toggleLeg = (legNum) =>
+    setExpandedLegs(prev => ({ ...prev, [legNum]: !prev[legNum] }));
 
   useEffect(() => {
     if (open) {
@@ -38,6 +42,7 @@ export default function ImportAgileModal({ open, onClose, onImported }) {
     setResult(null);
     setDuplicateRR('');
     setDuplicateAction(null);
+    setExpandedLegs({});
   };
 
   const handleClose = () => { reset(); onClose(); };
@@ -249,30 +254,139 @@ export default function ImportAgileModal({ open, onClose, onImported }) {
               {preview.legs && preview.legs.length > 0 && (
                 <div>
                   <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-                    Process Steps ({preview.legs.length} leg{preview.legs.length > 1 ? 's' : ''} detected)
+                    Auto-Detected Legs &amp; Process Steps
+                    <span className="ml-2 font-normal normal-case text-slate-400">
+                      ({preview.legs.length} leg{preview.legs.length !== 1 ? 's' : ''} found)
+                    </span>
                   </h3>
-                  <div className="space-y-3">
-                    {preview.legs.map((leg) => (
-                      <div key={leg.leg_num} className="bg-slate-50 rounded-lg border border-slate-200 px-4 py-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="text-sm font-semibold text-violet-700">LEG {leg.leg_num}</p>
-                          {leg.process_type && (
-                            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">
-                              {leg.process_type}
+                  <div className="space-y-2">
+                    {preview.legs.map((leg) => {
+                      const isOpen = !!expandedLegs[leg.leg_num];
+                      // indicators
+                      const flags = [
+                        leg.has_el  && { label: 'E/L',  cls: 'bg-blue-100 text-blue-700' },
+                        leg.has_os  && { label: 'O/S',  cls: 'bg-amber-100 text-amber-700' },
+                        leg.has_sat && { label: 'SAT',  cls: 'bg-violet-100 text-violet-700' },
+                        leg.has_ca  && { label: 'CA',   cls: 'bg-rose-100 text-rose-700' },
+                      ].filter(Boolean);
+
+                      return (
+                        <div key={leg.leg_num} className="border border-slate-200 rounded-lg overflow-hidden">
+                          {/* ── Leg header row (always visible) ── */}
+                          <button
+                            type="button"
+                            onClick={() => toggleLeg(leg.leg_num)}
+                            className="w-full flex items-center gap-3 px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+                          >
+                            {isOpen
+                              ? <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                              : <ChevronRight className="w-4 h-4 text-slate-400 flex-shrink-0" />}
+
+                            {/* Leg number */}
+                            <span className="text-sm font-bold text-violet-700 flex-shrink-0 w-14">
+                              LEG {leg.leg_num}
                             </span>
+
+                            {/* Leg label / lot */}
+                            <span className="text-xs text-slate-500 flex-1 truncate">
+                              {leg.leg_label && leg.leg_label !== String(leg.leg_num) ? leg.leg_label : ''}
+                              {leg.lot_no ? ` · ${leg.lot_no}` : ''}
+                              {leg.other_info ? ` · ${leg.other_info}` : ''}
+                            </span>
+
+                            {/* Indicator badges */}
+                            <span className="flex items-center gap-1 flex-shrink-0">
+                              {flags.map(f => (
+                                <span key={f.label} className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${f.cls}`}>
+                                  {f.label}
+                                </span>
+                              ))}
+                            </span>
+
+                            {/* SS quantity */}
+                            {leg.total_ss != null && (
+                              <span className="flex-shrink-0 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full ml-1">
+                                SS: {leg.total_ss}
+                              </span>
+                            )}
+
+                            {/* Process type */}
+                            {leg.process_type && (
+                              <span className="flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 ml-1">
+                                {leg.process_type}
+                              </span>
+                            )}
+
+                            {/* Step count */}
+                            <span className="flex-shrink-0 text-xs text-slate-400 ml-1">
+                              {leg.steps.length} step{leg.steps.length !== 1 ? 's' : ''}
+                            </span>
+                          </button>
+
+                          {/* ── Expanded detail ── */}
+                          {isOpen && (
+                            <div className="px-4 py-3 border-t border-slate-200 bg-white space-y-3">
+
+                              {/* Test items table */}
+                              {leg.rows && leg.rows.length > 0 && (
+                                <div>
+                                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Test Matrix Items</p>
+                                  <div className="overflow-x-auto rounded border border-slate-100">
+                                    <table className="w-full text-xs">
+                                      <thead>
+                                        <tr className="bg-slate-50 text-slate-500 border-b border-slate-100">
+                                          <th className="text-left px-2 py-1 font-semibold">Test Type</th>
+                                          <th className="text-left px-2 py-1 font-semibold">Test Item</th>
+                                          <th className="text-left px-2 py-1 font-semibold">Condition</th>
+                                          <th className="text-left px-2 py-1 font-semibold">Reading Pt.</th>
+                                          <th className="text-center px-2 py-1 font-semibold">E/L</th>
+                                          <th className="text-center px-2 py-1 font-semibold">O/S</th>
+                                          <th className="text-center px-2 py-1 font-semibold">SAT</th>
+                                          <th className="text-center px-2 py-1 font-semibold">CA</th>
+                                          <th className="text-right px-2 py-1 font-semibold">SS</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {leg.rows.map((row, ri) => (
+                                          <tr key={ri} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                                            <td className="px-2 py-1 text-slate-600">{row.test_type || '—'}</td>
+                                            <td className="px-2 py-1 font-medium text-slate-800">{row.test_item || '—'}</td>
+                                            <td className="px-2 py-1 text-slate-600">{row.test_condition || '—'}</td>
+                                            <td className="px-2 py-1 text-slate-600">{row.reading_point || '—'}</td>
+                                            <td className="px-2 py-1 text-center">{row.has_el  ? <span className="text-blue-600 font-bold">✓</span>   : <span className="text-slate-300">—</span>}</td>
+                                            <td className="px-2 py-1 text-center">{row.has_os  ? <span className="text-amber-600 font-bold">✓</span>  : <span className="text-slate-300">—</span>}</td>
+                                            <td className="px-2 py-1 text-center">{row.has_sat ? <span className="text-violet-600 font-bold">✓</span> : <span className="text-slate-300">—</span>}</td>
+                                            <td className="px-2 py-1 text-center">{row.has_ca  ? <span className="text-rose-600 font-bold">✓</span>   : <span className="text-slate-300">—</span>}</td>
+                                            <td className="px-2 py-1 text-right font-semibold text-emerald-700">{row.ss || '—'}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Process steps list */}
+                              <div>
+                                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                                  Process Steps ({leg.steps.length})
+                                </p>
+                                {leg.steps.length === 0 ? (
+                                  <p className="text-xs text-slate-400 italic">No steps detected</p>
+                                ) : (
+                                  <ol className="text-xs text-slate-600 grid grid-cols-2 gap-x-4 gap-y-0.5 list-decimal list-inside">
+                                    {leg.steps.map((s, i) => (
+                                      <li key={i}>{s}</li>
+                                    ))}
+                                  </ol>
+                                )}
+                              </div>
+
+                            </div>
                           )}
                         </div>
-                        {leg.steps.length === 0 ? (
-                          <p className="text-xs text-slate-400 italic">No steps detected</p>
-                        ) : (
-                          <ol className="text-xs text-slate-600 space-y-0.5 list-decimal list-inside">
-                            {leg.steps.map((s, i) => (
-                              <li key={i}>{s}</li>
-                            ))}
-                          </ol>
-                        )}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -348,11 +462,24 @@ export default function ImportAgileModal({ open, onClose, onImported }) {
                   <div>
                     <p className="text-lg font-semibold !text-black">Import Successful</p>
                     <p className="text-sm !text-black mt-1">
-                      Request created with {result.num_legs} leg{result.num_legs !== 1 ? 's' : ''}
+                      {result.num_legs} leg{result.num_legs !== 1 ? 's' : ''} imported with {
+                        result.legs?.reduce((s, l) => s + (l.steps?.length || 0), 0)
+                      } total process steps
                     </p>
                   </div>
                   {result.request_number && (
                     <p className="text-sm font-mono bg-slate-100 !text-black px-3 py-1 rounded">{result.request_number}</p>
+                  )}
+                  {result.legs && result.legs.length > 0 && (
+                    <div className="w-full text-left mt-2 space-y-1">
+                      {result.legs.map(l => (
+                        <div key={l.leg} className="flex items-start gap-2 text-xs bg-slate-50 rounded px-3 py-1.5 border border-slate-200">
+                          <span className="font-bold text-violet-700 w-10 flex-shrink-0">LEG {l.leg}</span>
+                          <span className="text-slate-500 flex-1">{l.steps?.length || 0} steps</span>
+                          {l.lot_no && <span className="text-slate-400 truncate">{l.lot_no}</span>}
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </>
               ) : (

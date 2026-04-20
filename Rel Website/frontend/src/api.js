@@ -63,7 +63,8 @@ class ApiClient {
   getSystemHealth(period = '24H') { return this.get(`/system/health?period=${period}`); }
   updateProfile(data) { return this.patch('/auth/profile', data); }
   updateAvatar(base64) { return this.patch('/auth/profile', { avatar: base64 }); }
-  forgotPassword(email, new_password) { return this.post('/auth/forgot-password', { email, new_password }); }
+  requestReset(email) { return this.post('/auth/request-reset', { email }); }
+  forgotPassword(email, new_password, reset_token) { return this.post('/auth/forgot-password', { email, new_password, reset_token }); }
   changePassword(current_password, new_password) { return this.post('/auth/change-password', { current_password, new_password }); }
 
   // Users
@@ -217,9 +218,10 @@ class ApiClient {
     return res.json();
   }
 
-  async importAgileExcel(file) {
+  async importAgileExcel(file, duplicateAction = null) {
     const formData = new FormData();
     formData.append('file', file);
+    if (duplicateAction) formData.append('duplicate_action', duplicateAction);
     const headers = {};
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
     const res = await fetch(`${API_BASE}/requests/import-agile`, { method: 'POST', headers, body: formData });
@@ -232,7 +234,9 @@ class ApiClient {
         else if (Array.isArray(detail)) msg = detail.map(e => e.msg || JSON.stringify(e)).join('; ');
         else if (detail) msg = JSON.stringify(detail);
       } catch { /* use default msg */ }
-      throw new Error(msg || 'Agile import failed');
+      const err = new Error(msg || 'Agile import failed');
+      err.status = res.status;
+      throw err;
     }
     return res.json();
   }
@@ -362,7 +366,12 @@ class ApiClient {
   async downloadLtcReport(id) {
     const headers = {};
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
-    const res = await fetch(`${API_BASE}/requests/${id}/ltc`, { headers });
+    // Force a fresh response every click to avoid browser reusing a stale LTC file.
+    const cacheBust = Date.now();
+    const res = await fetch(`${API_BASE}/requests/${id}/ltc?cb=${cacheBust}`, {
+      headers,
+      cache: 'no-store',
+    });
     if (!res.ok) throw new Error(`LTC generation failed: ${res.status}`);
     return res.blob();
   }

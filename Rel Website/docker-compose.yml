@@ -5,15 +5,24 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    env_file:
+      - .env          # Create this file locally — never commit it
     environment:
-      - JWT_SECRET=change-me
-      - CORS_ORIGINS=*
       - DB_PATH=/app/data/rel_database.db
+      # Required in .env: JWT_SECRET, CORS_ORIGINS
+      # e.g.  JWT_SECRET=<long-random-string>  CORS_ORIGINS=http://your-frontend-host
+      - ENVIRONMENT=production
     ports:
       - "8000:8000"
     volumes:
       - db_data:/app/data
       - ./backend/uploads:/app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/public/stats || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   frontend:
     build:
@@ -22,7 +31,8 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   db_data:

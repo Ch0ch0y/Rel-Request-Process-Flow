@@ -48,6 +48,8 @@ export default function Login() {
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotError, setForgotError] = useState('');
   const [forgotDone, setForgotDone] = useState(false);
+  const [forgotResetToken, setForgotResetToken] = useState('');  // server-issued token
+  const [forgotStep, setForgotStep] = useState('email');  // 'email' | 'reset'
   const [mathChallenge, setMathChallenge] = useState(() => generateMath());
   const [mathAnswer, setMathAnswer] = useState('');
   const [forgotNewPw, setForgotNewPw] = useState('');
@@ -142,6 +144,30 @@ export default function Login() {
 
   const handleForgotSubmit = async (e) => {
     e.preventDefault();
+    setForgotError('');
+
+    // Step 1: verify email exists and get a server-issued reset token
+    if (forgotStep === 'email') {
+      if (!forgotEmail.trim()) { setForgotError('Please enter your email address.'); return; }
+      setForgotLoading(true);
+      try {
+        const res = await api.requestReset(forgotEmail.trim());
+        const token = res.reset_token;
+        if (!token) {
+          setForgotError('No account found with that email address.');
+          return;
+        }
+        setForgotResetToken(token);
+        setForgotStep('reset');
+      } catch (err) {
+        setForgotError(err.message || 'Failed to request reset.');
+      } finally {
+        setForgotLoading(false);
+      }
+      return;
+    }
+
+    // Step 2: verify math CAPTCHA locally, then call the server with the reset token
     if (parseInt(mathAnswer, 10) !== mathChallenge.answer) {
       setForgotError('Incorrect answer to the math question. Please try again.');
       refreshMath();
@@ -151,14 +177,13 @@ export default function Login() {
       setForgotError('Passwords do not match.');
       return;
     }
-    if (forgotNewPw.length < 6) {
-      setForgotError('Password must be at least 6 characters.');
+    if (forgotNewPw.length < 8) {
+      setForgotError('Password must be at least 8 characters.');
       return;
     }
     setForgotLoading(true);
-    setForgotError('');
     try {
-      await api.forgotPassword(forgotEmail, forgotNewPw);
+      await api.forgotPassword(forgotEmail, forgotNewPw, forgotResetToken);
       setForgotDone(true);
     } catch (err) {
       setForgotError(err.message || 'Failed to reset password.');
@@ -171,6 +196,8 @@ export default function Login() {
   const resetForgotFlow = () => {
     setShowForgotPw(false);
     setForgotDone(false);
+    setForgotStep('email');
+    setForgotResetToken('');
     setForgotEmail('');
     setMathChallenge(generateMath());
     setMathAnswer('');

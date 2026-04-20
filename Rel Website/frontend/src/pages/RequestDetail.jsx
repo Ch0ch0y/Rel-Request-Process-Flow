@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+﻿import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api';
@@ -150,7 +150,7 @@ function getStepCT(step) {
   }
 
   // ── T&H Soak ────────────────────────────────────────────────────────────
-  if (name === 't&h soak') {
+  if (TH_SOAK_NAMES.has(name)) {
     // New format: test_item='L1', test_condition='85/85-168' → lookup 'L1 85/85-168'
     // Legacy format: test_condition='L1 85/85-168' (backward compat)
     const v = TH_SOAK_CT[item + ' ' + cond] ?? TH_SOAK_CT[cond];
@@ -162,11 +162,10 @@ function getStepCT(step) {
   }
 
   // ── FCR / Reflow ──────────────────────────────────────────────────────────
-  if (name === 'forced convection reflow (fcr)') return 1;
-  if (name === 'reflow') return 1;
+  if (FCR_NAMES.has(name)) return 1;
 
   // ── MRT TC ────────────────────────────────────────────────────────────────
-  if (name === 'moisture resistance test') {
+  if (MRT_NAMES.has(name)) {
     if (MRT_TC_CT[cond] !== undefined) return MRT_TC_CT[cond];
     if (TH_SOAK_CT[cond] !== undefined) return TH_SOAK_CT[cond];
     return 1; // reflow-cycle MRT conditions
@@ -565,10 +564,20 @@ const DEFAULT_STEP_PRESETS = [
   'Preconditioning (Precon)', 'Forced Convection Reflow (FCR)', 'Whisker Test', 'Staging',
 ];
 
+// All lowercase name variants that should behave as T&H Soak
+const TH_SOAK_NAMES = new Set(['t&h soak', 't & h soak', 'th soak']);
+// All lowercase name variants that should behave as Forced Convection Reflow (FCR)
+const FCR_NAMES = new Set(['forced convection reflow (fcr)', 'forced convection reflow', 'reflow', 'fcr']);
+// All lowercase name variants that should behave as Moisture Resistance Test
+const MRT_NAMES = new Set(['moisture resistance test', 'mrt']);
+// All lowercase name variants that should behave as Preconditioning (Precon)
+const PRECON_NAMES = new Set(['preconditioning (precon)', 'preconditioning', 'precon']);
+
 // Maps alternate/alias names to the canonical step name
 const STEP_MERGE_ALIASES = {
   't & h soak': 'T&H Soak',
   't&h soak': 'T&H Soak',
+  'th soak': 'T&H Soak',
   'reflow': 'Forced Convection Reflow (FCR)',
   'fcr': 'Forced Convection Reflow (FCR)',
   'forced convection reflow': 'Forced Convection Reflow (FCR)',
@@ -945,6 +954,9 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
   // Auto-save: track whether form has been initialised (skip save on first load)
   const formInitialisedRef = useRef(false);
   const autoSaveTimerRef = useRef(null);
+  // Tracks the last data saved (used as baseline for change-detection after autosave
+  // so we don't need to reload the step from the server — which would wipe pending edits).
+  const savedBaselineRef = useRef(null);
 
   const isSATStep          = step.step_name?.toUpperCase() === 'SAT';
   const isBakeStep         = step.step_name?.toLowerCase() === 'bake';
@@ -959,13 +971,13 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
   const isPCAStep          = step.step_name?.toLowerCase() === 'physical construction analysis (pca)';
   const isProductAuditStep = step.step_name?.toLowerCase() === 'product audit';
   const isMADStep          = step.step_name?.toLowerCase() === 'moisture absorption and desorption';
-  const isMRTStep          = step.step_name?.toLowerCase() === 'moisture resistance test';
-  const isPreconStep       = step.step_name?.toLowerCase() === 'preconditioning (precon)';
-  const isFCRStep          = step.step_name?.toLowerCase() === 'forced convection reflow (fcr)';
+  const isMRTStep          = MRT_NAMES.has(step.step_name?.toLowerCase());
+  const isPreconStep       = PRECON_NAMES.has(step.step_name?.toLowerCase());
+  const isFCRStep          = FCR_NAMES.has(step.step_name?.toLowerCase());
   const isTCStep            = step.step_name?.toLowerCase() === 'temperature cycle';
   const isWhiskerTestStep   = step.step_name?.toLowerCase() === 'whisker test';
   const isElectricalStep     = step.step_name?.toLowerCase() === 'electrical test';
-  const isTHSoakStep         = step.step_name?.toLowerCase() === 't&h soak';
+  const isTHSoakStep         = TH_SOAK_NAMES.has(step.step_name?.toLowerCase());
   const isStagingStep        = step.step_name?.toLowerCase() === 'staging';
 
   const serializeCondition = totalSS
@@ -1148,7 +1160,7 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
         hts_custom_hrs_init = mTCrel[2];
         test_condition_init = `${mTCrel[1]} Custom`;
       }
-    } else if (step.step_name?.toLowerCase() === 'moisture resistance test' && test_condition_init && !test_condition_init.includes('custom_hrs') && !test_condition_init.includes('custom_cyc') && !MRT_FIXED_CONDITIONS.has(test_condition_init)) {
+    } else if (MRT_NAMES.has(step.step_name?.toLowerCase()) && test_condition_init && !test_condition_init.includes('custom_hrs') && !test_condition_init.includes('custom_cyc') && !MRT_FIXED_CONDITIONS.has(test_condition_init)) {
       // Matches "L6 30/60-168 hrs" → L6 sentinel
       const mMRT = test_condition_init.match(/^L6 30\/60-(\d+(?:\.\d+)?) hrs?$/);
       if (mMRT) {
@@ -1242,6 +1254,7 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
     // Mark form as initialised AFTER this load completes so the auto-save
     // useEffect doesn't fire for the initial population
     formInitialisedRef.current = false;
+    savedBaselineRef.current = null; // reset so handleSave compares against fresh step prop
     setTimeout(() => { formInitialisedRef.current = true; }, 0);
   }, [step]);
 
@@ -1274,32 +1287,30 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
       }
     }
     try {
+      // Use savedBaselineRef as the comparison baseline if set (avoids reload loop after autosave)
+      const baseline = savedBaselineRef.current || step;
       const updateData = {};
-      if (form.status !== step.status) updateData.status = form.status;
-      if (form.machine_no !== (step.machine_no || '')) updateData.machine_no = form.machine_no;
-      if (form.rack_no !== (step.rack_no || '')) updateData.rack_no = form.rack_no;
-      if (form.operator_id !== (step.operator_id || '')) updateData.operator_id = form.operator_id;
-      if (form.tray_no !== (step.tray_no || '')) updateData.tray_no = form.tray_no;
-      if (form.qty_in !== '' && form.qty_in !== (step.qty_in ?? '')) updateData.qty_in = parseInt(form.qty_in) || 0;
-      if (form.qty_out !== '' && form.qty_out !== (step.qty_out ?? '')) updateData.qty_out = parseInt(form.qty_out) || 0;
-      if (form.notes !== (step.notes || '')) updateData.notes = form.notes;
+      if (form.status !== baseline.status) updateData.status = form.status;
+      if (form.machine_no !== (baseline.machine_no || '')) updateData.machine_no = form.machine_no;
+      if (form.rack_no !== (baseline.rack_no || '')) updateData.rack_no = form.rack_no;
+      if (form.operator_id !== (baseline.operator_id || '')) updateData.operator_id = form.operator_id;
+      if (form.tray_no !== (baseline.tray_no || '')) updateData.tray_no = form.tray_no;
+      if (form.qty_in !== '' && String(form.qty_in) !== String(baseline.qty_in ?? '')) updateData.qty_in = parseInt(form.qty_in) || 0;
+      if (form.qty_out !== '' && String(form.qty_out) !== String(baseline.qty_out ?? '')) updateData.qty_out = parseInt(form.qty_out) || 0;
+      if (form.notes !== (baseline.notes || '')) updateData.notes = form.notes;
       if (form.started_at) {
-        // Send datetime-local value directly (format: YYYY-MM-DDTHH:mm) without timezone conversion
-        // This preserves the user's manually entered time instead of converting to UTC
         const newStarted = form.started_at;
-        const existingStarted = step.started_at ? step.started_at.slice(0, 16) : '';
+        const existingStarted = baseline.started_at ? baseline.started_at.slice(0, 16) : '';
         if (newStarted !== existingStarted) updateData.started_at = newStarted;
       }
       if (form.completed_at) {
-        // Send datetime-local value directly (format: YYYY-MM-DDTHH:mm) without timezone conversion
-        // This preserves the user's manually entered time instead of converting to UTC
         const newCompleted = form.completed_at;
-        const existingCompleted = step.completed_at ? step.completed_at.slice(0, 16) : '';
+        const existingCompleted = baseline.completed_at ? baseline.completed_at.slice(0, 16) : '';
         if (newCompleted !== existingCompleted) updateData.completed_at = newCompleted;
       }
 
       // Include attachments if they changed (SAT steps)
-      const origAtt = (step.attachments && !Array.isArray(step.attachments)) ? step.attachments : {};
+      const origAtt = (baseline.attachments && !Array.isArray(baseline.attachments)) ? baseline.attachments : {};
       if (JSON.stringify(origAtt) !== JSON.stringify(satImages)) {
         updateData.attachments = satImages;
       }
@@ -1319,16 +1330,16 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
         form.test_condition === 'L6 30/60-custom_hrs' && isMRTStep ? `L6 30/60-${form.hts_custom_hrs} hrs` :
         form.test_condition?.includes('custom_cyc') && isMRTStep ? `${form.test_condition.replace(' custom_cyc', '')} ${form.hts_custom_hrs}x` :
         form.test_condition === '30/60-custom_hrs' && isPreconStep ? `30/60-${form.hts_custom_hrs} hrs` :
-        form.test_condition === '30/60-Xhrs' && isTHSoakStep ? `30/60-${form.th_soak_custom_hrs} hrs` :
+        form.test_condition === '30/60-Xhrs' && isTHSoakStep ? `30/60-${form.th_soak_custom_hrs || ''} hrs` :
         form.test_condition?.includes('custom_cyc') && isFCRStep ? `${form.test_condition.replace(' custom_cyc', '')} ${form.hts_custom_hrs}x` :
         form.test_condition?.endsWith(' Custom') && isTCStep && form.hts_custom_hrs ? `${form.test_condition.replace(/ Custom$/, '')} ${form.hts_custom_hrs}hrs` :
         form.test_condition?.endsWith(' Custom') && isReliabilityStep && form.hts_custom_hrs ? `${form.test_condition.replace(/ Custom$/, '')} ${form.hts_custom_hrs}hrs` :
         form.test_condition === 'Custom' && isWhiskerTestStep && form.hts_custom_hrs ? `${form.hts_custom_hrs}hrs` :
         form.test_condition;
-      const origTestItem = step.custom_fields?.test_item || '';
-      const origTestCondition = step.custom_fields?.test_condition || '';
+      const origTestItem = baseline.custom_fields?.test_item || '';
+      const origTestCondition = baseline.custom_fields?.test_condition || '';
       if (form.test_item !== origTestItem || finalTestCondition !== origTestCondition) {
-        updateData.custom_fields = { ...(step.custom_fields || {}), test_item: form.test_item, test_condition: finalTestCondition };
+        updateData.custom_fields = { ...(baseline.custom_fields || {}), test_item: form.test_item, test_condition: finalTestCondition };
       }
 
       if (Object.keys(updateData).length === 0) {
@@ -1349,8 +1360,23 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
         }
       }
       setMessage(isAutoSave ? '✓ Auto-saved' : 'Step updated successfully!');
-      if (isAutoSave) setTimeout(() => setMessage(''), 2000);
-      onUpdated();
+      if (isAutoSave) {
+        // Update the saved baseline so the next autosave correctly detects only NEW changes
+        // without needing a full server reload (which would reset the form and lose pending input).
+        savedBaselineRef.current = {
+          ...baseline,
+          ...updateData,
+          custom_fields: updateData.custom_fields
+            ? { ...(baseline.custom_fields || {}), ...updateData.custom_fields }
+            : baseline.custom_fields,
+        };
+        setTimeout(() => setMessage(''), 2000);
+        // Do NOT call onUpdated() here — that would reload the step and reset the form,
+        // wiping any edits the user is still making.
+      } else {
+        savedBaselineRef.current = null; // let the upcoming reload (via onUpdated) set the baseline
+        onUpdated();
+      }
     } catch (err) {
       setMessage(`Error: ${err.message}`);
     } finally {
@@ -2205,6 +2231,17 @@ export default function RequestDetail() {
   const [plannerEstEditing, setPlannerEstEditing] = useState(false);
   const [plannerEstForm, setPlannerEstForm] = useState({ planner_est_start: '', planner_est_end: '', planner_note: '' });
   const [plannerEstSaving, setPlannerEstSaving] = useState(false);
+  // RELMON form data for RMS requests
+  const [relmonFormData, setRelmonFormData] = useState(null);
+  // Drag-and-drop for process step reordering
+  const [dragStepIdx, setDragStepIdx] = useState(null);
+  const [dragOverStepIdx, setDragOverStepIdx] = useState(null);
+  // Copy/Paste leg steps
+  const [copiedLegData, setCopiedLegData] = useState(null);
+  // Pending new-step config (shown after quick-add)
+  const [pendingStepConfig, setPendingStepConfig] = useState(null); // { stepNumber, stepName }
+  const [pendingStepForm, setPendingStepForm] = useState({ test_item: '', test_condition: '' });
+  const [pendingStepSaving, setPendingStepSaving] = useState(false);
 
   // Technicians can now edit all steps, but must provide Date and Employee number before saving
   const canUpdateStep = hasPerm('update_steps') || hasRole('Admin') || hasRole('Technician') || !!user?.isGuest;
@@ -2405,8 +2442,9 @@ export default function RequestDetail() {
       const blob = await api.downloadLtcReport(id);
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement('a');
+      const ts   = new Date().toISOString().replace(/[:.]/g, '-');
       a.href     = url;
-      a.download = `LTC_${request?.request_number || id}.xlsx`;
+      a.download = `LTC_${request?.request_number || id}_${ts}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -2418,6 +2456,14 @@ export default function RequestDetail() {
   };
 
   useEffect(() => { loadRequest(); }, [id]);
+
+  // Fetch RELMON form data when viewing an RMS request
+  useEffect(() => {
+    if (!request || request.request_type !== 'RMS') { setRelmonFormData(null); return; }
+    api.get(`/relmon/rms-form?req_no=${encodeURIComponent(request.request_number)}`)
+      .then(res => setRelmonFormData(res.found ? (res.form_data || null) : null))
+      .catch(() => setRelmonFormData(null));
+  }, [request?.request_number, request?.request_type]);
 
   // Sync analysis notes when request updates
   useEffect(() => {
@@ -2600,6 +2646,91 @@ export default function RequestDetail() {
     });
   };
 
+  // Drag-and-drop handlers for process step reorder panel
+  const handleDragStart = (idx) => setDragStepIdx(idx);
+  const handleDragOver = (e, idx) => { e.preventDefault(); setDragOverStepIdx(idx); };
+  const handleDragEnd = () => { setDragStepIdx(null); setDragOverStepIdx(null); };
+  const handleDropStep = (idx) => {
+    if (dragStepIdx === null || dragStepIdx === idx) { setDragStepIdx(null); setDragOverStepIdx(null); return; }
+    setEditStepList(prev => {
+      const arr = [...prev];
+      const [removed] = arr.splice(dragStepIdx, 1);
+      arr.splice(idx, 0, removed);
+      return arr;
+    });
+    setDragStepIdx(null);
+    setDragOverStepIdx(null);
+  };
+
+  // Copy/Paste leg steps
+  const handleCopyLegSteps = () => {
+    const data = legSteps.map(s => ({ step_name: s.step_name, custom_fields: s.custom_fields || {} }));
+    setCopiedLegData(data);
+    setSaveMsg(`LEG ${selectedLeg} steps copied (${data.length} steps)!`);
+    setTimeout(() => setSaveMsg(''), 3000);
+  };
+  const handlePasteLegSteps = async () => {
+    if (!copiedLegData || copiedLegData.length === 0) return;
+    if (!window.confirm(`Paste ${copiedLegData.length} steps into LEG ${selectedLeg}? This will replace the current steps.`)) return;
+    setStepSaving(true);
+    try {
+      const names = copiedLegData.map(s => s.step_name);
+      await api.replaceSteps(id, names, selectedLeg);
+      // Apply custom fields for each step (step numbers are 1-indexed after replace)
+      for (let i = 0; i < copiedLegData.length; i++) {
+        const cf = copiedLegData[i].custom_fields;
+        if (cf && Object.keys(cf).length > 0) {
+          await api.updateStep(id, i + 1, { custom_fields: cf }, selectedLeg);
+        }
+      }
+      loadRequest();
+      setSelectedStep(null);
+      setSaveMsg('Steps pasted successfully!');
+      setTimeout(() => setSaveMsg(''), 2000);
+    } catch (err) {
+      setSaveMsg(`Error: ${err.message}`);
+    } finally {
+      setStepSaving(false);
+    }
+  };
+
+  // Helper: get test items + conditions for a step type (for new-step config prompt)
+  const getStepTestOptions = (stepName) => {
+    const n = (stepName || '').toLowerCase().trim();
+    if (TH_SOAK_NAMES.has(n)) return { items: TH_SOAK_TEST_ITEMS, conditions: TH_SOAK_TEST_CONDITIONS };
+    if (n === 'forced convection reflow (fcr)') return { items: [], conditions: FCR_TEST_CONDITIONS };
+    if (n === 'bake') return { items: [], conditions: BAKE_TEST_CONDITIONS };
+    if (n === 'dry bake') return { items: DRY_BAKE_TEST_ITEMS, conditions: DRY_BAKE_TEST_CONDITIONS };
+    if (n === 'reliability test') return { items: RELIABILITY_TEST_ITEMS, conditions: RELIABILITY_TEST_CONDITIONS };
+    if (n === 'temperature cycle') return { items: TC_TEST_ITEMS, conditions: TC_TEST_CONDITIONS };
+    if (n === 'electrical test') return { items: ELECTRICAL_TEST_ITEMS, conditions: ELECTRICAL_TEST_CONDITIONS };
+    if (n === 'whisker test') return { items: WHISKER_TEST_ITEMS, conditions: WHISKER_TEST_CONDITIONS };
+    if (MRT_NAMES.has(n)) return { items: [], conditions: [...RELIABILITY_TEST_CONDITIONS] };
+    if (PRECON_NAMES.has(n)) return { items: [], conditions: PRECON_TEST_CONDITIONS };
+    return null; // no configurable items for this step type
+  };
+
+  // Save pending new-step config
+  const savePendingStepConfig = async () => {
+    if (!pendingStepConfig) return;
+    const { test_item, test_condition } = pendingStepForm;
+    if (!test_item && !test_condition) { setPendingStepConfig(null); return; }
+    setPendingStepSaving(true);
+    try {
+      const existing = legSteps.find(s => s.step_number === pendingStepConfig.stepNumber)?.custom_fields || {};
+      await api.updateStep(id, pendingStepConfig.stepNumber, {
+        custom_fields: { ...existing, test_item, test_condition }
+      }, selectedLeg);
+      loadRequest();
+      setPendingStepConfig(null);
+      setPendingStepForm({ test_item: '', test_condition: '' });
+    } catch (err) {
+      setSaveMsg(`Error saving step config: ${err.message}`);
+    } finally {
+      setPendingStepSaving(false);
+    }
+  };
+
   const saveSteps = async () => {
     if (editStepList.length === 0) return;
     setStepSaving(true);
@@ -2629,6 +2760,7 @@ export default function RequestDetail() {
     setStepSaving(true);
     try {
       const currentNames = legSteps.map(s => s.step_name);
+      const newStepNumber = currentNames.length + 1;
       await api.replaceSteps(id, [...currentNames, name], selectedLeg);
       // Auto-save custom name to presets
       if (!stepPresets.includes(name)) savePresets([...stepPresets, name]);
@@ -2636,6 +2768,12 @@ export default function RequestDetail() {
       setCustomStepInput('');
       setStepSuggestions([]);
       loadRequest();
+      // Prompt for test items/conditions if applicable
+      const testOpts = getStepTestOptions(name);
+      if (testOpts) {
+        setPendingStepConfig({ stepNumber: newStepNumber, stepName: name });
+        setPendingStepForm({ test_item: '', test_condition: '' });
+      }
       setSaveMsg('Step added!');
       setTimeout(() => setSaveMsg(''), 2000);
     } catch (err) {
@@ -3500,6 +3638,164 @@ export default function RequestDetail() {
                 </div>
               </div>
             )}
+
+            {/* ── RELMON RMS Additional Info ── */}
+            {!editing && request.request_type === 'RMS' && relmonFormData && (() => {
+              const fd = relmonFormData;
+              const hasRelTest = fd.process || fd.condition || fd.mrt_level || fd.read_point;
+              const hasLongTerm = fd.longterm_processcode || fd.longterm_condition || fd.longterm_read_point;
+              const REL_TEST_STEPS = ['Incoming Inspection','Visual','Serialize Samples','O/S','SAT','Bake','Reflow','Reliability Test','SAT','O/S','Visual'];
+              const LONG_TERM_STEPS = ['Incoming Inspection','Visual','Serialize Samples','O/S','SAT','Bake','Reflow','Preconditioning (Precon)','Reliability Test','SAT','O/S','Visual'];
+
+              const RmsSubSection = ({ title, color, children }) => (
+                <div className={`mt-4 rounded-lg border ${color === 'blue' ? 'border-blue-200 bg-blue-50' : color === 'emerald' ? 'border-emerald-200 bg-emerald-50' : color === 'violet' ? 'border-violet-200 bg-violet-50' : 'border-amber-200 bg-amber-50'}`}>
+                  <div className={`px-4 py-2 border-b ${color === 'blue' ? 'border-blue-200' : color === 'emerald' ? 'border-emerald-200' : color === 'violet' ? 'border-violet-200' : 'border-amber-200'}`}>
+                    <p className={`text-xs font-semibold uppercase tracking-wider ${color === 'blue' ? 'text-blue-700' : color === 'emerald' ? 'text-emerald-700' : color === 'violet' ? 'text-violet-700' : 'text-amber-700'}`}>{title}</p>
+                  </div>
+                  <div className="px-4 py-3">{children}</div>
+                </div>
+              );
+
+              const RmsRow = ({ label, value }) => value ? (
+                <div className="flex gap-2 py-0.5">
+                  <span className="text-xs text-slate-400 w-36 flex-shrink-0">{label}</span>
+                  <span className="text-xs font-medium text-slate-700">{value}</span>
+                </div>
+              ) : null;
+
+              return (
+                <>
+                  {/* Pkg & Lot Description */}
+                  <RmsSubSection title="Pkg & Lot Description" color="blue">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
+                      <div>
+                        <RmsRow label="Package Code" value={fd.package_code} />
+                        <RmsRow label="Package Type" value={fd.package_type} />
+                        <RmsRow label="Lead / Ball Count" value={fd.lead_ball_count} />
+                        <RmsRow label="Package Size" value={fd.package_size} />
+                        <RmsRow label="Package Thickness" value={fd.package_thickness} />
+                        <RmsRow label="Lead Pitch" value={fd.lead_pitch} />
+                        <RmsRow label="Assembly Site" value={fd.assembly_site} />
+                      </div>
+                      <div>
+                        <RmsRow label="Customer No." value={fd.customer_no} />
+                        <RmsRow label="Customer" value={fd.customer} />
+                        <RmsRow label="Device Number" value={fd.device_number} />
+                        <RmsRow label="Lot Number" value={fd.lot_number} />
+                        <RmsRow label="Date Code" value={fd.date_code} />
+                        <RmsRow label="Unit Quantity" value={fd.unit_quantity} />
+                      </div>
+                    </div>
+                  </RmsSubSection>
+
+                  {/* Materials */}
+                  <RmsSubSection title="Materials" color="emerald">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
+                      <div>
+                        <RmsRow label="Die Size (mils)" value={fd.die_size_mils} />
+                        <RmsRow label="Passivation" value={fd.passivation} />
+                        <RmsRow label="Metallization" value={fd.metallization} />
+                        <RmsRow label="Die Pad Size (mils)" value={fd.die_pad_size_mils} />
+                        <RmsRow label="LF Type" value={fd.lf_type} />
+                        <RmsRow label="LF/Subs Material" value={fd.lf_subs_material} />
+                        <RmsRow label="LF/Subs Supplier" value={fd.lf_subs_supplier} />
+                      </div>
+                      <div>
+                        <RmsRow label="LF/Subs SID#" value={fd.lf_subs_sid} />
+                        <RmsRow label="Die Attach Material" value={fd.die_attach_material} />
+                        <RmsRow label="Wire Size/Type" value={fd.wire_size_type} />
+                        <RmsRow label="Die Coat" value={fd.die_coat} />
+                        <RmsRow label="EMC/Encap/Fill Matl" value={fd.emc_encap_fill_material} />
+                        <RmsRow label="HS" value={fd.hs} />
+                      </div>
+                    </div>
+                  </RmsSubSection>
+
+                  {/* REL Test Requirements */}
+                  {hasRelTest && (
+                    <RmsSubSection title="REL Test Requirements" color="violet">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 mb-3">
+                        <div>
+                          <RmsRow label="MRT Level" value={fd.mrt_level} />
+                          <RmsRow label="Process" value={fd.process} />
+                          <RmsRow label="Condition" value={fd.condition} />
+                          <RmsRow label="Read Point" value={fd.read_point} />
+                        </div>
+                        <div>
+                          <RmsRow label="Qty" value={fd.qty} />
+                          <RmsRow label="Date-In" value={fd.date_in} />
+                          <RmsRow label="Date-Out" value={fd.date_out} />
+                          <RmsRow label="MA" value={fd.ma} />
+                        </div>
+                      </div>
+                      {canManageSteps && (
+                        <button
+                          disabled={legProcessSaving}
+                          onClick={async () => {
+                            if (!window.confirm(`Apply REL Test process to LEG ${selectedLeg}? (${REL_TEST_STEPS.length} steps)`)) return;
+                            setLegProcessSaving(true);
+                            try {
+                              await api.replaceSteps(id, REL_TEST_STEPS, selectedLeg);
+                              loadRequest();
+                              setSaveMsg('REL Test process applied!');
+                              setTimeout(() => setSaveMsg(''), 2500);
+                            } catch (err) { setSaveMsg(`Error: ${err.message}`); }
+                            finally { setLegProcessSaving(false); }
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors">
+                          {legProcessSaving
+                            ? <span className="w-3 h-3 border border-white/50 border-t-white rounded-full animate-spin" />
+                            : <LayoutList className="w-3 h-3" />}
+                          Apply REL Test Process to LEG {selectedLeg}
+                        </button>
+                      )}
+                    </RmsSubSection>
+                  )}
+
+                  {/* Long Term Test Requirements */}
+                  {hasLongTerm && (
+                    <RmsSubSection title="Long Term Test Requirements" color="amber">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 mb-3">
+                        <div>
+                          <RmsRow label="Process Code" value={fd.longterm_processcode} />
+                          <RmsRow label="Condition" value={fd.longterm_condition} />
+                          <RmsRow label="Read Point" value={fd.longterm_read_point} />
+                          <RmsRow label="SS" value={fd.longterm_ss} />
+                          <RmsRow label="Mach No." value={fd.longterm_mach_no} />
+                        </div>
+                        <div>
+                          <RmsRow label="Date Test Start" value={fd.longterm_date_test_start} />
+                          <RmsRow label="Date Test End" value={fd.longterm_date_test_end} />
+                          <RmsRow label="OPTR Load" value={fd.longterm_optr_load} />
+                          <RmsRow label="OPTR Unload" value={fd.longterm_optr_unload} />
+                        </div>
+                      </div>
+                      {canManageSteps && (
+                        <button
+                          disabled={legProcessSaving}
+                          onClick={async () => {
+                            if (!window.confirm(`Apply Precon + Long Term process to LEG ${selectedLeg}? (${LONG_TERM_STEPS.length} steps)`)) return;
+                            setLegProcessSaving(true);
+                            try {
+                              await api.replaceSteps(id, LONG_TERM_STEPS, selectedLeg);
+                              loadRequest();
+                              setSaveMsg('Precon + Long Term process applied!');
+                              setTimeout(() => setSaveMsg(''), 2500);
+                            } catch (err) { setSaveMsg(`Error: ${err.message}`); }
+                            finally { setLegProcessSaving(false); }
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors">
+                          {legProcessSaving
+                            ? <span className="w-3 h-3 border border-white/50 border-t-white rounded-full animate-spin" />
+                            : <LayoutList className="w-3 h-3" />}
+                          Apply Precon + Long Term to LEG {selectedLeg}
+                        </button>
+                      )}
+                    </RmsSubSection>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
       </div>
@@ -3529,6 +3825,20 @@ export default function RequestDetail() {
               <button onClick={handleDuplicateLeg}
                 className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200 transition-colors">
                 Duplicate
+              </button>
+            )}
+            {canManageSteps && (
+              <button onClick={handleCopyLegSteps}
+                title={`Copy all ${legSteps.length} steps from LEG ${selectedLeg}`}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 transition-colors flex items-center gap-1">
+                📋 Copy Process Steps
+              </button>
+            )}
+            {canManageSteps && copiedLegData && (
+              <button onClick={handlePasteLegSteps} disabled={stepSaving}
+                title={`Paste ${copiedLegData.length} copied steps into LEG ${selectedLeg}`}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 transition-colors flex items-center gap-1 disabled:opacity-50">
+                📌 Paste Process Steps {copiedLegData ? `(${copiedLegData.length})` : ''}
               </button>
             )}
             {canManageSteps && legs.length > 1 && (
@@ -3779,6 +4089,16 @@ export default function RequestDetail() {
                       <span>{stepMergeWarning}</span>
                     </div>
                   )}
+                  {(() => {
+                    const _alias = STEP_MERGE_ALIASES[customStepInput.toLowerCase().trim()];
+                    const _aliasLabel = _alias && _alias.toLowerCase() !== customStepInput.toLowerCase().trim() ? _alias : null;
+                    return _aliasLabel ? (
+                      <div className="px-3 py-1.5 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg text-xs flex items-center gap-1.5">
+                        <span className="font-medium">→</span>
+                        <span>Will be added as <strong>{_aliasLabel}</strong></span>
+                      </div>
+                    ) : null;
+                  })()}
                   <div className="flex gap-2">
                     <div className="flex-1 relative">
                       <input
@@ -3822,6 +4142,65 @@ export default function RequestDetail() {
             </div>
           )}
 
+          {/* Pending new-step config: shown after quick-add when step has test options */}
+          {pendingStepConfig && (() => {
+            const opts = getStepTestOptions(pendingStepConfig.stepName);
+            if (!opts) return null;
+            const { items, conditions } = opts;
+            return (
+              <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-lg space-y-2">
+                <p className="text-xs font-semibold text-emerald-800 flex items-center gap-1.5">
+                  <PlusCircle className="w-3.5 h-3.5" />
+                  Set Test Details for <span className="font-bold">{pendingStepConfig.stepName}</span> (Step {pendingStepConfig.stepNumber})
+                </p>
+                {items.length > 0 && (
+                  <div>
+                    <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Test Item</label>
+                    <select
+                      value={pendingStepForm.test_item}
+                      onChange={e => setPendingStepForm(f => ({ ...f, test_item: e.target.value }))}
+                      className="mt-1 w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:border-emerald-400 focus:ring-1 focus:ring-emerald-100">
+                      <option value="">-- Select Test Item --</option>
+                      {items.map(it => <option key={it} value={it}>{it}</option>)}
+                    </select>
+                  </div>
+                )}
+                {conditions.length > 0 && (
+                  <div>
+                    <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Test Condition</label>
+                    <select
+                      value={pendingStepForm.test_condition}
+                      onChange={e => setPendingStepForm(f => ({ ...f, test_condition: e.target.value }))}
+                      className="mt-1 w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:border-emerald-400 focus:ring-1 focus:ring-emerald-100">
+                      <option value="">-- Select Test Condition --</option>
+                      {conditions.map(c => <option key={c} value={c}>{c.replace('custom_cyc','custom cycles').replace('_hrs',' hrs').replace('Xhrs','custom hrs')}</option>)}
+                    </select>
+                    {/* Custom hrs field for T&H Soak 30/60-Xhrs */}
+                    {pendingStepForm.test_condition === '30/60-Xhrs' && (
+                      <input type="number" min="1" placeholder="Enter hours"
+                        value={pendingStepForm._customHrs || ''}
+                        onChange={e => setPendingStepForm(f => ({ ...f, _customHrs: e.target.value, test_condition: `30/60-${e.target.value} hrs` }))}
+                        className="mt-1 w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white" />
+                    )}
+                  </div>
+                )}
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={savePendingStepConfig}
+                    disabled={pendingStepSaving || (!pendingStepForm.test_item && !pendingStepForm.test_condition)}
+                    className="flex-1 px-3 py-1.5 bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg text-xs font-medium disabled:opacity-50 transition-colors">
+                    {pendingStepSaving ? 'Saving...' : 'Save Test Details'}
+                  </button>
+                  <button
+                    onClick={() => { setPendingStepConfig(null); setPendingStepForm({ test_item: '', test_condition: '' }); }}
+                    className="px-3 py-1.5 bg-white border border-slate-200 text-slate-500 hover:bg-slate-50 rounded-lg text-xs font-medium">
+                    Skip
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
           {editingSteps ? (
             <div className="space-y-3">
               {/* Process preset selector */}
@@ -3858,8 +4237,23 @@ export default function RequestDetail() {
               {editStepList.length > 0 && (
                 <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-64 overflow-y-auto">
                   {editStepList.map((step, idx) => (
-                    <div key={idx} className="flex items-center gap-2 px-3 py-2 group text-sm">
-                      <GripVertical className="w-3.5 h-3.5 text-slate-300 flex-shrink-0" />
+                    <div
+                      key={idx}
+                      draggable
+                      onDragStart={() => handleDragStart(idx)}
+                      onDragOver={e => handleDragOver(e, idx)}
+                      onDrop={() => handleDropStep(idx)}
+                      onDragEnd={handleDragEnd}
+                      className={`flex items-center gap-2 px-3 py-2 group text-sm transition-colors ${
+                        dragOverStepIdx === idx && dragStepIdx !== idx
+                          ? 'bg-blue-50 border-l-4 border-blue-400'
+                          : dragStepIdx === idx
+                          ? 'opacity-50 bg-slate-50'
+                          : ''
+                      }`}
+                      style={{ cursor: 'grab' }}
+                    >
+                      <GripVertical className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                       <span className="text-xs font-medium text-slate-400 w-5">{idx + 1}.</span>
                       <span className="flex-1 text-slate-700">{step}</span>
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
