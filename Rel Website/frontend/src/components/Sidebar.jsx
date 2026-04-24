@@ -4,26 +4,28 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import {
   LayoutDashboard, ClipboardList, Settings, Users, LogOut, X, CheckCircle2, FileText, Archive, ListFilter, MonitorDot,
-  Sun, Moon, ShieldCheck, ChevronRight, Layers, Microscope, ExternalLink, PackageOpen, BarChart3, Database, TableProperties,
+  Sun, Moon, ShieldCheck, ChevronRight, Layers, Microscope, ExternalLink, PackageOpen, BarChart3, Database, Table,
   ScanSearch,
 } from 'lucide-react';
 import AmkorLogo from '../assets/amkor-logo.svg';
 
 const allNavItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Home', end: true, guestAllowed: true },
   {
-    to: '/my-requests', icon: FileText, label: 'My Requests', guestAllowed: false,
     subItems: [
       { to: '/requests', icon: ClipboardList, label: 'All Requests', guestAllowed: true },
+      { to: '/my-requests', icon: ClipboardList, label: 'My Requests', guestAllowed: true },
       { to: '/completed', icon: CheckCircle2, label: 'All Requests Completed', guestAllowed: true },
     ]
   },
   { to: '/approval', icon: ShieldCheck, label: 'Approval Queue', guestAllowed: false, roles: ['Admin', 'Planner'] },
-  { to: '/masterlist', icon: TableProperties, label: 'Masterlist', guestAllowed: false, roles: ['Admin', 'Planner'] },
+  { to: '/masterlist', icon: Table, label: 'Masterlist', guestAllowed: false, roles: ['Admin', 'Planner'] },
   { to: '/requests', icon: ClipboardList, label: 'All Requests', guestAllowed: true, roles: ['Technician'] },
   { to: '/loading-unloading', icon: PackageOpen, label: 'Loading / Unloading', guestAllowed: true, roles: ['Technician', 'Admin', 'Reliability Engineer', 'Planner'] },
   { to: '/process-monitoring', icon: ScanSearch, label: 'Process Monitoring', guestAllowed: false },
   { to: '/relmon', icon: Database, label: 'RELMON', guestAllowed: false },
+  // {
+  //   to: '/ic-mapping-tool', icon: Layers, label: 'IC Mapping Tool', guestAllowed: true
+  // },
   {
     to: '/_record-monitor', icon: Layers, label: 'Record Monitor', guestAllowed: false, noNav: true,
     subItems: [
@@ -111,6 +113,7 @@ export default function Sidebar({ onClose }) {
         </a>
       </div>
 
+
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {navItems.map(item => {
@@ -130,7 +133,9 @@ export default function Sidebar({ onClose }) {
               >
                 {item.noNav ? (
                   <button className={headerCls} onClick={() => setTappedGroup(tappedGroup === item.to ? null : item.to)}>
-                    <item.icon className="w-4.5 h-4.5 flex-shrink-0" />
+                    {typeof item.icon === 'function' ? (
+                      <item.icon className="w-4.5 h-4.5 flex-shrink-0" />
+                    ) : null}
                     <span className="flex-1">{item.label}</span>
                     <ChevronRight className={`w-3.5 h-3.5 flex-shrink-0 transition-transform duration-200 ${isGroupHovered ? 'rotate-90' : ''}`} />
                   </button>
@@ -156,7 +161,9 @@ export default function Sidebar({ onClose }) {
                       }`
                     }
                   >
-                    <item.icon className="w-4.5 h-4.5 flex-shrink-0" />
+                    {typeof item.icon === 'function' ? (
+                      <item.icon className="w-4.5 h-4.5 flex-shrink-0" />
+                    ) : null}
                     <span className="flex-1">{item.label}</span>
                     <ChevronRight className={`w-3.5 h-3.5 flex-shrink-0 transition-transform duration-200 ${isGroupHovered ? 'rotate-90' : ''}`} />
                   </NavLink>
@@ -177,7 +184,9 @@ export default function Sidebar({ onClose }) {
                           }`
                         }
                       >
-                        <sub.icon className="w-4 h-4 flex-shrink-0" />
+                        {typeof sub.icon === 'function' ? (
+                          <sub.icon className="w-4 h-4 flex-shrink-0" />
+                        ) : null}
                         {sub.label}
                       </NavLink>
                     ))}
@@ -206,6 +215,8 @@ export default function Sidebar({ onClose }) {
           );
         })}
       </nav>
+
+
 
       {/* User section */}
       <div className="px-3 py-4 border-t border-slate-800">

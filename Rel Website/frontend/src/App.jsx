@@ -24,6 +24,8 @@ import PerformanceMonitor from './pages/PerformanceMonitor';
 import RelMon from './pages/RelMon';
 import ProcessMonitoring from './pages/ProcessMonitoring';
 import UserGuide, { hasUserDismissedGuide } from './components/UserGuide';
+import ICPinoutTestUI from './ICPinoutTestUI';
+// import ICMappingTool from './pages/ICMappingTool';
 
 const GUEST_ALLOWED_PATHS = ['/', '/completed'];
 
@@ -195,6 +197,7 @@ function AppRoutes() {
             <Route path="performance" element={<ProtectedRoute><PerformanceMonitor /></ProtectedRoute>} />
             <Route path="relmon" element={<ProtectedRoute><RelMon /></ProtectedRoute>} />
             <Route path="process-monitoring" element={<ProtectedRoute><ProcessMonitoring /></ProtectedRoute>} />
+            {/* <Route path="/ic-mapping-tool" element={<ProtectedRoute guestAllowed><ICMappingTool /></ProtectedRoute>} /> */}
           </Route>
         </Routes>
       </RouteTransition>

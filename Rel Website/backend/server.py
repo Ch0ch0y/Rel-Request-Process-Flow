@@ -3007,7 +3007,8 @@ def _generate_sat_report_excel(req: dict) -> bytes:
         sheet_name = f"Leg {leg}"
         ws = wb.create_sheet(title=sheet_name)
         # Cols: 1=spacer, 2=T-Scan, 3=divider, 4=1.C-Scan, 5=divider, 6=2.C-Scan, 7=divider, 8=Attachments, 9=end
-        _set_col_widths(ws, {1:3, 2:27, 3:2, 4:27, 5:2, 6:27, 7:2, 8:27, 9:3})
+        # Set columns B, D, F, H (2, 4, 6, 8) to 47.29 width
+        _set_col_widths(ws, {1:3, 2:47.29, 3:2, 4:47.29, 5:2, 6:47.29, 7:2, 8:47.29, 9:3})
 
         # Company info top-right (col 6 = F, spans F-G)
         for i, line in enumerate([
@@ -3066,8 +3067,9 @@ def _generate_sat_report_excel(req: dict) -> bytes:
 
         photo_no = 1
         # Each image: fits within one 27-unit col (~189px wide, same height)
-        img_w    = 189
-        img_h    = 165
+        # Set image size to 3.5in x 3.5in (Excel uses pixels, 1in ≈ 96px)
+        img_w    = int(3.5 * 96)  # 336 px
+        img_h    = int(3.5 * 96)  # 336 px
         rows_per_img = max(1, round(img_h / 15))
         row_h_pt     = img_h / rows_per_img
 
@@ -3115,8 +3117,8 @@ def _generate_sat_report_excel(req: dict) -> bytes:
                         if os.path.exists(img_path):
                             try:
                                 xl_img = XLImage(img_path)
-                                xl_img.width  = img_w * 3
-                                xl_img.height = img_h * 2
+                                xl_img.width  = img_w
+                                xl_img.height = img_h
                                 ws.add_image(xl_img, f"B{r}")
                                 rn = max(1, round(xl_img.height / 15))
                                 for ir in range(r, r + rn):
@@ -8823,25 +8825,29 @@ async def clear_masterlist(current_user: User = Depends(require_role([UserRole.A
         await db.close()
 
 
-class MasterlistRecord(BaseModel):
-    ww: Optional[str] = None
-    date_received: Optional[str] = None
-    rrs_no: Optional[str] = None
-    purpose: Optional[str] = None
-    qual_type: Optional[str] = None
-    customer: Optional[str] = None
-    pkg_type: Optional[str] = None
-    lc_bc: Optional[str] = None
-    rr_agile_no: Optional[str] = None
-    test_level: Optional[str] = None
-    qty: Optional[str] = None
-    num_days: Optional[str] = None
-    num_legs: Optional[str] = None
-    est_start: Optional[str] = None
-    est_completion: Optional[str] = None
-    recommit: Optional[str] = None
-    planner_remarks: Optional[str] = None
 
+
+from pydantic import BaseModel
+
+# Minimal Pydantic model for MasterlistRecord
+class MasterlistRecord(BaseModel):
+    ww: str
+    date_received: str
+    rrs_no: str = None
+    purpose: str
+    qual_type: str
+    customer: str
+    pkg_type: str
+    lc_bc: str
+    rr_agile_no: str
+    test_level: str
+    qty: int
+    num_days: int
+    num_legs: int
+    est_start: str
+    est_completion: str = None
+    recommit: str = None
+    planner_remarks: str = None
 
 @api_router.post("/masterlist", status_code=201)
 async def add_masterlist_record(

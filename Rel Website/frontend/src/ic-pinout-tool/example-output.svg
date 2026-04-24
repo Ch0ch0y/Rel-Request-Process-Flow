@@ -1,0 +1,16 @@
+<!-- Example SVG output for a 32-pin QFN package (mock data) -->
+<svg width="200" height="200" xmlns="http://www.w3.org/2000/svg">
+  <rect x="30" y="30" width="140" height="140" fill="white" stroke="black" stroke-width="2"/>
+  <rect x="82" y="82" width="36" height="36" fill="#eee" stroke="#888" stroke-width="1.5"/>
+  <!-- Pins (top, right, bottom, left) -->
+  <!-- Top side pins -->
+  <rect x="44" y="27" width="6" height="6" fill="#fff" stroke="#333"/>
+  <line x1="47" y1="30" x2="47" y2="14" stroke="#333" stroke-width="2"/>
+  <text x="47" y="12" font-size="10" text-anchor="middle" fill="#222">Pin 1</text>
+  <!-- ...more pins would be drawn here... -->
+  <!-- Example for 2nd pin on top -->
+  <rect x="53" y="27" width="6" height="6" fill="#fff" stroke="#333"/>
+  <line x1="56" y1="30" x2="56" y2="14" stroke="#333" stroke-width="2"/>
+  <text x="56" y="12" font-size="10" text-anchor="middle" fill="#222">Pin 2</text>
+  <!-- ...repeat for all pins on all sides... -->
+</svg>

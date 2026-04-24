@@ -506,6 +506,13 @@ export default function Requests() {
     setDeleteConfirm(null);
   };
 
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const handleDropdown = (open) => setDropdownOpen(open);
+  const handleNav = (path) => {
+    setDropdownOpen(false);
+    window.location.href = path;
+  };
+
   return (
     <div className="space-y-6 stagger-children">
       {/* Header */}
@@ -515,8 +522,24 @@ export default function Requests() {
             <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
               <LayoutList className="w-5 h-5 text-blue-600 dark:text-blue-400" />
             </div>
-            <div>
-              <h1 className="text-xl font-heading font-bold text-slate-900 dark:text-white tracking-tight">Requests</h1>
+            <div className="relative" onMouseEnter={() => handleDropdown(true)} onMouseLeave={() => handleDropdown(false)}>
+              <button
+                className="text-xl font-heading font-bold text-slate-900 dark:text-white tracking-tight bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-6 py-2 w-56 flex items-center justify-between focus:outline-none"
+                style={{ minWidth: '180px' }}
+                onClick={() => setDropdownOpen((v) => !v)}
+                aria-haspopup="listbox"
+                aria-expanded={dropdownOpen}
+              >
+                All Requests
+                <span className="ml-2">▼</span>
+              </button>
+              {dropdownOpen && (
+                <div className="absolute left-0 mt-2 w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-10">
+                  <button onClick={() => handleNav('/requests')} className="block w-full text-left px-4 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-slate-900 dark:text-white">All Requests</button>
+                  <button onClick={() => handleNav('/my-requests')} className="block w-full text-left px-4 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-slate-900 dark:text-white">My Requests</button>
+                  <button onClick={() => handleNav('/completed')} className="block w-full text-left px-4 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-slate-900 dark:text-white">Completed Requests</button>
+                </div>
+              )}
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Manage RELDMS requests.</p>
             </div>
           </div>
@@ -631,10 +654,27 @@ export default function Requests() {
             >
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-3 mb-1">
-                  <span className="font-mono text-base font-bold text-blue-700 dark:text-blue-400 tracking-tight">
-                    {req.original_rr_number || req.request_number}
-                  </span>
+                                  {/* REL# at the top */}
+                                  {req.request_number && (
+                                    <div className="font-mono text-lg font-extrabold text-blue-700 dark:text-blue-400 mb-1 tracking-tight">
+                                      {req.request_number}
+                                    </div>
+                                  )}
+                                  {/* Request Title */}
+                                  {req.title && (
+                                    <div className="font-heading text-base font-bold text-slate-900 dark:text-white mb-1 truncate">
+                                      {req.title}
+                                    </div>
+                                  )}
                   <StatusBadge status={req.status} />
+                  {req.rrs_no && (
+                    <span className="inline-flex flex-col items-center ml-2">
+                      <span className="px-2 py-0.5 rounded-lg text-[11px] font-semibold border bg-violet-50 text-violet-700 border-violet-200" style={{lineHeight: '1.1'}}>
+                        RRS#<br/>
+                        <span className="font-mono text-base font-bold text-violet-700">{req.rrs_no}</span>
+                      </span>
+                    </span>
+                  )}
                   {/* Blinking red dot for delayed requests */}
                   {req.deadline && new Date(req.deadline) < new Date() && req.status !== 'completed' && (
                     <span className="relative flex h-2.5 w-2.5" title="Delayed — past deadline">
