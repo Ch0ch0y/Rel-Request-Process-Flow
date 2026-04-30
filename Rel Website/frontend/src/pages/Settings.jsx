@@ -1568,7 +1568,7 @@ export default function Settings() {
                       )}
                     </div>
                     <div className="flex items-center gap-2 text-xs text-slate-400">
-                      <span>{new Date(b.created_at).toLocaleString()}</span>
+                      <span>{new Date(b.created_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}</span>
                       <span>•</span>
                       <span>{b.size_mb} MB</span>
                       {b.relative_path && (

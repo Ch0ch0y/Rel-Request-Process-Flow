@@ -5626,6 +5626,52 @@ async def delete_process_preset(
         await db.close()
 
 
+@api_router.get("/step-catalog")
+async def get_step_catalog(current_user: User = Depends(get_current_user)):
+    """Return server-persisted step options and step name presets (shared across all users)."""
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT custom_fields FROM settings WHERE id = 1")
+        row = await cursor.fetchone()
+        cf = json.loads(row[0]) if row and row[0] else {}
+        return cf.get("_step_catalog", {})
+    finally:
+        await db.close()
+
+
+@api_router.patch("/step-catalog")
+async def patch_step_catalog(
+    delta: Dict[str, Any],
+    current_user: User = Depends(get_current_user)
+):
+    """Merge delta keys into step catalog stored in settings.custom_fields._step_catalog."""
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT custom_fields FROM settings WHERE id = 1")
+        row = await cursor.fetchone()
+        cf = json.loads(row[0]) if row and row[0] else {}
+        catalog = cf.get("_step_catalog", {})
+        catalog.update(delta)
+        cf["_step_catalog"] = catalog
+        now = datetime.now(timezone.utc).isoformat()
+        cursor2 = await db.execute("SELECT id FROM settings WHERE id = 1")
+        exists = await cursor2.fetchone()
+        if exists:
+            await db.execute(
+                "UPDATE settings SET custom_fields = ?, updated_at = ? WHERE id = 1",
+                [json.dumps(cf), now]
+            )
+        else:
+            await db.execute(
+                "INSERT INTO settings (id, custom_fields, updated_at) VALUES (1, ?, ?)",
+                [json.dumps(cf), now]
+            )
+        await db.commit()
+        return {"message": "Step catalog updated"}
+    finally:
+        await db.close()
+
+
 # ========================
 # Excel Import Routes - Reliability Test Request Sheets
 # ========================

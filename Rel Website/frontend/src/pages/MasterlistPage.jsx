@@ -44,7 +44,7 @@ function formatDateDisplay(str) {
   const d = parseAnyDate(str);
   if (!d) return str || '';
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-    + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 // Convert any date string to the "YYYY-MM-DDTHH:mm" format needed by datetime-local input
 function toDatetimeLocal(str) {

@@ -586,7 +586,7 @@ export default function Users() {
                         Online
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1.5 text-xs text-slate-400" title={u.last_seen ? new Date(u.last_seen).toLocaleString() : 'Never logged in'}>
+                      <span className="inline-flex items-center gap-1.5 text-xs text-slate-400" title={u.last_seen ? new Date(u.last_seen).toLocaleString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : 'Never logged in'}>
                         <span className="inline-flex rounded-full h-2 w-2 bg-slate-300"></span>
                         {formatLastSeen(u.last_seen)}
                       </span>
@@ -594,7 +594,7 @@ export default function Users() {
                   </td>
                   <td className="px-4 py-4 text-sm text-slate-400">
                     <div>{new Date(u.created_at).toLocaleDateString()}</div>
-                    <div className="text-xs text-slate-400">{new Date(u.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                    <div className="text-xs text-slate-400">{new Date(u.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</div>
                   </td>
                   <td className="px-4 py-4 text-right">
                     <div className="flex items-center justify-end gap-1">
@@ -683,7 +683,7 @@ export default function Users() {
                     )}
                   </td>
                   <td className="px-6 py-3 text-sm text-slate-500 dark:text-slate-400">
-                    {new Date(log.login_at).toLocaleString()}
+                    {new Date(log.login_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}
                   </td>
                 </tr>
               ))}
@@ -739,7 +739,7 @@ export default function Users() {
                     </td>
                     <td className="px-6 py-3 text-sm text-slate-500 dark:text-slate-400">{tech.employee_id}</td>
                     <td className="px-6 py-3 text-sm text-slate-500 dark:text-slate-400">{tech.employee_position || '—'}</td>
-                    <td className="px-6 py-3 text-sm text-slate-500 dark:text-slate-400">{tech.login_at ? new Date(tech.login_at).toLocaleString() : '—'}</td>
+                    <td className="px-6 py-3 text-sm text-slate-500 dark:text-slate-400">{tech.login_at ? new Date(tech.login_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '—'}</td>
                     <td className="px-6 py-3">
                       <span className="inline-flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 font-medium">
                         <span className="relative flex h-2 w-2">

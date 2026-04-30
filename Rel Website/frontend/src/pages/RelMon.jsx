@@ -1952,7 +1952,7 @@ export default function RelMon() {
                   </h2>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                     Rows: {rows.length} · Columns: {rows[0]?.length ?? 0}
-                    {meta.updated_at ? ` · Last save: ${new Date(meta.updated_at).toLocaleString()}${meta.updated_by ? ` by ${meta.updated_by}` : ''}` : ''}
+                    {meta.updated_at ? ` · Last save: ${new Date(meta.updated_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}${meta.updated_by ? ` by ${meta.updated_by}` : ''}` : ''}
                   </p>
                 </div>
               ) : (

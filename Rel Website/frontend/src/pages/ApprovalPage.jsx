@@ -143,7 +143,7 @@ export default function ApprovalPage() {
                     <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{req.customer || ''}</td>
                     <td className="px-4 py-3 font-mono text-xs text-slate-600 dark:text-slate-400">{req.lot_no || ''}</td>
                     <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{req.created_by_username || ''}</td>
-                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400 text-xs">{req.created_at ? new Date(req.created_at).toLocaleDateString() : ''}</td>
+                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400 text-xs">{req.created_at ? new Date(req.created_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : ''}</td>
                     <td className="px-4 py-3">
                       <span className={'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ' + (STATUS_COLORS[req.status] || 'bg-slate-100 text-slate-600 border-slate-200')}>
                         {STATUS_LABELS[req.status] || req.status}

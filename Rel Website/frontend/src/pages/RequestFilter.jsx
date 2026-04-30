@@ -369,7 +369,7 @@ export default function RequestFilter() {
                               <Archive className={`w-4 h-4 shrink-0 ${isSel ? 'text-amber-600' : 'text-slate-400'}`} />
                               <div className="flex-1 min-w-0">
                                 <p className={`text-xs font-medium truncate ${isSel ? 'text-amber-800' : 'text-slate-700'}`}>{b.filename}</p>
-                                <p className="text-[10px] text-slate-400">{b.type}  {b.size_mb} MB  {new Date(b.created_at).toLocaleString()}</p>
+                                <p className="text-[10px] text-slate-400">{b.type}  {b.size_mb} MB  {new Date(b.created_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}</p>
                               </div>
                               {isSel && backupLoading && <Loader2 className="w-3.5 h-3.5 text-amber-500 animate-spin shrink-0" />}
                               {isSel && !backupLoading && fetched && (

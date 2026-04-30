@@ -53,7 +53,7 @@ function formatDT(iso) {
   if (!iso) return '—';
   return new Date(iso).toLocaleString('en-PH', {
     timeZone: 'Asia/Manila', month: 'short', day: 'numeric', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', hour12: true,
+    hour: '2-digit', minute: '2-digit', hour12: false,
   });
 }
 
@@ -336,7 +336,7 @@ export default function ProcessMonitoring() {
         <div className="flex items-center gap-2">
           {lastRefresh && (
             <span className="text-xs text-slate-400 dark:text-slate-500 hidden sm:inline">
-              Updated {lastRefresh.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              Updated {lastRefresh.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
             </span>
           )}
           <button

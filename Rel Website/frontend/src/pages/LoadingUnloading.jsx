@@ -46,7 +46,7 @@ function formatDT(iso) {
   return new Date(iso).toLocaleString('en-PH', {
     timeZone: 'Asia/Manila',
     month: 'short', day: 'numeric', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', hour12: true,
+    hour: '2-digit', minute: '2-digit', hour12: false,
   });
 }
 
@@ -380,7 +380,7 @@ export default function LoadingUnloading() {
           </button>
           {lastRefresh && (
             <span className="text-[11px] text-slate-400 dark:text-slate-500 hidden sm:block">
-              Updated {lastRefresh.toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', hour12: true })}
+              Updated {lastRefresh.toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', hour12: false })}
             </span>
           )}
         </div>

@@ -96,7 +96,7 @@ export default function CompletedRequests() {
       ['Ball Count', req.ball_count], ['Lead Pitch', req.lead_pitch],
       ['Lead Count', req.lead_count], ['Total SS', req.total_ss],
       ['Deadline', req.deadline], ['Created By', req.created_by_username],
-      ['Created At', req.created_at ? new Date(req.created_at).toLocaleString() : '—'],
+      ['Created At', req.created_at ? new Date(req.created_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '—'],
     ].filter(([, v]) => v != null && v !== '' && v !== false);
 
     const infoRows = fields.map(([label, val]) =>
@@ -122,7 +122,7 @@ export default function CompletedRequests() {
         @media print{body{padding:0;} button{display:none;}}
       </style></head><body>
         <h1>RELDMS Report</h1>
-        <p class="subtitle">Generated on ${new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit'})} &mdash; <span class="badge">Completed</span></p>
+        <p class="subtitle">Generated on ${new Date().toLocaleString('en-PH', {timeZone:'Asia/Manila',year:'numeric',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false})} &mdash; <span class="badge">Completed</span></p>
         <h2>General Information</h2>
         <table class="info-table"><tbody>${infoRows}</tbody></table>
         ${purposeSection}${instrSection}
@@ -182,7 +182,7 @@ export default function CompletedRequests() {
         </head>
         <body>
           <h1>Completed RELDMS Records</h1>
-          <p class="subtitle">Printed on ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })} &bull; Total: ${requests.length} request(s)</p>
+          <p class="subtitle">Printed on ${new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })} &bull; Total: ${requests.length} request(s)</p>
           <table>
             <thead>
               <tr>

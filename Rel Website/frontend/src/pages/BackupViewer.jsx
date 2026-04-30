@@ -31,9 +31,10 @@ function fmtDate(v) {
 function fmtDateTime(v) {
   if (!v) return '—';
   try {
-    return new Date(v).toLocaleDateString('en-US', {
+    return new Date(v).toLocaleString('en-PH', {
+      timeZone: 'Asia/Manila',
       year: 'numeric', month: 'short', day: 'numeric',
-      hour: '2-digit', minute: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false,
     });
   } catch { return String(v); }
 }

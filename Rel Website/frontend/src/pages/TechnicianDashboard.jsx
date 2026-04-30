@@ -191,7 +191,7 @@ export default function TechnicianDashboard({ stats }) {
       s.request_number, `${s.device_name || ''} / ${s.customer || ''}`.replace(/^\/|\/$/g, '').trim(),
       s.step_name, s.leg ?? '', s.status,
       s.machine_no || '', s.rack_no || '',
-      s.started_at ? new Date(s.started_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila' }) : '',
+      s.started_at ? new Date(s.started_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', hour12: false }) : '',
       s.deadline || '',
     ]);
     const csv = [[`Work List — ${selectedEmployee?.name || 'Employee'} — ${date}`], header, ...rows]

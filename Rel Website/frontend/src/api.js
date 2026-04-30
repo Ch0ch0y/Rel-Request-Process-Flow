@@ -108,6 +108,10 @@ class ApiClient {
   removeLeg(requestId, legNumber) { return this.delete(`/requests/${requestId}/legs/${legNumber}`); }
   getStepNames() { return this.get('/step-names'); }
 
+  // Step catalog (server-persisted options + name presets, shared across all users)
+  getStepCatalog() { return this.get('/step-catalog'); }
+  patchStepCatalog(delta) { return this.patch('/step-catalog', delta); }
+
   // Machines
   getMachines() { return this.get('/machines'); }
   addMachine(data) { return this.post('/machines', data); }

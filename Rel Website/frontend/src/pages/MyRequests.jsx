@@ -49,6 +49,8 @@ export default function MyRequests() {
   const [showCreate, setShowCreate] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [statusFilter, setStatusFilter] = useState('');
+  const [typeFilter, setTypeFilter] = useState(''); // '' | 'REL' | 'RMS'
+  const getReqType = (r) => r.request_type || (r.request_number?.startsWith('RMS') ? 'RMS' : 'REL');
 
   const canDeleteReq = (req) => {
     if (!hasPerm('delete_request')) return false;
@@ -79,7 +81,7 @@ export default function MyRequests() {
     setError(null);
     api.getRequests()
       .then(all => {
-        const mine = all.filter(r => r.created_by === user?.id);
+        const mine = all.filter(r => r.created_by === user?.id && r.status !== 'completed');
         setRequests(mine);
       })
       .catch(e => setError(e.message))
@@ -90,6 +92,7 @@ export default function MyRequests() {
 
   const filtered = (() => {
     let list = requests;
+    if (typeFilter) list = list.filter(r => getReqType(r) === typeFilter);
     if (statusFilter) {
       if (statusFilter === 'request') list = list.filter(r => r.status === 'incoming' || r.status === 'pending');
       else if (statusFilter === 'testing') list = list.filter(r => r.status === 'testing' || r.status === 'in_progress');
@@ -152,8 +155,8 @@ export default function MyRequests() {
         </div>
       </div>
 
-      {/* Search */}
-      <div className="flex gap-2">
+      {/* Search + type filter */}
+      <div className="flex gap-2 flex-wrap">
         <div className="flex-1 relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
@@ -162,6 +165,20 @@ export default function MyRequests() {
             className="w-full pl-10 pr-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 focus:bg-white dark:focus:bg-slate-700 dark:text-slate-100 dark:placeholder-slate-500
               focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm transition-all"
           />
+        </div>
+        {/* REL / RMS type filter */}
+        <div className="flex items-center gap-1 border border-slate-200 dark:border-slate-600 rounded-lg overflow-hidden">
+          <button
+            onClick={() => setTypeFilter(f => f === 'REL' ? '' : 'REL')}
+            className={`px-3 py-2.5 text-xs font-semibold transition-colors ${typeFilter === 'REL' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:text-blue-700'}`}
+            title="Show REL (RR) requests only"
+          >REL</button>
+          <div className="w-px h-5 bg-slate-200 dark:bg-slate-600" />
+          <button
+            onClick={() => setTypeFilter(f => f === 'RMS' ? '' : 'RMS')}
+            className={`px-3 py-2.5 text-xs font-semibold transition-colors ${typeFilter === 'RMS' ? 'bg-emerald-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:text-emerald-700'}`}
+            title="Show RMS requests only"
+          >RMS</button>
         </div>
       </div>
 
@@ -176,7 +193,6 @@ export default function MyRequests() {
             { label: 'Testing',      value: 'testing',      match: r => r.status === 'testing' || r.status === 'in_progress',               color: 'text-orange-600',                       active: 'bg-orange-50 dark:bg-orange-900/30 ring-1 ring-orange-300' },
             { label: 'Analysis',     value: 'analysis',     match: r => r.status === 'analysis',                                            color: 'text-teal-600',                         active: 'bg-teal-50 dark:bg-teal-900/30 ring-1 ring-teal-300' },
             { label: 'Report',       value: 'report',       match: r => r.status === 'report',                                              color: 'text-cyan-600',                         active: 'bg-cyan-50 dark:bg-cyan-900/30 ring-1 ring-cyan-300' },
-            { label: 'Completed',    value: 'completed',    match: r => r.status === 'completed',                                           color: 'text-emerald-600',                      active: 'bg-emerald-50 dark:bg-emerald-900/30 ring-1 ring-emerald-300' },
             { label: 'Discontinued', value: 'discontinued', match: r => r.status === 'discontinued',                                        color: 'text-rose-600',                         active: 'bg-rose-50 dark:bg-rose-900/30 ring-1 ring-rose-300' },
           ].map(({ label, value, match, color, active }) => {
             const count = value === '' ? requests.length : requests.filter(match).length;
@@ -254,7 +270,7 @@ export default function MyRequests() {
                     {req.device_name && <span>Device: {req.device_name}</span>}
                     {req.customer && <span>Customer: {req.customer}</span>}
                     {req.lot_no && <span>Lot: {req.lot_no}</span>}
-                    <span>Created: {new Date(req.created_at).toLocaleString()}</span>
+                    <span>Created: {new Date(req.created_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}</span>
                   </div>
                   {(() => {
                     const activeStep = req.steps?.find(s => s.status === 'in_progress') || req.steps?.find(s => s.status === 'pending');

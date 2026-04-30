@@ -9,6 +9,7 @@ let cachedMachines = null;
  * Autocomplete input for Machine #.
  * - Type a machine number or description to filter suggestions.
  * - Select from the dropdown or type a custom value manually.
+ * - Arrow Up/Down navigates; Enter selects; Escape closes.
  * - Shows the description badge next to the selected machine number.
  * - Data is fetched from the backend API (managed via Settings).
  */
@@ -16,7 +17,9 @@ export default function MachineSelect({ value, onChange, className = '' }) {
   const [machines, setMachines] = useState(cachedMachines || []);
   const [query, setQuery] = useState(value || '');
   const [open, setOpen] = useState(false);
+  const [highlightIdx, setHighlightIdx] = useState(-1);
   const containerRef = useRef(null);
+  const listRef = useRef(null);
 
   useEffect(() => {
     if (!cachedMachines) {
@@ -31,6 +34,11 @@ export default function MachineSelect({ value, onChange, className = '' }) {
   useEffect(() => {
     setQuery(value || '');
   }, [value]);
+
+  // Reset highlight when list changes
+  useEffect(() => {
+    setHighlightIdx(-1);
+  }, [query]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -57,6 +65,7 @@ export default function MachineSelect({ value, onChange, className = '' }) {
     setQuery(machine.machine_no);
     onChange(machine.machine_no);
     setOpen(false);
+    setHighlightIdx(-1);
   };
 
   const handleInputChange = (e) => {
@@ -69,7 +78,42 @@ export default function MachineSelect({ value, onChange, className = '' }) {
     setQuery('');
     onChange('');
     setOpen(false);
+    setHighlightIdx(-1);
   };
+
+  const handleKeyDown = (e) => {
+    if (!open || filtered.length === 0) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { setOpen(true); return; }
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightIdx(i => Math.min(i + 1, filtered.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightIdx(i => Math.max(i - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (highlightIdx >= 0 && highlightIdx < filtered.length) {
+        handleSelect(filtered[highlightIdx]);
+      } else {
+        // Accept typed value as-is
+        onChange(query);
+        setOpen(false);
+      }
+    } else if (e.key === 'Escape') {
+      setOpen(false);
+      setHighlightIdx(-1);
+    }
+  };
+
+  // Scroll highlighted item into view
+  useEffect(() => {
+    if (highlightIdx >= 0 && listRef.current) {
+      const item = listRef.current.children[highlightIdx];
+      item?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [highlightIdx]);
 
   return (
     <div ref={containerRef} className={`relative ${className}`}>
@@ -80,6 +124,7 @@ export default function MachineSelect({ value, onChange, className = '' }) {
           value={query}
           onChange={handleInputChange}
           onFocus={() => setOpen(true)}
+          onKeyDown={handleKeyDown}
           placeholder="Search or type machine #"
           className="w-full border border-slate-200 rounded-lg pl-3 pr-8 py-2.5 bg-slate-50
             focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm transition-all"
@@ -103,20 +148,21 @@ export default function MachineSelect({ value, onChange, className = '' }) {
 
       {/* Dropdown */}
       {open && (
-        <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg
+        <div ref={listRef} className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg
           max-h-60 overflow-y-auto text-sm ring-1 ring-slate-100">
           {filtered.length === 0 ? (
             <div className="px-4 py-3 text-slate-400 text-xs text-center">
               No machine found — value will be saved as typed.
             </div>
           ) : (
-            filtered.map(m => (
+            filtered.map((m, idx) => (
               <button
                 key={m.id ?? m.machine_no}
                 type="button"
                 onMouseDown={(e) => { e.preventDefault(); handleSelect(m); }}
-                className={`w-full flex items-center justify-between px-4 py-2.5 hover:bg-blue-50 transition-colors text-left
-                  ${value === m.machine_no ? 'bg-blue-50' : ''}`}
+                onMouseEnter={() => setHighlightIdx(idx)}
+                className={`w-full flex items-center justify-between px-4 py-2.5 transition-colors text-left
+                  ${idx === highlightIdx ? 'bg-blue-100' : value === m.machine_no ? 'bg-blue-50' : 'hover:bg-blue-50'}`}
               >
                 <span className="font-mono font-semibold text-slate-800 text-xs">{m.machine_no}</span>
                 <span className="text-xs text-slate-500 ml-3 truncate max-w-[55%] text-right">{m.description}</span>

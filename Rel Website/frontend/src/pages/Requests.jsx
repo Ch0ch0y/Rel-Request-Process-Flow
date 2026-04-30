@@ -445,9 +445,12 @@ export default function Requests() {
   const [showImportWhisker, setShowImportWhisker] = useState(false);
   const [showImportAgile, setShowImportAgile] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [typeFilter, setTypeFilter] = useState(''); // '' | 'REL' | 'RMS'
   const { hasRole, hasPerm, user } = useAuth();
 
   const canCreate = hasPerm('create_request');
+  // Helper: derive request type from request_type field or request_number prefix
+  const getReqType = (r) => r.request_type || (r.request_number?.startsWith('RMS') ? 'RMS' : 'REL');
 
   // Delete is Admin-only
   const canDeleteRequest = () => user?.role === 'Admin';
@@ -458,16 +461,17 @@ export default function Requests() {
     if (search) params.search = search;
     if (statusFilter) params.status = statusFilter;
     api.getRequests(params)
-      .then(setRequests)
+      .then(data => setRequests(data.filter(r => r.status !== 'completed')))
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   };
 
   // Apply step filter + sort client-side
   const displayRequests = (() => {
-    if (!stepFilter) return requests;
+    const base = typeFilter ? requests.filter(r => getReqType(r) === typeFilter) : requests;
+    if (!stepFilter) return base;
     // Filter: requests that have the target step in_progress or pending
-    const filtered = requests.filter(req =>
+    const filtered = base.filter(req =>
       req.steps?.some(s => s.step_name === stepFilter && (s.status === 'in_progress' || s.status === 'pending'))
     );
     // Sort: in_queue (in_progress) first, then pending; within each group sort by started_at ASC (earliest first), nulls last
@@ -522,7 +526,7 @@ export default function Requests() {
             <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
               <LayoutList className="w-5 h-5 text-blue-600 dark:text-blue-400" />
             </div>
-            <div className="relative" onMouseEnter={() => handleDropdown(true)} onMouseLeave={() => handleDropdown(false)}>
+            <div className="relative z-50" onMouseEnter={() => handleDropdown(true)} onMouseLeave={() => handleDropdown(false)}>
               <button
                 className="text-xl font-heading font-bold text-slate-900 dark:text-white tracking-tight bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-6 py-2 w-56 flex items-center justify-between focus:outline-none"
                 style={{ minWidth: '180px' }}
@@ -534,7 +538,7 @@ export default function Requests() {
                 <span className="ml-2">▼</span>
               </button>
               {dropdownOpen && (
-                <div className="absolute left-0 mt-2 w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-10">
+                <div className="absolute left-0 mt-2 w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl z-50">
                   <button onClick={() => handleNav('/requests')} className="block w-full text-left px-4 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-slate-900 dark:text-white">All Requests</button>
                   <button onClick={() => handleNav('/my-requests')} className="block w-full text-left px-4 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-slate-900 dark:text-white">My Requests</button>
                   <button onClick={() => handleNav('/completed')} className="block w-full text-left px-4 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-slate-900 dark:text-white">Completed Requests</button>
@@ -619,11 +623,24 @@ export default function Requests() {
             <option value="testing">Testing</option>
             <option value="analysis">Analysis</option>
             <option value="in_progress">In Progress (Legacy)</option>
-            <option value="completed">Completed</option>
             <option value="discontinued">Discontinued</option>
             <option value="delayed">Delayed</option>
             <option value="upcoming">Upcoming Deadlines</option>
           </select>
+          {/* REL / RMS type filter */}
+          <div className="flex items-center gap-1 border border-slate-200 dark:border-slate-600 rounded-lg overflow-hidden">
+            <button
+              onClick={() => setTypeFilter(f => f === 'REL' ? '' : 'REL')}
+              className={`px-3 py-2.5 text-xs font-semibold transition-colors ${typeFilter === 'REL' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:text-blue-700'}`}
+              title="Show REL (RR) requests only"
+            >REL</button>
+            <div className="w-px h-5 bg-slate-200 dark:bg-slate-600" />
+            <button
+              onClick={() => setTypeFilter(f => f === 'RMS' ? '' : 'RMS')}
+              className={`px-3 py-2.5 text-xs font-semibold transition-colors ${typeFilter === 'RMS' ? 'bg-emerald-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:text-emerald-700'}`}
+              title="Show RMS requests only"
+            >RMS</button>
+          </div>
         </div>
       </div>
 

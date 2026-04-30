@@ -5,10 +5,10 @@ import api from '../api';
 import ProcessTimeline from '../components/ProcessTimeline';
 import {
   ArrowLeft, Save, CheckCircle2, Clock, AlertTriangle, Calendar,
-  ChevronDown, ChevronUp, Edit3, X, ImagePlus, Trash2,
+  ChevronDown, ChevronUp, ChevronRight, Edit3, X, ImagePlus, Trash2,
   GripVertical, PlusCircle, Plus, Settings2, Check, Download, FileSpreadsheet,
   MessageSquarePlus, Pencil, LayoutList, Archive,
-  Send, ShieldCheck, ThumbsUp, ThumbsDown, FileCheck, Star
+  Send, ShieldCheck, ThumbsUp, ThumbsDown, FileCheck, Pin
 } from 'lucide-react';
 import ConfirmDialog from '../components/ConfirmDialog';
 import EmployeeSelect from '../components/EmployeeSelect';
@@ -643,6 +643,29 @@ const DEFAULT_PROCESS_PRESETS = [
 const LS_PRESETS_KEY = 'rel_step_presets';
 const LS_STEP_OPTS_PREFIX = 'rel_step_opts_';
 
+// ─── Server-backed step catalog (shared across all browsers/users) ─────────────
+let _serverCatalog = null; // null = not yet fetched
+let _catalogFetching = false;
+
+async function ensureServerCatalog() {
+  if (_serverCatalog !== null || _catalogFetching) return;
+  _catalogFetching = true;
+  try {
+    const data = await api.getStepCatalog();
+    _serverCatalog = data || {};
+    // Hydrate localStorage so loadStepOpts works immediately (even before re-render)
+    Object.entries(_serverCatalog).forEach(([k, v]) => {
+      if (k !== '_step_name_presets') {
+        try { localStorage.setItem(LS_STEP_OPTS_PREFIX + k, JSON.stringify(v)); } catch {}
+      }
+    });
+  } catch {
+    _serverCatalog = {};
+  } finally {
+    _catalogFetching = false;
+  }
+}
+
 function NewProcessModal({ onClose, onSave, createdByUsername }) {
   const [label, setLabel] = useState('');
   const [selectedSteps, setSelectedSteps] = useState([]);
@@ -736,13 +759,20 @@ function NewProcessModal({ onClose, onSave, createdByUsername }) {
 }
 
 function loadStepOpts(key, defaults) {
+  // Server catalog takes priority once loaded
+  if (_serverCatalog && key in _serverCatalog) return _serverCatalog[key];
   try {
     const raw = localStorage.getItem(LS_STEP_OPTS_PREFIX + key);
     return raw ? JSON.parse(raw) : defaults;
   } catch { return defaults; }
 }
 function saveStepOpts(key, list) {
+  // Update module cache
+  if (_serverCatalog) _serverCatalog[key] = list;
+  // Update localStorage as backup
   try { localStorage.setItem(LS_STEP_OPTS_PREFIX + key, JSON.stringify(list)); } catch {}
+  // Persist to server (fire and forget)
+  api.patchStepCatalog({ [key]: list }).catch(() => {});
 }
 
 const LS_STEP_DEFAULT_PREFIX = 'rel_step_default_';
@@ -876,7 +906,7 @@ function DefaultPickerModal({ title, options, currentDefault, onSelect, onClose 
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm flex flex-col max-h-[80vh]">
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
           <div className="flex items-center gap-2">
-            <Star className="w-4 h-4 text-amber-500 fill-amber-400" />
+            <Pin className="w-4 h-4 text-blue-500" />
             <h4 className="font-semibold text-slate-800 text-sm">{title}</h4>
           </div>
           <button onClick={onClose} className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors" type="button">
@@ -886,7 +916,7 @@ function DefaultPickerModal({ title, options, currentDefault, onSelect, onClose 
 
         {currentDefault && (
           <div className="px-4 pt-3 pb-1">
-            <p className="text-xs text-slate-500">Current default: <span className="font-medium text-amber-600">{currentDefault}</span></p>
+            <p className="text-xs text-slate-500">Pinned default: <span className="font-medium text-blue-600">{currentDefault}</span></p>
           </div>
         )}
 
@@ -901,10 +931,10 @@ function DefaultPickerModal({ title, options, currentDefault, onSelect, onClose 
               type="button"
               className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2
                 ${opt === currentDefault
-                  ? 'bg-amber-50 text-amber-700 font-medium border border-amber-200'
+                  ? 'bg-blue-50 text-blue-700 font-medium border border-blue-200'
                   : 'hover:bg-slate-50 text-slate-700 border border-transparent'}`}
             >
-              <Star className={`w-3 h-3 flex-shrink-0 ${opt === currentDefault ? 'fill-amber-400 text-amber-400' : 'text-slate-300'}`} />
+              <Pin className={`w-3 h-3 flex-shrink-0 ${opt === currentDefault ? 'text-blue-500' : 'text-slate-300'}`} />
               {opt}
             </button>
           ))}
@@ -944,10 +974,11 @@ function DefaultPickerModal({ title, options, currentDefault, onSelect, onClose 
   );
 }
 
-function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, leg = 1, totalSS, estimatedStart = null, steps = [] }) {
+function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, leg = 1, totalSS, estimatedStart = null, steps = [], onSelectStep = null }) {
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [lastSavedAt, setLastSavedAt] = useState(null); // persists after autosave message fades
   const [imageUploading, setImageUploading] = useState(null); // category key being uploaded, or null
   const [satImages, setSatImages] = useState({});             // { categoryKey: [url, ...] }
   const [employeeMap, setEmployeeMap] = useState({});
@@ -957,6 +988,9 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
   // Tracks the last data saved (used as baseline for change-detection after autosave
   // so we don't need to reload the step from the server — which would wipe pending edits).
   const savedBaselineRef = useRef(null);
+
+  // Load server catalog once per session so custom options are shared across browsers
+  useEffect(() => { ensureServerCatalog(); }, []);
 
   const isSATStep          = step.step_name?.toUpperCase() === 'SAT';
   const isBakeStep         = step.step_name?.toLowerCase() === 'bake';
@@ -1067,11 +1101,11 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
   const activeItemOpts = stepOptKey ? loadStepOpts(`${stepOptKey}_items`, defaultItemOpts) : [];
   const activeCondOpts = stepOptKey ? loadStepOpts(`${stepOptKey}_conds`, defaultCondOpts) : [];
   void optsRefreshKey; // referenced so state update forces re-render to refresh above vars
-  // Which option is currently saved as default (for showing ★ in dropdown)
+  // Which option is currently saved as default (for showing 📌 in dropdown)
   const defaultItemVal = stepOptKey ? loadStepDefault(stepOptKey, 'item') : null;
   const defaultCondVal = stepOptKey ? loadStepDefault(stepOptKey, 'cond') : null;
-  const iDisp = (v) => v === defaultItemVal ? `★ ${v}` : v;
-  const cDisp = (v, transform) => { const t = transform ? transform(v) : v; return v === defaultCondVal ? `★ ${t}` : t; };
+  const iDisp = (v) => v === defaultItemVal ? `📌 ${v}` : v;
+  const cDisp = (v, transform) => { const t = transform ? transform(v) : v; return v === defaultCondVal ? `📌 ${t}` : t; };
 
   // For Temperature Cycle: show only conditions relevant to the selected TC type
   const tcVisibleConds = isTCStep
@@ -1360,6 +1394,7 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
         }
       }
       setMessage(isAutoSave ? '✓ Auto-saved' : 'Step updated successfully!');
+      setLastSavedAt(new Date());
       if (isAutoSave) {
         // Update the saved baseline so the next autosave correctly detects only NEW changes
         // without needing a full server reload (which would reset the form and lose pending input).
@@ -1377,10 +1412,33 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
         savedBaselineRef.current = null; // let the upcoming reload (via onUpdated) set the baseline
         onUpdated();
       }
+      return true;
     } catch (err) {
       setMessage(`Error: ${err.message}`);
+      return false;
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Save and advance to the next step in the leg
+  const handleSaveAndNext = async () => {
+    const missing = [];
+    if (!form.started_at) missing.push('Start of Process');
+    if (!form.operator_id) missing.push('Employee No.');
+    if (!form.tray_no?.trim()) missing.push('Tray #');
+    if (form.qty_in === '' || form.qty_in === null || form.qty_in === undefined) missing.push('Qty In');
+    if (missing.length > 0) {
+      setMessage(`Next Step requires: ${missing.join(', ')}`);
+      return;
+    }
+    // Find next step before saving (steps sorted by step_number)
+    const sorted = steps.slice().sort((a, b) => a.step_number - b.step_number);
+    const idx = sorted.findIndex(s => s.step_number === step.step_number);
+    const nextStepData = idx >= 0 && idx < sorted.length - 1 ? sorted[idx + 1] : null;
+    const ok = await handleSave(false);
+    if (ok && nextStepData && onSelectStep) {
+      onSelectStep(nextStepData);
     }
   };
 
@@ -1448,7 +1506,7 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
             'bg-slate-100 text-slate-500'}`}>
           {step.step_number}
         </div>
-        <div>
+        <div className="flex-1">
           <div className="flex items-center gap-2">
             <h3 className="font-heading font-semibold text-slate-800">{step.step_name}</h3>
             {(() => { const ct = getStepCT(step); return ct !== null && ct !== undefined ? (
@@ -1457,7 +1515,16 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
               </span>
             ) : null; })()}
           </div>
-          <p className="text-xs text-slate-400">Step {step.step_number} of {totalSteps}</p>
+          <div className="flex items-center gap-2 mt-0.5">
+            <p className="text-xs text-slate-400">Step {step.step_number} of {totalSteps}</p>
+            {saving && <span className="text-[10px] text-slate-400 animate-pulse">Saving…</span>}
+            {!saving && lastSavedAt && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600 font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                Saved {lastSavedAt.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', hour12: false })}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1471,11 +1538,11 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
                   {stepOptKey && (
                     <button
                       onClick={() => setDefaultPicker('item')}
-                      className={`p-0.5 rounded hover:bg-amber-100 transition-colors ${loadStepDefault(stepOptKey, 'item') ? 'text-amber-500' : 'text-slate-400 hover:text-amber-600'}`}
-                      title="Choose default Test Item"
+                      className={`p-0.5 rounded hover:bg-blue-100 transition-colors ${loadStepDefault(stepOptKey, 'item') ? 'text-blue-500' : 'text-slate-400 hover:text-blue-600'}`}
+                      title="Pin default Test Item"
                       type="button"
                     >
-                      <Star className={`w-3.5 h-3.5 ${loadStepDefault(stepOptKey, 'item') ? 'fill-amber-400' : ''}`} />
+                      <Pin className="w-3.5 h-3.5" />
                     </button>
                   )}
                   {stepOptKey && (
@@ -1523,11 +1590,11 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
                   {stepOptKey && (
                     <button
                       onClick={() => setDefaultPicker('cond')}
-                      className={`p-0.5 rounded hover:bg-amber-100 transition-colors ${loadStepDefault(stepOptKey, 'cond') ? 'text-amber-500' : 'text-slate-400 hover:text-amber-600'}`}
-                      title="Choose default Test Condition"
+                      className={`p-0.5 rounded hover:bg-blue-100 transition-colors ${loadStepDefault(stepOptKey, 'cond') ? 'text-blue-500' : 'text-slate-400 hover:text-blue-600'}`}
+                      title="Pin default Test Condition"
                       type="button"
                     >
-                      <Star className={`w-3.5 h-3.5 ${loadStepDefault(stepOptKey, 'cond') ? 'fill-amber-400' : ''}`} />
+                      <Pin className="w-3.5 h-3.5" />
                     </button>
                   )}
                   {(stepOptKey && !isMRTStep) && (
@@ -1999,19 +2066,30 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
             <p className={`text-xs ${message.startsWith('Error') ? 'text-red-600' : 'text-emerald-600'}`}>{message}</p>
           )}
 
-          <button onClick={handleSave} disabled={saving}
-            className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg px-4 py-2.5 text-sm font-medium disabled:opacity-50 shadow-sm">
-            <Save className="w-4 h-4" />
-            {saving ? 'Saving...' : 'Save Step'}
-          </button>
+          {/* Action buttons: Save (left) + Next Step (right) */}
+          <div className="flex gap-2">
+            <button onClick={() => handleSave(false)} disabled={saving}
+              className="flex-1 flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg px-4 py-2.5 text-sm font-medium disabled:opacity-50 shadow-sm transition-colors">
+              <Save className="w-4 h-4" />
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            {steps.length > 0 && step.step_number < totalSteps && (
+              <button onClick={handleSaveAndNext} disabled={saving}
+                className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-4 py-2.5 text-sm font-medium disabled:opacity-50 shadow-sm transition-colors"
+                title="Save and go to the next step (requires Start Date, Employee, Tray #, Qty In)">
+                <ChevronRight className="w-4 h-4" />
+                {saving ? 'Saving…' : 'Next Step'}
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <div className="space-y-0">
           <InfoRow label="Test Item" value={step.custom_fields?.test_item} />
           <InfoRow label="Test Condition" value={step.custom_fields?.test_condition} />
           <InfoRow label="Status" value={step.status?.replace('_', ' ')} />
-          <InfoRow label="Start of Process" value={step.started_at ? new Date(step.started_at).toLocaleString() : null} />
-          <InfoRow label="End of Process" value={step.completed_at ? new Date(step.completed_at).toLocaleString() : null} />
+          <InfoRow label="Start of Process" value={step.started_at ? new Date(step.started_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : null} />
+          <InfoRow label="End of Process" value={step.completed_at ? new Date(step.completed_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : null} />
           <InfoRow label="Machine #" value={step.machine_no || null} />
           <InfoRow label="Rack No# / Name" value={step.rack_no || null} />
           <InfoRow label="Employee No." value={
@@ -2093,7 +2171,7 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
         if (!startDt) return null;
         const stdDays = getStepCT(step);
         const estEndDt = typeof stdDays === 'number' ? new Date(startDt.getTime() + stdDays * 86400000) : null;
-        const fmt = d => d.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        const fmt = d => d.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
         return (
           <div className="mt-4 border-t border-violet-100 pt-4">
             <div className="flex items-center gap-1.5 mb-3">
@@ -2255,8 +2333,11 @@ export default function RequestDetail() {
 
   const [lockedStepMsg, setLockedStepMsg] = useState('');
 
-  const savePresets = (list) => {    setStepPresets(list);
+  const savePresets = (list) => {
+    setStepPresets(list);
     try { localStorage.setItem(LS_PRESETS_KEY, JSON.stringify(list)); } catch {}
+    // Also persist to server so custom step names are available on any browser
+    api.patchStepCatalog({ _step_name_presets: list }).catch(() => {});
   };
   const deletePreset = (idx) => savePresets(stepPresets.filter((_, i) => i !== idx));
   const commitPresetRename = (idx) => {
@@ -2456,6 +2537,21 @@ export default function RequestDetail() {
   };
 
   useEffect(() => { loadRequest(); }, [id]);
+
+  // On mount: fetch server catalog and merge step name presets
+  useEffect(() => {
+    ensureServerCatalog().then(() => {
+      const serverPresets = _serverCatalog?._step_name_presets;
+      if (serverPresets?.length) {
+        setStepPresets(prev => {
+          const merged = [...new Set([...prev, ...serverPresets])];
+          try { localStorage.setItem(LS_PRESETS_KEY, JSON.stringify(merged)); } catch {}
+          return merged;
+        });
+      }
+    });
+    reloadProcessPresets();
+  }, []);
 
   // Fetch RELMON form data when viewing an RMS request
   useEffect(() => {
@@ -2664,7 +2760,21 @@ export default function RequestDetail() {
 
   // Copy/Paste leg steps
   const handleCopyLegSteps = () => {
-    const data = legSteps.map(s => ({ step_name: s.step_name, custom_fields: s.custom_fields || {} }));
+    const data = legSteps.map(s => ({
+      step_name: s.step_name,
+      custom_fields: s.custom_fields || {},
+      // Carry over all detail fields so paste reproduces the full step state
+      machine_no: s.machine_no || '',
+      rack_no: s.rack_no || '',
+      operator_id: s.operator_id || '',
+      tray_no: s.tray_no || '',
+      qty_in: s.qty_in ?? '',
+      qty_out: s.qty_out ?? '',
+      notes: s.notes || '',
+      status: s.status || 'pending',
+      started_at: s.started_at || null,
+      completed_at: s.completed_at || null,
+    }));
     setCopiedLegData(data);
     setSaveMsg(`LEG ${selectedLeg} steps copied (${data.length} steps)!`);
     setTimeout(() => setSaveMsg(''), 3000);
@@ -2676,11 +2786,23 @@ export default function RequestDetail() {
     try {
       const names = copiedLegData.map(s => s.step_name);
       await api.replaceSteps(id, names, selectedLeg);
-      // Apply custom fields for each step (step numbers are 1-indexed after replace)
+      // Apply all copied fields for each step (step numbers are 1-indexed after replace)
       for (let i = 0; i < copiedLegData.length; i++) {
-        const cf = copiedLegData[i].custom_fields;
-        if (cf && Object.keys(cf).length > 0) {
-          await api.updateStep(id, i + 1, { custom_fields: cf }, selectedLeg);
+        const src = copiedLegData[i];
+        const updateData = {};
+        if (src.custom_fields && Object.keys(src.custom_fields).length > 0) updateData.custom_fields = src.custom_fields;
+        if (src.machine_no) updateData.machine_no = src.machine_no;
+        if (src.rack_no) updateData.rack_no = src.rack_no;
+        if (src.operator_id) updateData.operator_id = src.operator_id;
+        if (src.tray_no) updateData.tray_no = src.tray_no;
+        if (src.qty_in !== '' && src.qty_in !== null && src.qty_in !== undefined) updateData.qty_in = src.qty_in;
+        if (src.qty_out !== '' && src.qty_out !== null && src.qty_out !== undefined) updateData.qty_out = src.qty_out;
+        if (src.notes) updateData.notes = src.notes;
+        if (src.status && src.status !== 'pending') updateData.status = src.status;
+        if (src.started_at) updateData.started_at = src.started_at;
+        if (src.completed_at) updateData.completed_at = src.completed_at;
+        if (Object.keys(updateData).length > 0) {
+          await api.updateStep(id, i + 1, updateData, selectedLeg);
         }
       }
       loadRequest();
@@ -2926,7 +3048,7 @@ export default function RequestDetail() {
   const legPct = legSteps.length > 0 ? Math.round((legCompleted / legSteps.length) * 100) : 0;
 
   const fmtTimestamp = (d) =>
-    d.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    d.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
 
   // ── Cascaded per-step estimates ──────────────────────────────────────────
   // All legs start from the SAME base anchor (approval date) because legs run
@@ -3021,7 +3143,7 @@ export default function RequestDetail() {
             </p>
           )}
           <p className="text-sm text-slate-400 mt-0.5">
-            Created by {request.created_by_username} • {new Date(request.created_at).toLocaleString()}
+            Created by {request.created_by_username} • {new Date(request.created_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}
             {request.deadline && <> • Due: {request.deadline}</>}
           </p>
         </div>
@@ -4321,6 +4443,7 @@ export default function RequestDetail() {
                 requestId={request.id}
                 leg={selectedLeg}
                 onUpdated={() => { loadRequest(); }}
+                onSelectStep={(s) => setSelectedStep(s)}
                 canUpdate={canUpdateStep && (!isStepLocked(selectedStep) || canBypassOrder)}
                 steps={legSteps}
                 totalSteps={legSteps.length}

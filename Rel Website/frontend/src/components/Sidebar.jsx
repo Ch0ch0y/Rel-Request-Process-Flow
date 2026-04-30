@@ -4,16 +4,21 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import {
   LayoutDashboard, ClipboardList, Settings, Users, LogOut, X, CheckCircle2, FileText, Archive, ListFilter, MonitorDot,
-  Sun, Moon, ShieldCheck, ChevronRight, Layers, Microscope, ExternalLink, PackageOpen, BarChart3, Database, Table,
+  Sun, Moon, ShieldCheck, ChevronRight, HardDrive, FolderKanban, Microscope, ExternalLink, PackageOpen, BarChart3, Database, Table,
   ScanSearch,
 } from 'lucide-react';
 import AmkorLogo from '../assets/amkor-logo.svg';
 
 const allNavItems = [
+  { to: '/', icon: LayoutDashboard, label: 'Dashboard', guestAllowed: false, end: true },
   {
+    to: '/my-requests',
+    icon: FolderKanban,
+    label: 'My Requests',
+    guestAllowed: false,
+    roles: ['Admin', 'Reliability Engineer', 'Planner'],
     subItems: [
       { to: '/requests', icon: ClipboardList, label: 'All Requests', guestAllowed: true },
-      { to: '/my-requests', icon: ClipboardList, label: 'My Requests', guestAllowed: true },
       { to: '/completed', icon: CheckCircle2, label: 'All Requests Completed', guestAllowed: true },
     ]
   },
@@ -23,11 +28,8 @@ const allNavItems = [
   { to: '/loading-unloading', icon: PackageOpen, label: 'Loading / Unloading', guestAllowed: true, roles: ['Technician', 'Admin', 'Reliability Engineer', 'Planner'] },
   { to: '/process-monitoring', icon: ScanSearch, label: 'Process Monitoring', guestAllowed: false },
   { to: '/relmon', icon: Database, label: 'RELMON', guestAllowed: false },
-  // {
-  //   to: '/ic-mapping-tool', icon: Layers, label: 'IC Mapping Tool', guestAllowed: true
-  // },
   {
-    to: '/_record-monitor', icon: Layers, label: 'Record Monitor', guestAllowed: false, noNav: true,
+    to: '/_record-monitor', icon: HardDrive, label: 'Record Monitor', guestAllowed: false, noNav: true,
     subItems: [
       { to: '/request-filter', icon: ListFilter, label: 'Request Filter', guestAllowed: false, roles: ['Admin', 'Reliability Engineer'] },
       { to: '/backup-viewer', icon: Archive, label: 'Backup Viewer', guestAllowed: false },
@@ -118,6 +120,33 @@ export default function Sidebar({ onClose }) {
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {navItems.map(item => {
           if (item.subItems && item.subItems.length > 0) {
+            // Flat section: group has no parent link — render sub-items directly
+            if (!item.to) {
+              return (
+                <div key={item.subItems[0]?.to ?? 'flat-group'} className="space-y-0.5">
+                  {item.subItems.map(sub => (
+                    <NavLink
+                      key={sub.to}
+                      to={sub.to}
+                      end={sub.end}
+                      onClick={onClose}
+                      className={({ isActive }) =>
+                        `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium nav-link-transition ${
+                          isActive
+                            ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`
+                      }
+                    >
+                      {typeof sub.icon === 'function' ? (
+                        <sub.icon className="w-4 h-4 flex-shrink-0" />
+                      ) : null}
+                      {sub.label}
+                    </NavLink>
+                  ))}
+                </div>
+              );
+            }
             const isGroupHovered = hoveredGroup === item.to || tappedGroup === item.to;
             const isSubActive = item.subItems.some(s => location.pathname === s.to);
             const headerCls = `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium nav-link-transition w-full text-left ${
@@ -133,9 +162,7 @@ export default function Sidebar({ onClose }) {
               >
                 {item.noNav ? (
                   <button className={headerCls} onClick={() => setTappedGroup(tappedGroup === item.to ? null : item.to)}>
-                    {typeof item.icon === 'function' ? (
-                      <item.icon className="w-4.5 h-4.5 flex-shrink-0" />
-                    ) : null}
+                    {item.icon && <item.icon className="w-4 h-4 flex-shrink-0" />}
                     <span className="flex-1">{item.label}</span>
                     <ChevronRight className={`w-3.5 h-3.5 flex-shrink-0 transition-transform duration-200 ${isGroupHovered ? 'rotate-90' : ''}`} />
                   </button>
@@ -161,9 +188,7 @@ export default function Sidebar({ onClose }) {
                       }`
                     }
                   >
-                    {typeof item.icon === 'function' ? (
-                      <item.icon className="w-4.5 h-4.5 flex-shrink-0" />
-                    ) : null}
+                    {item.icon && <item.icon className="w-4 h-4 flex-shrink-0" />}
                     <span className="flex-1">{item.label}</span>
                     <ChevronRight className={`w-3.5 h-3.5 flex-shrink-0 transition-transform duration-200 ${isGroupHovered ? 'rotate-90' : ''}`} />
                   </NavLink>
@@ -209,7 +234,7 @@ export default function Sidebar({ onClose }) {
                 }`
               }
             >
-              <item.icon className="w-4.5 h-4.5 flex-shrink-0" />
+              <item.icon className="w-4 h-4 flex-shrink-0" />
               {item.label}
             </NavLink>
           );

@@ -126,7 +126,7 @@ export default function TaskManager() {
             System performance &amp; real-time activity overview
             {lastRefresh && (
               <span className="ml-2 text-xs text-slate-400">
-                · Last updated {lastRefresh.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                · Last updated {lastRefresh.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
               </span>
             )}
           </p>
@@ -181,7 +181,7 @@ export default function TaskManager() {
           icon={Server}
           label="Server Time"
           value={stats?.server_time
-            ? new Date(stats.server_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            ? new Date(stats.server_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
             : '—'}
           sub={stats?.server_time ? new Date(stats.server_time).toLocaleDateString() : ''}
           iconColor="bg-slate-100 text-slate-600"
@@ -224,7 +224,7 @@ export default function TaskManager() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">{req.request_number}</p>
-                    <p className="text-xs text-slate-400 dark:text-slate-500 truncate">{req.created_by_username} · {new Date(req.created_at).toLocaleString()}</p>
+                    <p className="text-xs text-slate-400 dark:text-slate-500 truncate">{req.created_by_username} · {new Date(req.created_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}</p>
                   </div>
                   <StatusBadge status={req.status} />
                 </li>
@@ -252,7 +252,7 @@ export default function TaskManager() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">{edit.step_name || `Step ${edit.step_number}`}</p>
                     <p className="text-xs text-slate-400 dark:text-slate-500 truncate">
-                      {edit.request_number} · {new Date(edit.updated_at).toLocaleString()}
+                      {edit.request_number} · {new Date(edit.updated_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}
                     </p>
                     {edit.by && <p className="text-xs text-blue-500 dark:text-blue-400 truncate">by {edit.by}</p>}
                   </div>
@@ -291,7 +291,7 @@ export default function TaskManager() {
                       </div>
                     </td>
                     <td className="py-2 text-xs text-slate-500 dark:text-slate-400">{log.role}</td>
-                    <td className="py-2 text-xs text-slate-400 dark:text-slate-500">{new Date(log.login_time).toLocaleString()}</td>
+                    <td className="py-2 text-xs text-slate-400 dark:text-slate-500">{new Date(log.login_time).toLocaleString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}</td>
                   </tr>
                 ))}
               </tbody>
