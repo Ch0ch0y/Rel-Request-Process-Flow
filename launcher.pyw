@@ -13,7 +13,7 @@ DEV mode:     starts backends with --reload and fronted with npm run dev
               so hot-reload works during development.
 """
 import tkinter as tk
-from tkinter import scrolledtext
+from tkinter import scrolledtext, messagebox
 import subprocess
 import threading
 import os
@@ -22,6 +22,16 @@ import signal
 import time
 import socket
 import webbrowser
+import ctypes
+
+# ── Single-instance guard ─────────────────────────────────────────────────────
+_MUTEX = ctypes.windll.kernel32.CreateMutexW(None, True, "AmkorLauncherMutex_v1")
+if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+    import tkinter as _tk, sys as _sys
+    _r = _tk.Tk(); _r.withdraw()
+    messagebox.showinfo("Already Running", "Amkor Apps Launcher is already running.")
+    _r.destroy()
+    _sys.exit(0)
 
 # ── Node.js / npm resolver ────────────────────────────────────────────────────
 def _find_node_dir() -> str | None:
@@ -229,10 +239,11 @@ class LauncherApp(tk.Tk):
 
         # Header action buttons (right → left order)
         for txt, cmd, bg in [
-            ("■  Stop All",          self._stop_all,       "#ef4444"),
-            ("↻  Restart All",       self._restart_all,    "#f59e0b"),
-            ("▶  Start Local/LAN",   self._start_local,    "#22c55e"),
-            ("⬆  Deploy All (LAN)",  self._deploy_all,     "#3b82f6"),
+            ("■  Stop All",          self._stop_all,           "#ef4444"),
+            ("↻  Restart All",       self._restart_all,        "#f59e0b"),
+            ("▶  Start Local/LAN",   self._start_local,        "#22c55e"),
+            ("⬆  Deploy All (LAN)",  self._deploy_all,         "#3b82f6"),
+            ("🔓 Open Firewall",      self._open_firewall_admin,"#6b7280"),
         ]:
             tk.Button(hdr, text=txt, font=("Segoe UI", 9, "bold"),
                       bg=bg, fg="white", relief="flat",
@@ -416,6 +427,7 @@ class LauncherApp(tk.Tk):
                     r = subprocess.run(
                         "npm install", cwd=fe_cwd, shell=True,
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        stdin=subprocess.DEVNULL,
                         creationflags=subprocess.CREATE_NO_WINDOW,
                         env=_npm_env(),
                     )
@@ -430,6 +442,7 @@ class LauncherApp(tk.Tk):
                 build_proc = subprocess.Popen(
                     "npm run build", cwd=fe_cwd, shell=True,
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL,
                     creationflags=subprocess.CREATE_NO_WINDOW,
                     env=_npm_env(),
                 )
@@ -459,7 +472,8 @@ class LauncherApp(tk.Tk):
                 cwd=be_svc["cwd"](),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                stdin=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP,
                 shell=False,
             )
             self.processes[be_id] = new_proc
@@ -512,21 +526,39 @@ class LauncherApp(tk.Tk):
         try:
             # Frontend dev services use npm — ensure Node.js is on PATH
             extra_env = _npm_env() if svc.get("shell") else None
-            proc = subprocess.Popen(
-                svc["cmd"](),
-                cwd=svc["cwd"](),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-                shell=svc.get("shell", False),
-                env=extra_env,
-            )
-            self.processes[svc_id] = proc
-            threading.Thread(
-                target=self._stream_log,
-                args=(proc, svc["label"]),
-                daemon=True,
-            ).start()
+            if svc.get("shell"):
+                # npm/Vite dev server: run in its own console window.
+                # CREATE_NO_WINDOW causes EPERM (-4048) when Vite does file
+                # watching or IPC on Windows (especially on OneDrive paths).
+                proc = subprocess.Popen(
+                    svc["cmd"](),
+                    cwd=svc["cwd"](),
+                    creationflags=subprocess.CREATE_NEW_CONSOLE,
+                    shell=True,
+                    env=extra_env,
+                )
+                self.processes[svc_id] = proc
+                self._log(f"[{svc['label']}] Started in a separate console window.")
+            else:
+                # Backend (uvicorn/Python): hide console window but keep a valid
+                # stdin (DEVNULL).  Inheriting an invalid stdin from pythonw.exe
+                # causes OSError [Errno 22] Invalid argument in asyncio/uvicorn.
+                proc = subprocess.Popen(
+                    svc["cmd"](),
+                    cwd=svc["cwd"](),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL,
+                    creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP,
+                    shell=False,
+                    env=extra_env,
+                )
+                self.processes[svc_id] = proc
+                threading.Thread(
+                    target=self._stream_log,
+                    args=(proc, svc["label"]),
+                    daemon=True,
+                ).start()
         except Exception as exc:
             self._log(f"[{svc['label']}] ERROR: {exc}")
 
@@ -546,6 +578,7 @@ class LauncherApp(tk.Tk):
             r = subprocess.run(
                 cmd, cwd=cwd,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
             if r.returncode != 0:
@@ -556,7 +589,9 @@ class LauncherApp(tk.Tk):
         self.after(100, lambda: self._start("ca_backend"))
 
     def _kill_port(self, port: int) -> int:
-        """Kill ALL processes listening on `port`. Returns count killed."""
+        """Kill ALL processes listening on `port`. Returns count killed.
+        Uses taskkill first; falls back to PowerShell Stop-Process for
+        processes in other sessions (e.g. Store-Python children)."""
         killed = 0
         try:
             r = subprocess.run(
@@ -575,17 +610,35 @@ class LauncherApp(tk.Tk):
                     except (ValueError, IndexError):
                         pass
             for pid in pids:
-                try:
-                    subprocess.run(
-                        ["taskkill", "/PID", str(pid), "/F", "/T"],
+                # Try taskkill first
+                r2 = subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/F", "/T"],
+                    capture_output=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+                if r2.returncode == 0:
+                    killed += 1
+                else:
+                    # Fallback: PowerShell Stop-Process (handles cross-session PIDs)
+                    r3 = subprocess.run(
+                        ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                         f"Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue"],
                         capture_output=True,
                         creationflags=subprocess.CREATE_NO_WINDOW,
                     )
-                    killed += 1
-                except Exception:
-                    pass
+                    if r3.returncode == 0:
+                        killed += 1
         except Exception as exc:
             self._log(f"[Launcher] Port kill error: {exc}")
+
+        # Brief wait for OS to release the socket after killing
+        if killed:
+            deadline = time.time() + 3.0
+            while time.time() < deadline:
+                if not self._is_port_open(port):
+                    break
+                time.sleep(0.2)
+
         return killed
 
     def _stop(self, svc_id: str):
@@ -712,10 +765,37 @@ class LauncherApp(tk.Tk):
             self.rows[svc["id"]]["dot"].config(fg=color)
         self.after(2000, self._poll_status)
 
+    # ── Firewall helper ───────────────────────────────────────────────────────
+    def _open_firewall_admin(self):
+        """Run open_firewall.bat elevated (UAC prompt) to allow LAN access."""
+        bat = os.path.join(ROOT, "Rel Website", "open_firewall.bat")
+        if not os.path.exists(bat):
+            self._log("[Firewall] open_firewall.bat not found.")
+            return
+        self._log("[Firewall] Requesting admin elevation to open ports 8000 & 8001…")
+        subprocess.Popen(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+             f"Start-Process -FilePath '{bat}' -Verb RunAs"],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+
     # ── Window close ─────────────────────────────────────────────────────────
     def _on_close(self):
-        self._stop_all()
-        time.sleep(0.5)
+        answer = messagebox.askyesnocancel(
+            "Close Launcher",
+            "Keep servers running in the background?\n\n"
+            "\u2022 Yes    \u2014 close the launcher, servers keep running\n"
+            "\u2022 No     \u2014 stop all servers, then close\n"
+            "\u2022 Cancel \u2014 stay open",
+        )
+        if answer is None:    # Cancel — stay open
+            return
+        if not answer:        # No — stop all servers first
+            self._log("[Launcher] Stopping all servers before close…")
+            self._stop_all()
+            time.sleep(1)
+        else:
+            self._log("[Launcher] Closing launcher — servers continue running.")
         self.destroy()
 
 
