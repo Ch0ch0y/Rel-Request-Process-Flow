@@ -3844,20 +3844,71 @@ def _generate_ltc_excel(req: dict) -> bytes:  # noqa: C901
             _wv(row, 20, f"Page {page_num} of {total_pages}")
             row += 1
 
-    # ── document footer (Confirmed by, Spec No., Revision History, etc.) ──────
-    if all_footer_steps:
-        for step in all_footer_steps:
-            sname  = step.get("step_name", "")
-            tc_val = _tc(step)
-            _wv(row, 2, sname)
-            if tc_val:
-                _wv(row, 4, tc_val)
-            _sc(row, 2, font=_F_BLK, align=_A_VC)
-            _sc(row, 4, font=_F_BLK, align=_A_VC)
-            row += 1
+    # ── structured document footer (always written) ───────────────────────────
+    # Row 1: "Confirmed by" | [originator] | S/N: [req_num] rev.0 [date] | [purpose]
+    # Row 2: "Spec No. 001-2150"                                          | Page X of X
+    confirmed_by_name = (req.get("originator") or req.get("created_by_username") or "").strip()
+    purpose_str       = (req.get("purpose") or "").strip()
+    date_fmt          = date_ltc_val.strftime("%m/%d/%y")
+    sn_text           = f"S/N:    {req_num}\nrev.0\n{date_fmt}"
 
-    # ── final page indicator ──────────────────────────────────────────────────
-    _wv(row, 20, f"Page {total_pages} of {total_pages}")
+    _F_FTR    = _Font(name='Arial', size=9)
+    _F_FTR_B  = _Font(name='Arial', size=9, bold=True)
+    _F_FTR_BL = _Font(name='Arial', size=9, color='FF0070C0')
+
+    # ── footer row 1 – set values/borders BEFORE merging ──────────────────────
+    # Section A: cols 2-3  → "Confirmed by" label
+    ws.cell(row, 2).value     = "Confirmed by"
+    ws.cell(row, 2).font      = _F_FTR_B
+    ws.cell(row, 2).alignment = _A_LVC
+    ws.cell(row, 2).border    = _bdr('medium', None, 'medium', 'thin')
+    ws.cell(row, 3).border    = _bdr(None, 'thin', 'medium', 'thin')
+
+    # Section B: cols 4-8  → originator name
+    ws.cell(row, 4).value     = confirmed_by_name
+    ws.cell(row, 4).font      = _F_FTR
+    ws.cell(row, 4).alignment = _A_LVCW
+    ws.cell(row, 4).border    = _bdr('thin', None, 'medium', 'thin')
+    ws.cell(row, 8).border    = _bdr(None, 'thin', 'medium', 'thin')
+
+    # Section C: cols 9-14 → S/N block
+    ws.cell(row, 9).value     = sn_text
+    ws.cell(row, 9).font      = _F_FTR
+    ws.cell(row, 9).alignment = _Align(horizontal='center', vertical='center', wrap_text=True)
+    ws.cell(row, 9).border    = _bdr('thin', None, 'medium', 'thin')
+    ws.cell(row, 14).border   = _bdr(None, 'thin', 'medium', 'thin')
+
+    # Section D: cols 15-20 → purpose
+    ws.cell(row, 15).value     = purpose_str
+    ws.cell(row, 15).font      = _F_FTR
+    ws.cell(row, 15).alignment = _A_CC
+    ws.cell(row, 15).border    = _bdr('thin', None, 'medium', 'thin')
+    ws.cell(row, 20).border    = _bdr(None, 'medium', 'medium', 'thin')
+
+    ws.merge_cells(start_row=row, start_column=2,  end_row=row, end_column=3)
+    ws.merge_cells(start_row=row, start_column=4,  end_row=row, end_column=8)
+    ws.merge_cells(start_row=row, start_column=9,  end_row=row, end_column=14)
+    ws.merge_cells(start_row=row, start_column=15, end_row=row, end_column=20)
+    ws.row_dimensions[row].height = 45
+    row += 1
+
+    # ── footer row 2 – set values/borders BEFORE merging ──────────────────────
+    # Section A: cols 2-14 → "Spec No. 001-2150"
+    ws.cell(row, 2).value     = "Spec No. 001-2150"
+    ws.cell(row, 2).font      = _F_FTR
+    ws.cell(row, 2).alignment = _A_LVC
+    ws.cell(row, 2).border    = _bdr('medium', None, None, 'medium')
+    ws.cell(row, 14).border   = _bdr(None, 'thin', None, 'medium')
+
+    # Section B: cols 15-20 → page indicator (value must be at top-left col 15)
+    ws.cell(row, 15).value     = f"Page {total_pages} of {total_pages}"
+    ws.cell(row, 15).font      = _F_FTR_BL
+    ws.cell(row, 15).alignment = _A_CC
+    ws.cell(row, 15).border    = _bdr('thin', 'medium', None, 'medium')
+
+    ws.merge_cells(start_row=row, start_column=2,  end_row=row, end_column=14)
+    ws.merge_cells(start_row=row, start_column=15, end_row=row, end_column=20)
+    ws.row_dimensions[row].height = 20
     last_content_row = row
 
     # ── delete all template rows beyond what we actually wrote ─────────────────

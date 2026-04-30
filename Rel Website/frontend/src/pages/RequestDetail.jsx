@@ -1421,24 +1421,71 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
     }
   };
 
-  // Save and advance to the next step in the leg
+  // Save and advance to the next step in the leg (no required fields — just navigate)
   const handleSaveAndNext = async () => {
-    const missing = [];
-    if (!form.started_at) missing.push('Start of Process');
-    if (!form.operator_id) missing.push('Employee No.');
-    if (!form.tray_no?.trim()) missing.push('Tray #');
-    if (form.qty_in === '' || form.qty_in === null || form.qty_in === undefined) missing.push('Qty In');
-    if (missing.length > 0) {
-      setMessage(`Next Step requires: ${missing.join(', ')}`);
-      return;
-    }
-    // Find next step before saving (steps sorted by step_number)
     const sorted = steps.slice().sort((a, b) => a.step_number - b.step_number);
     const idx = sorted.findIndex(s => s.step_number === step.step_number);
     const nextStepData = idx >= 0 && idx < sorted.length - 1 ? sorted[idx + 1] : null;
-    const ok = await handleSave(false);
-    if (ok && nextStepData && onSelectStep) {
+    await handleSave(true); // auto-save whatever is filled in, no validation
+    if (nextStepData && onSelectStep) {
       onSelectStep(nextStepData);
+    }
+  };
+
+  // Mark step as Done (completed) and advance to next step — requires all key fields
+  const handleDone = async () => {
+    const missing = [];
+    if (!form.started_at) missing.push('Start of Process');
+    if (!form.completed_at) missing.push('End of Process');
+    if (!form.machine_no?.trim()) missing.push('Machine #');
+    if (!form.operator_id) missing.push('Employee No.');
+    if (!form.tray_no?.trim()) missing.push('Tray #');
+    if (form.qty_in === '' || form.qty_in === null || form.qty_in === undefined) missing.push('Qty In');
+    if (form.qty_out === '' || form.qty_out === null || form.qty_out === undefined) missing.push('Qty Out');
+    if (missing.length > 0) {
+      setMessage(`Done requires: ${missing.join(', ')}`);
+      return;
+    }
+    setSaving(true);
+    setMessage('');
+    try {
+      const baseline = savedBaselineRef.current || step;
+      const updateData = {
+        status: 'completed',
+        machine_no: form.machine_no,
+        rack_no: form.rack_no,
+        operator_id: form.operator_id,
+        tray_no: form.tray_no,
+        qty_in: parseInt(form.qty_in) || 0,
+        qty_out: parseInt(form.qty_out) || 0,
+        started_at: form.started_at,
+        completed_at: form.completed_at,
+        notes: form.notes,
+      };
+      // Persist custom fields (test_item / test_condition)
+      const origTestItem = baseline.custom_fields?.test_item || '';
+      const origTestCondition = baseline.custom_fields?.test_condition || '';
+      if (form.test_item !== origTestItem || form.test_condition !== origTestCondition) {
+        updateData.custom_fields = { ...(baseline.custom_fields || {}), test_item: form.test_item, test_condition: form.test_condition };
+      }
+      await api.updateStep(requestId, step.step_number, updateData, leg);
+      // Auto-advance: set next pending step to in_progress
+      const sorted = steps.slice().sort((a, b) => a.step_number - b.step_number);
+      const idx = sorted.findIndex(s => s.step_number === step.step_number);
+      const nextStepData = idx >= 0 && idx < sorted.length - 1 ? sorted[idx + 1] : null;
+      if (nextStepData?.status === 'pending') {
+        try { await api.updateStep(requestId, nextStepData.step_number, { status: 'in_progress' }, leg); } catch (_) {}
+      }
+      setMessage('Step completed!');
+      savedBaselineRef.current = null;
+      onUpdated();
+      if (nextStepData && onSelectStep) {
+        onSelectStep(nextStepData);
+      }
+    } catch (err) {
+      setMessage(`Error: ${err.message}`);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -1885,31 +1932,73 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
           </div>
 
           <div className="border-t border-slate-100 pt-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Timing</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Timing <span className="text-slate-300 font-normal normal-case">(24-hr)</span></p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Start of Process — split date + time for military (24-hr) format */}
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1.5">
                   Start of Process
-                  {form.status === 'completed' && <span className="text-red-500 ml-1">*</span>}
+                  {(form.status === 'completed' || form.status === 'done') && <span className="text-red-500 ml-1">*</span>}
                 </label>
-                <input type="datetime-local" value={form.started_at || ''} onChange={e => setForm(f => ({ ...f, started_at: e.target.value }))}
-                  className={`w-full border rounded-lg px-3 py-2.5 bg-slate-50 focus:bg-white focus:ring-2 text-sm ${
-                    form.status === 'completed' && !form.started_at
-                      ? 'border-red-300 focus:border-red-500 focus:ring-red-200'
-                      : 'border-slate-200 focus:border-blue-500 focus:ring-blue-200'
-                  }`} />
+                <div className="flex gap-1">
+                  <input type="date"
+                    value={form.started_at ? form.started_at.slice(0, 10) : ''}
+                    onChange={e => {
+                      const d = e.target.value;
+                      const t = form.started_at ? form.started_at.slice(11, 16) : '00:00';
+                      setForm(f => ({ ...f, started_at: d ? `${d}T${t}` : '' }));
+                    }}
+                    className={`flex-1 min-w-0 border rounded-lg px-2 py-2.5 bg-slate-50 focus:bg-white focus:ring-2 text-sm ${
+                      (form.status === 'completed') && !form.started_at
+                        ? 'border-red-300 focus:border-red-500 focus:ring-red-200'
+                        : 'border-slate-200 focus:border-blue-500 focus:ring-blue-200'
+                    }`} />
+                  <input type="time"
+                    value={form.started_at ? form.started_at.slice(11, 16) : ''}
+                    onChange={e => {
+                      const t = e.target.value;
+                      const d = form.started_at ? form.started_at.slice(0, 10) : new Date().toISOString().slice(0, 10);
+                      setForm(f => ({ ...f, started_at: t ? `${d}T${t}` : f.started_at }));
+                    }}
+                    className={`w-28 border rounded-lg px-2 py-2.5 bg-slate-50 focus:bg-white focus:ring-2 text-sm ${
+                      (form.status === 'completed') && !form.started_at
+                        ? 'border-red-300 focus:border-red-500 focus:ring-red-200'
+                        : 'border-slate-200 focus:border-blue-500 focus:ring-blue-200'
+                    }`} />
+                </div>
               </div>
+              {/* End of Process — split date + time for military (24-hr) format */}
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1.5">
                   End of Process
-                  {form.status === 'completed' && <span className="text-red-500 ml-1">*</span>}
+                  {(form.status === 'completed' || form.status === 'done') && <span className="text-red-500 ml-1">*</span>}
                 </label>
-                <input type="datetime-local" value={form.completed_at || ''} onChange={e => setForm(f => ({ ...f, completed_at: e.target.value }))}
-                  className={`w-full border rounded-lg px-3 py-2.5 bg-slate-50 focus:bg-white focus:ring-2 text-sm ${
-                    form.status === 'completed' && !form.completed_at
-                      ? 'border-red-300 focus:border-red-500 focus:ring-red-200'
-                      : 'border-slate-200 focus:border-blue-500 focus:ring-blue-200'
-                  }`} />
+                <div className="flex gap-1">
+                  <input type="date"
+                    value={form.completed_at ? form.completed_at.slice(0, 10) : ''}
+                    onChange={e => {
+                      const d = e.target.value;
+                      const t = form.completed_at ? form.completed_at.slice(11, 16) : '00:00';
+                      setForm(f => ({ ...f, completed_at: d ? `${d}T${t}` : '' }));
+                    }}
+                    className={`flex-1 min-w-0 border rounded-lg px-2 py-2.5 bg-slate-50 focus:bg-white focus:ring-2 text-sm ${
+                      (form.status === 'completed') && !form.completed_at
+                        ? 'border-red-300 focus:border-red-500 focus:ring-red-200'
+                        : 'border-slate-200 focus:border-blue-500 focus:ring-blue-200'
+                    }`} />
+                  <input type="time"
+                    value={form.completed_at ? form.completed_at.slice(11, 16) : ''}
+                    onChange={e => {
+                      const t = e.target.value;
+                      const d = form.completed_at ? form.completed_at.slice(0, 10) : new Date().toISOString().slice(0, 10);
+                      setForm(f => ({ ...f, completed_at: t ? `${d}T${t}` : f.completed_at }));
+                    }}
+                    className={`w-28 border rounded-lg px-2 py-2.5 bg-slate-50 focus:bg-white focus:ring-2 text-sm ${
+                      (form.status === 'completed') && !form.completed_at
+                        ? 'border-red-300 focus:border-red-500 focus:ring-red-200'
+                        : 'border-slate-200 focus:border-blue-500 focus:ring-blue-200'
+                    }`} />
+                </div>
               </div>
             </div>
             {/* Estimated Date & Time — moved outside canUpdate, shown after timing section */}
@@ -2066,19 +2155,25 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
             <p className={`text-xs ${message.startsWith('Error') ? 'text-red-600' : 'text-emerald-600'}`}>{message}</p>
           )}
 
-          {/* Action buttons: Save (left) + Next Step (right) */}
+          {/* Action buttons: Save | Done | Next Step */}
           <div className="flex gap-2">
             <button onClick={() => handleSave(false)} disabled={saving}
               className="flex-1 flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg px-4 py-2.5 text-sm font-medium disabled:opacity-50 shadow-sm transition-colors">
               <Save className="w-4 h-4" />
               {saving ? 'Saving…' : 'Save'}
             </button>
+            <button onClick={handleDone} disabled={saving}
+              className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-4 py-2.5 text-sm font-medium disabled:opacity-50 shadow-sm transition-colors"
+              title="Mark as Done and proceed to next step (requires Start, End, Machine, Employee, Tray, Qty In & Out)">
+              <CheckCircle2 className="w-4 h-4" />
+              {saving ? 'Saving…' : 'Done'}
+            </button>
             {steps.length > 0 && step.step_number < totalSteps && (
               <button onClick={handleSaveAndNext} disabled={saving}
                 className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-4 py-2.5 text-sm font-medium disabled:opacity-50 shadow-sm transition-colors"
-                title="Save and go to the next step (requires Start Date, Employee, Tray #, Qty In)">
+                title="Proceed to the next step">
                 <ChevronRight className="w-4 h-4" />
-                {saving ? 'Saving…' : 'Next Step'}
+                {saving ? '…' : 'Next Step'}
               </button>
             )}
           </div>

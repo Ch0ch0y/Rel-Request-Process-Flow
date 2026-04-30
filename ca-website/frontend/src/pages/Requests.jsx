@@ -4,6 +4,7 @@ import api from '../api';
 import { useAuth } from '../context/AuthContext';
 import { Search, Plus, ChevronRight, Loader2, X, FileSpreadsheet } from 'lucide-react';
 import ImportCAExcelModal from '../components/ImportCAExcelModal';
+import CALegSelectorModal from '../components/CALegSelectorModal';
 
 const STATUS_OPTS = ['all', 'pending', 'in_progress', 'completed', 'discontinued'];
 const STATUS_STYLE = {
@@ -51,6 +52,8 @@ const EMPTY_FORM = {
   ubm_opening_size: '', underfill_material: '', wafer_type: '',
   wire_length_max: '', wire_material: '', wire_size: '', wire_supplier: '',
   wire_type: '',
+  // CA Leg Selection (array of selected leg names)
+  ca_legs: [],
 };
 
 function Field({ label, value, onChange, textarea, rows = 2 }) {
@@ -72,6 +75,7 @@ export default function Requests() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [showForm, setShowForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showLegSelector, setShowLegSelector] = useState(false);
   const [formTab, setFormTab] = useState('general');
   const [searchParams] = useSearchParams();
   const stepFilter = searchParams.get('step') || '';
@@ -104,8 +108,7 @@ export default function Requests() {
         ...form,
         title: form.title || form.device_name || form.device || '(Untitled)',
         lot_number: form.lot_number || form.lot_no,
-        device: form.device || form.device_name,
-      };
+        device: form.device || form.device_name,        ca_legs: JSON.stringify(form.ca_legs || []),      };
       const res = await api.post('/api/requests', payload);
       setShowForm(false);
       setForm({ ...EMPTY_FORM, submitter_name: user?.username || '' });
@@ -211,6 +214,15 @@ export default function Requests() {
         </div>
       )}
 
+      {/* ── CA Leg Selector Modal ── */}
+      {showLegSelector && (
+        <CALegSelectorModal
+          selected={form.ca_legs}
+          onConfirm={(legs) => setForm(p => ({ ...p, ca_legs: legs }))}
+          onClose={() => setShowLegSelector(false)}
+        />
+      )}
+
       {/* ── Import Excel Modal ── */}
       {showImport && (
         <ImportCAExcelModal
@@ -231,19 +243,32 @@ export default function Requests() {
                 <h3 className="font-semibold text-slate-900 dark:text-white">New Construction Analysis Request</h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Fill in the information below to submit a CA request</p>
               </div>
-              <button onClick={() => { setShowForm(false); setFormTab('general'); }} className="text-slate-500 hover:text-white">
+              <button onClick={() => { setShowForm(false); setShowLegSelector(false); setFormTab('general'); setForm({ ...EMPTY_FORM, submitter_name: user?.username || '' }); }} className="text-slate-500 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Tabs */}
-            <div className="flex gap-1 px-6 pt-3 shrink-0">
+            <div className="flex items-center gap-1 px-6 pt-3 shrink-0">
               {[['general', 'General Information'], ['material', 'Material Information']].map(([tab, label]) => (
-                <button key={tab} type="button" onClick={() => setFormTab(tab)}
-                  className={`px-4 py-2 rounded-t-lg text-sm font-medium border-b-2 transition-colors ${formTab === tab ? 'border-violet-500 text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-500/10' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}>
+                <button key={tab} type="button" onClick={() => setFormTab(tab)} 
+                  className={`px-4 py-2 rounded-t-lg text-sm font-medium border-b-2 transition-colors ${formTab === tab ? 'border-violet-500 text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-500/10' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}>  
                   {label}
                 </button>
               ))}
+              {/* CA Leg Selection button */}
+              <button
+                type="button"
+                onClick={() => setShowLegSelector(true)}
+                className="ml-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-violet-300 dark:border-violet-700 text-violet-600 dark:text-violet-400 text-xs font-medium hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors"
+              >
+                CA Leg Selection
+                {form.ca_legs.length > 0 && (
+                  <span className="bg-violet-600 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none">
+                    {form.ca_legs.length}
+                  </span>
+                )}
+              </button>
             </div>
 
             {/* Form */}
@@ -418,7 +443,7 @@ export default function Requests() {
                   )}
                 </div>
                 <div className="flex gap-3">
-                  <button type="button" onClick={() => { setShowForm(false); setFormTab('general'); }}
+                  <button type="button" onClick={() => { setShowForm(false); setShowLegSelector(false); setFormTab('general'); setForm({ ...EMPTY_FORM, submitter_name: user?.username || '' }); }}
                     className="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 text-sm hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-colors">
                     Cancel
                   </button>

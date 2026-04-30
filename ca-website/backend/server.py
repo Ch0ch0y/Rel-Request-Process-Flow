@@ -8,7 +8,7 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -24,7 +24,18 @@ except ImportError:
 ROOT_DIR = Path(__file__).parent
 
 # ── Config ─────────────────────────────────────────────────────────────────
-SECRET_KEY   = os.getenv("CA_SECRET_KEY", "ca-secret-key-change-in-prod")
+_CA_JWT_DEFAULT = "ca-secret-key-change-in-prod"
+SECRET_KEY   = os.getenv("CA_SECRET_KEY", _CA_JWT_DEFAULT)
+if SECRET_KEY == _CA_JWT_DEFAULT:
+    if os.getenv("ENVIRONMENT", "").lower() == "production":
+        raise RuntimeError(
+            "FATAL: CA_SECRET_KEY is still set to the default insecure value. "
+            "Set the CA_SECRET_KEY environment variable before starting in production."
+        )
+    logging.warning(
+        "\u26a0\ufe0f  SECURITY: CA_SECRET_KEY is using the default insecure key. "
+        "Set the CA_SECRET_KEY environment variable for production use."
+    )
 ALGORITHM    = "HS256"
 TOKEN_EXPIRY = 24  # hours
 DB_PATH      = os.path.join(os.path.dirname(__file__), "ca_database.db")
@@ -145,8 +156,15 @@ CHECKLIST_TEMPLATE = [
 ]
 
 # ── Database Init ──────────────────────────────────────────────────────────
+async def _ca_db_pragmas(db) -> None:
+    """Apply recommended SQLite settings on every connection."""
+    await db.execute("PRAGMA journal_mode=WAL")
+    await db.execute("PRAGMA foreign_keys=ON")
+    await db.execute("PRAGMA busy_timeout=5000")
+
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
+        await _ca_db_pragmas(db)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -350,6 +368,7 @@ async def init_db():
                 wire_size                      TEXT,
                 wire_supplier                  TEXT,
                 wire_type                      TEXT,
+                ca_legs                        TEXT,
                 FOREIGN KEY (submitter_id) REFERENCES users(id),
                 FOREIGN KEY (analyst_id)   REFERENCES users(id)
             )
@@ -389,6 +408,7 @@ async def init_db():
             ("wafer_type", "TEXT"), ("wire_length_max", "TEXT"),
             ("wire_material", "TEXT"), ("wire_size", "TEXT"),
             ("wire_supplier", "TEXT"), ("wire_type", "TEXT"),
+            ("ca_legs", "TEXT"),
         ]
         for col, coltype in _new_ca_cols:
             try:
@@ -403,6 +423,15 @@ async def init_db():
         # Add retention_details column to ca_requests if not present
         try:
             await db.execute("ALTER TABLE ca_requests ADD COLUMN retention_details TEXT")
+        except Exception:
+            pass
+        # Add soft-delete columns for backup archiving
+        try:
+            await db.execute("ALTER TABLE ca_requests ADD COLUMN is_archived INTEGER DEFAULT 0")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE ca_requests ADD COLUMN archived_at TEXT")
         except Exception:
             pass
         await db.execute("""
@@ -469,19 +498,20 @@ async def init_db():
                 pass  # column already exists
         await db.commit()
 
-    # Seed admin user if empty
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM users")
-    if cur.fetchone()[0] == 0:
-        pw = bcrypt.hashpw(b"admin123", bcrypt.gensalt()).decode()
-        cur.execute(
-            "INSERT INTO users (email,username,password,role,is_approved) VALUES (?,?,?,?,1)",
-            ("admin@amkor.com", "Admin", pw, "Admin"),
-        )
-        conn.commit()
-        logger.info("Seeded admin: admin@amkor.com / admin123")
-    conn.close()
+    # Seed admin user if empty — async to avoid blocking the event loop
+    async with aiosqlite.connect(DB_PATH) as db_seed:
+        cur = await db_seed.execute("SELECT COUNT(*) FROM users")
+        row = await cur.fetchone()
+        if row[0] == 0:
+            import secrets as _sec
+            _initial_pw = _sec.token_urlsafe(12)
+            pw = bcrypt.hashpw(_initial_pw.encode(), bcrypt.gensalt()).decode()
+            await db_seed.execute(
+                "INSERT INTO users (email,username,password,role,is_approved) VALUES (?,?,?,?,1)",
+                ("admin@amkor.com", "Admin", pw, "Admin"),
+            )
+            await db_seed.commit()
+            logger.warning(f"\U0001f511 Seeded admin: admin@amkor.com / {_initial_pw}  \u2190 CHANGE THIS PASSWORD IMMEDIATELY!")
 
 # ── Lifespan & App ─────────────────────────────────────────────────────────
 @asynccontextmanager
@@ -491,7 +521,13 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="CA Request API", version="1.0.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
+_CA_ALLOWED_ORIGINS = [
+    o.strip() for o in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:3001,http://localhost:5174,http://localhost:5175"
+    ).split(",") if o.strip()
+]
+app.add_middleware(CORSMiddleware, allow_origins=_CA_ALLOWED_ORIGINS, allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
 
 security = HTTPBearer(auto_error=False)
@@ -631,6 +667,8 @@ class RequestCreate(BaseModel):
     wire_size: Optional[str] = None
     wire_supplier: Optional[str] = None
     wire_type: Optional[str] = None
+    # CA Leg Selection (JSON list of selected leg names)
+    ca_legs: Optional[str] = None
 
 class StepUpdate(BaseModel):
     status: Optional[str] = None
@@ -780,17 +818,14 @@ async def register(body: RegisterData):
     pw = bcrypt.hashpw(body.password.encode(), bcrypt.gensalt()).decode()
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            cur = await db.execute(
-                "INSERT INTO users (email,username,password,role,is_approved) VALUES (?,?,?,?,1)",
+            await db.execute(
+                "INSERT INTO users (email,username,password,role,is_approved) VALUES (?,?,?,?,0)",
                 (body.email, body.username, pw, body.role)
             )
-            uid = cur.lastrowid
             await db.commit()
     except Exception:
         raise HTTPException(status_code=400, detail="Email already registered")
-    token = make_token(uid, body.role)
-    return {"token": token, "user": {"id": uid, "email": body.email,
-            "username": body.username, "role": body.role}}
+    return {"message": "Registration successful. Your account is pending admin approval."}
 
 @app.get("/api/auth/me")
 async def me(u=Depends(get_current_user)):
@@ -814,14 +849,30 @@ async def heartbeat(u=Depends(get_current_user)):
         await db.commit()
     return {"ok": True}
 
+import time as _time
+from collections import defaultdict as _defaultdict
+_ca_tech_code_attempts: dict = _defaultdict(list)
+_CA_TECH_CODE_MAX = 10
+_CA_TECH_CODE_WINDOW = 60  # seconds per rate-limit window
+
 @app.post("/api/verify-tech-code")
-async def verify_tech_code(data: dict):
+async def verify_tech_code(data: dict, request: Request):
     """Public endpoint — verify the 6-digit Technician passcode."""
+    client_ip = request.client.host if request.client else "unknown"
+    now_ts = _time.time()
+    window_start = now_ts - _CA_TECH_CODE_WINDOW
+    bucket = _ca_tech_code_attempts[client_ip]
+    bucket[:] = [t for t in bucket if t > window_start]
+    if len(bucket) >= _CA_TECH_CODE_MAX:
+        raise HTTPException(status_code=429, detail="Too many attempts. Please wait before trying again.")
+    bucket.append(now_ts)
     code = data.get("code", "")
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("SELECT value FROM settings WHERE key='tech_auth_code'")
         row = await cur.fetchone()
-    stored = row[0] if row and row[0] else "735522"
+    stored = row[0] if row and row[0] else None
+    if stored is None:
+        return {"valid": False}
     return {"valid": code == stored}
 
 class GuestTokenData(BaseModel):
@@ -1270,10 +1321,10 @@ async def create_request(body: RequestCreate, u=Depends(get_current_user)):
                solder_mask_material,solder_paste_material,sub_layer,sub_pad_design,
                sub_pad_opening_size,sub_surface_treatment,ubm_material,ubm_opening_size,
                underfill_material,wafer_type,wire_length_max,wire_material,wire_size,
-               wire_supplier,wire_type)
+               wire_supplier,wire_type,ca_legs)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
                     ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             ca_num, body.title, body.sample_description, body.lot_number,
             body.device, body.department, u["id"],
@@ -1304,6 +1355,7 @@ async def create_request(body: RequestCreate, u=Depends(get_current_user)):
             body.sub_surface_treatment, body.ubm_material, body.ubm_opening_size,
             body.underfill_material, body.wafer_type, body.wire_length_max,
             body.wire_material, body.wire_size, body.wire_supplier, body.wire_type,
+            body.ca_legs,
         ))
         req_id = cur.lastrowid
         for i, sn in enumerate(CA_STEPS_DEFAULT, 1):
@@ -1609,7 +1661,7 @@ async def list_records(_=Depends(get_current_user)):
 @app.get("/api/backup/export")
 async def export_backup(_=Depends(require_role("Admin"))):
     """Export all completed CA requests as a multi-sheet Excel backup, then
-    permanently delete them from the database.
+    archive them in the database (soft-delete — data is preserved for audit/recovery).
 
     Sheet 1 – Summary: one row per request (sorted by created_at)
     Sheet 2+ – one sheet per request named by ca_number, showing:
@@ -1627,7 +1679,7 @@ async def export_backup(_=Depends(require_role("Admin"))):
             SELECT r.*, u.username AS analyst_name
             FROM ca_requests r
             LEFT JOIN users u ON r.analyst_id = u.id
-            WHERE r.status = 'completed'
+            WHERE r.status = 'completed' AND (r.is_archived IS NULL OR r.is_archived = 0)
             ORDER BY r.created_at ASC
         """)
         requests = [dict(r) for r in await cur.fetchall()]
@@ -1809,16 +1861,16 @@ async def export_backup(_=Depends(require_role("Admin"))):
 
     exported_count = len(requests)
 
-    # Permanently remove the exported completed requests from the database
+    # Archive the exported completed requests (soft-delete — data is preserved for audit/recovery)
     if requests:
         req_ids = [req["id"] for req in requests]
         placeholders = ",".join("?" * len(req_ids))
+        archived_at = datetime.now(timezone.utc).isoformat()
         async with aiosqlite.connect(DB_PATH) as db_del:
-            # Explicit child-table deletes (safe even if CASCADE is not enforced)
-            await db_del.execute(f"DELETE FROM ca_checklist_items WHERE request_id IN ({placeholders})", req_ids)
-            await db_del.execute(f"DELETE FROM ca_steps         WHERE request_id IN ({placeholders})", req_ids)
-            await db_del.execute(f"DELETE FROM ca_schedule      WHERE request_id IN ({placeholders})", req_ids)
-            await db_del.execute(f"DELETE FROM ca_requests      WHERE id          IN ({placeholders})", req_ids)
+            await db_del.execute(
+                f"UPDATE ca_requests SET is_archived=1, archived_at=? WHERE id IN ({placeholders})",
+                [archived_at, *req_ids]
+            )
             await db_del.commit()
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")

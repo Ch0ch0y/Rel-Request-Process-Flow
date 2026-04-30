@@ -53,12 +53,10 @@ export function AuthProvider({ children }) {
   }, []);
 
   const register = useCallback(async (email, username, password, role) => {
-    const { data } = await api.post('/api/auth/register', { email, username, password, role });
-    localStorage.setItem('ca_token', data.token);
-    localStorage.setItem('ca_user', JSON.stringify(data.user));
-    setToken(data.token);
-    setUser(data.user);
-    return data.user;
+    await api.post('/api/auth/register', { email, username, password, role });
+    // Registration requires admin approval — do NOT store a token.
+    // Caller should redirect to login with a success message.
+    return { pending: true };
   }, []);
 
   const logout = useCallback(() => {
