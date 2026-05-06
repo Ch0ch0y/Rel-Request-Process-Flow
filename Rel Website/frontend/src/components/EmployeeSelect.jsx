@@ -9,7 +9,7 @@ export function invalidateEmployeeCache() {
   cachedEmployees = null;
 }
 
-export default function EmployeeSelect({ value, onChange, highlightRequired = false }) {
+export default function EmployeeSelect({ value, onChange, highlightRequired = false, disabled = false }) {
   const [employees, setEmployees] = useState(cachedEmployees || []);
   const [query, setQuery] = useState(value || '');
   const [open, setOpen] = useState(false);
@@ -42,6 +42,13 @@ export default function EmployeeSelect({ value, onChange, highlightRequired = fa
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
+  useEffect(() => {
+    if (disabled) {
+      setOpen(false);
+      setHighlighted(-1);
+    }
+  }, [disabled]);
+
   const selectedEmployee = employees.find(e => e.id === value);
 
   const filtered = employees.filter(emp => {
@@ -50,6 +57,7 @@ export default function EmployeeSelect({ value, onChange, highlightRequired = fa
   });
 
   function handleSelect(emp) {
+    if (disabled) return;
     setQuery(emp.id);
     onChange(emp.id);
     setOpen(false);
@@ -57,6 +65,7 @@ export default function EmployeeSelect({ value, onChange, highlightRequired = fa
   }
 
   function handleClear() {
+    if (disabled) return;
     setQuery('');
     onChange('');
     setOpen(false);
@@ -64,6 +73,7 @@ export default function EmployeeSelect({ value, onChange, highlightRequired = fa
   }
 
   function handleInputChange(e) {
+    if (disabled) return;
     const v = e.target.value;
     setQuery(v);
     onChange(v);
@@ -72,6 +82,7 @@ export default function EmployeeSelect({ value, onChange, highlightRequired = fa
   }
 
   function handleKeyDown(e) {
+    if (disabled) return;
     if (!open) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         setOpen(true);
@@ -101,17 +112,18 @@ export default function EmployeeSelect({ value, onChange, highlightRequired = fa
           ref={inputRef}
           type="text"
           value={query}
+          disabled={disabled}
           onChange={handleInputChange}
-          onFocus={() => setOpen(true)}
+          onFocus={() => !disabled && setOpen(true)}
           onKeyDown={handleKeyDown}
           placeholder="Search ID or name..."
           className={`w-full border rounded-lg pl-8 pr-8 py-2.5 bg-slate-50 focus:bg-white focus:ring-2 text-sm ${
             highlightRequired
               ? 'border-red-300 focus:border-red-500 focus:ring-red-200'
               : 'border-slate-200 focus:border-blue-500 focus:ring-blue-200'
-          }`}
+          } ${disabled ? 'cursor-not-allowed bg-slate-100 text-slate-400' : ''}`}
         />
-        {query && (
+        {query && !disabled && (
           <button type="button" onClick={handleClear}
             className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
             <X className="w-3.5 h-3.5" />
@@ -127,7 +139,7 @@ export default function EmployeeSelect({ value, onChange, highlightRequired = fa
         </p>
       )}
 
-      {open && filtered.length > 0 && (
+      {!disabled && open && filtered.length > 0 && (
         <ul className="absolute z-50 mt-1 w-full max-h-52 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg">
           {filtered.map((emp, idx) => (
             <li
@@ -148,7 +160,7 @@ export default function EmployeeSelect({ value, onChange, highlightRequired = fa
         </ul>
       )}
 
-      {open && query && filtered.length === 0 && (
+      {!disabled && open && query && filtered.length === 0 && (
         <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg px-3 py-3 text-sm text-slate-400 text-center">
           No matching employee found
         </div>

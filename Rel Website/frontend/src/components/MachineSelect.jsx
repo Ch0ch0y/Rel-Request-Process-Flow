@@ -13,7 +13,7 @@ let cachedMachines = null;
  * - Shows the description badge next to the selected machine number.
  * - Data is fetched from the backend API (managed via Settings).
  */
-export default function MachineSelect({ value, onChange, className = '' }) {
+export default function MachineSelect({ value, onChange, className = '', disabled = false }) {
   const [machines, setMachines] = useState(cachedMachines || []);
   const [query, setQuery] = useState(value || '');
   const [open, setOpen] = useState(false);
@@ -52,6 +52,13 @@ export default function MachineSelect({ value, onChange, className = '' }) {
     return () => document.removeEventListener('mousedown', handler);
   }, [query, value, onChange]);
 
+  useEffect(() => {
+    if (disabled) {
+      setOpen(false);
+      setHighlightIdx(-1);
+    }
+  }, [disabled]);
+
   const filtered = query.trim() === ''
     ? machines
     : machines.filter(m =>
@@ -62,6 +69,7 @@ export default function MachineSelect({ value, onChange, className = '' }) {
   const matched = machines.find(m => m.machine_no === value);
 
   const handleSelect = (machine) => {
+    if (disabled) return;
     setQuery(machine.machine_no);
     onChange(machine.machine_no);
     setOpen(false);
@@ -69,12 +77,14 @@ export default function MachineSelect({ value, onChange, className = '' }) {
   };
 
   const handleInputChange = (e) => {
+    if (disabled) return;
     setQuery(e.target.value);
     onChange(e.target.value);
     setOpen(true);
   };
 
   const handleClear = () => {
+    if (disabled) return;
     setQuery('');
     onChange('');
     setOpen(false);
@@ -82,6 +92,7 @@ export default function MachineSelect({ value, onChange, className = '' }) {
   };
 
   const handleKeyDown = (e) => {
+    if (disabled) return;
     if (!open || filtered.length === 0) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { setOpen(true); return; }
       return;
@@ -122,18 +133,20 @@ export default function MachineSelect({ value, onChange, className = '' }) {
         <input
           type="text"
           value={query}
+          disabled={disabled}
           onChange={handleInputChange}
-          onFocus={() => setOpen(true)}
+          onFocus={() => !disabled && setOpen(true)}
           onKeyDown={handleKeyDown}
           placeholder="Search or type machine #"
           className="w-full border border-slate-200 rounded-lg pl-3 pr-8 py-2.5 bg-slate-50
-            focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm transition-all"
+            focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm transition-all disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
         />
         <button
           type="button"
           tabIndex={-1}
+          disabled={disabled}
           onClick={() => (value ? handleClear() : setOpen(o => !o))}
-          className="absolute right-2.5 text-slate-400 hover:text-slate-600 transition-colors"
+          className="absolute right-2.5 text-slate-400 hover:text-slate-600 transition-colors disabled:cursor-not-allowed disabled:text-slate-300"
         >
           {value ? <X className="w-3.5 h-3.5" /> : <ChevronsUpDown className="w-3.5 h-3.5" />}
         </button>
@@ -147,7 +160,7 @@ export default function MachineSelect({ value, onChange, className = '' }) {
       )}
 
       {/* Dropdown */}
-      {open && (
+      {!disabled && open && (
         <div ref={listRef} className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg
           max-h-60 overflow-y-auto text-sm ring-1 ring-slate-100">
           {filtered.length === 0 ? (

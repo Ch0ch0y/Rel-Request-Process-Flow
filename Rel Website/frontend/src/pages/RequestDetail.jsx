@@ -14,6 +14,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import EmployeeSelect from '../components/EmployeeSelect';
 import MachineSelect from '../components/MachineSelect';
 import EnhancedRetentionDetails from '../components/EnhancedRetentionDetails';
+import SatDataFileControl, { SAT_DATA_FILE_KEY } from '../components/SatDataFileControl';
 import { parseRetentionDetails, hasRetentionData } from '../constants/retentionConstants';
 
 // ─── Cycle Time (CT) lookup tables (source: standard reference Excel) ─────────
@@ -974,14 +975,141 @@ function DefaultPickerModal({ title, options, currentDefault, onSelect, onClose 
   );
 }
 
-function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, leg = 1, totalSS, estimatedStart = null, steps = [], onSelectStep = null }) {
+function padDateTimeUnit(value) {
+  return String(value).padStart(2, '0');
+}
+
+const MONTH_OPTIONS = [
+  { value: '01', label: 'Jan' },
+  { value: '02', label: 'Feb' },
+  { value: '03', label: 'Mar' },
+  { value: '04', label: 'Apr' },
+  { value: '05', label: 'May' },
+  { value: '06', label: 'Jun' },
+  { value: '07', label: 'Jul' },
+  { value: '08', label: 'Aug' },
+  { value: '09', label: 'Sep' },
+  { value: '10', label: 'Oct' },
+  { value: '11', label: 'Nov' },
+  { value: '12', label: 'Dec' },
+];
+
+const MONTH_LABEL_BY_VALUE = Object.fromEntries(MONTH_OPTIONS.map(month => [month.value, month.label]));
+const MONTH_VALUE_BY_LABEL = Object.fromEntries(
+  MONTH_OPTIONS.flatMap((month, index) => {
+    const monthNumber = String(index + 1);
+    const fullName = new Date(2000, index, 1).toLocaleString('en-US', { month: 'long' });
+    return [
+      [month.label.toLowerCase(), month.value],
+      [fullName.toLowerCase(), month.value],
+      [monthNumber, month.value],
+      [month.value, month.value],
+    ];
+  }),
+);
+
+function monthFromLocalDateTime(value) {
+  if (!value || value.length < 7) return '';
+  return value.slice(5, 7);
+}
+
+function normalizeMonthValue(value) {
+  const trimmed = String(value || '').trim().toLowerCase();
+  if (!trimmed) return '';
+  return MONTH_VALUE_BY_LABEL[trimmed] || '';
+}
+
+function monthInputDisplayValue(value) {
+  const normalizedMonth = normalizeMonthValue(value);
+  return normalizedMonth ? (MONTH_LABEL_BY_VALUE[normalizedMonth] || value) : value;
+}
+
+function dayFromLocalDateTime(value) {
+  if (!value || value.length < 10) return '';
+  return String(Number(value.slice(8, 10)));
+}
+
+function timeFromLocalDateTime(value) {
+  return value && value.length >= 16 ? value.slice(11, 16) : '';
+}
+
+function normalizeStoredLocalDateTime(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(trimmed) ? trimmed : '';
+}
+
+function yearFromLocalDateTime(value) {
+  const normalizedValue = normalizeStoredLocalDateTime(value);
+  return normalizedValue ? Number(normalizedValue.slice(0, 4)) : new Date().getFullYear();
+}
+
+function normalizeDayValue(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  const digits = trimmed.replace(/\D/g, '');
+  if (!digits) return trimmed;
+  const day = Number(digits);
+  if (!Number.isInteger(day) || day < 1 || day > 31) return trimmed;
+  return String(day);
+}
+
+function normalizeTime24Value(value) {
+  const trimmed = value.trim();
+  const match = trimmed.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (!match) return trimmed;
+  return `${padDateTimeUnit(match[1])}:${match[2]}`;
+}
+
+function buildLocalDateTimeValue(monthValue, dayValue, timeValue, existingValue = '', fallbackTime = '') {
+  const month = Number(normalizeMonthValue(monthValue));
+  const day = Number(dayValue);
+  const resolvedTime = normalizeTime24Value(timeValue.trim() || fallbackTime);
+  const timeMatch = resolvedTime.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (!Number.isInteger(month) || month < 1 || month > 12 || !Number.isInteger(day) || day < 1 || day > 31 || !timeMatch) return null;
+
+  const year = yearFromLocalDateTime(existingValue);
+  const probe = new Date(year, month - 1, day);
+  if (
+    probe.getFullYear() !== year ||
+    probe.getMonth() !== month - 1 ||
+    probe.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return `${year}-${padDateTimeUnit(month)}-${padDateTimeUnit(day)}T${padDateTimeUnit(timeMatch[1])}:${timeMatch[2]}`;
+}
+
+function formatStepDateTime(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toLocaleString('en-PH', {
+    timeZone: 'Asia/Manila',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
+function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, leg = 1, totalSS, estimatedStart = null, steps = [], onSelectStep = null, onTraySync = null }) {
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [lastSavedAt, setLastSavedAt] = useState(null); // persists after autosave message fades
   const [imageUploading, setImageUploading] = useState(null); // category key being uploaded, or null
   const [satImages, setSatImages] = useState({});             // { categoryKey: [url, ...] }
+  const [imagePreview, setImagePreview] = useState(null);
   const [employeeMap, setEmployeeMap] = useState({});
+  const [startedAtMonthInput, setStartedAtMonthInput] = useState('');
+  const [startedAtDayInput, setStartedAtDayInput] = useState('');
+  const [startedAtTimeInput, setStartedAtTimeInput] = useState('');
+  const [completedAtMonthInput, setCompletedAtMonthInput] = useState('');
+  const [completedAtDayInput, setCompletedAtDayInput] = useState('');
+  const [completedAtTimeInput, setCompletedAtTimeInput] = useState('');
   // Auto-save: track whether form has been initialised (skip save on first load)
   const formInitialisedRef = useRef(false);
   const autoSaveTimerRef = useRef(null);
@@ -1166,6 +1294,48 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
     }).catch(() => {});
   }, []);
 
+  const trySyncDateTimeField = (field, monthValue, dayValue, timeValue, fallbackTime = '00:00') => {
+    const normalizedDay = normalizeDayValue(dayValue);
+    const nextValue = buildLocalDateTimeValue(
+      monthValue,
+      normalizedDay,
+      timeValue,
+      form[field] || '',
+      timeFromLocalDateTime(form[field] || '') || fallbackTime,
+    );
+    if (nextValue) {
+      setForm(f => ({ ...f, [field]: nextValue }));
+      return true;
+    }
+    return false;
+  };
+
+  const commitDateTimeDraft = (field, monthValue, dayValue, timeValue, setMonthValue, setDayValue, setTimeValue) => {
+    if (!monthValue && !dayValue.trim() && !timeValue.trim()) {
+      setMonthValue('');
+      setDayValue('');
+      setTimeValue('');
+      setForm(f => ({ ...f, [field]: '' }));
+      return;
+    }
+
+    const normalizedMonth = normalizeMonthValue(monthValue);
+    const normalizedDay = normalizeDayValue(dayValue);
+    const normalizedTime = normalizeTime24Value(timeValue) || timeFromLocalDateTime(form[field] || '') || '00:00';
+    const nextValue = buildLocalDateTimeValue(normalizedMonth, normalizedDay, normalizedTime, form[field] || '', '00:00');
+    if (nextValue) {
+      setMonthValue(monthInputDisplayValue(normalizedMonth));
+      setDayValue(normalizedDay);
+      setTimeValue(normalizedTime);
+      setForm(f => ({ ...f, [field]: nextValue }));
+      return;
+    }
+
+    setMonthValue(monthInputDisplayValue(monthValue));
+    setDayValue(normalizedDay || dayValue);
+    setTimeValue(normalizeTime24Value(timeValue) || timeValue);
+  };
+
   useEffect(() => {
     // Detect if a previously saved custom-hours value needs a sentinel (Bake or Reliability)
     let test_condition_init = step.custom_fields?.test_condition || '';
@@ -1259,6 +1429,8 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
       ? loadStepDefault(stepOptKeyInit, 'item') : null;
     const savedDefaultCond = stepOptKeyInit && !step.custom_fields?.test_condition && !test_condition_init
       ? loadStepDefault(stepOptKeyInit, 'cond') : null;
+    const startedAtValue = normalizeStoredLocalDateTime(step.started_at ? step.started_at.slice(0, 16) : '');
+    const completedAtValue = normalizeStoredLocalDateTime(step.completed_at ? step.completed_at.slice(0, 16) : '');
     setForm({
       status: step.status,
       machine_no: step.machine_no || '',
@@ -1274,9 +1446,15 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
       hts_custom_hrs: hts_custom_hrs_init,
       // Extract datetime-local format (YYYY-MM-DDTHH:mm) directly without timezone conversion
       // This preserves the original datetime as stored in the database
-      started_at: step.started_at ? step.started_at.slice(0, 16) : '',
-      completed_at: step.completed_at ? step.completed_at.slice(0, 16) : '',
+      started_at: startedAtValue,
+      completed_at: completedAtValue,
     });
+    setStartedAtMonthInput(monthInputDisplayValue(monthFromLocalDateTime(startedAtValue)));
+    setStartedAtDayInput(dayFromLocalDateTime(startedAtValue));
+    setStartedAtTimeInput(timeFromLocalDateTime(startedAtValue));
+    setCompletedAtMonthInput(monthInputDisplayValue(monthFromLocalDateTime(completedAtValue)));
+    setCompletedAtDayInput(dayFromLocalDateTime(completedAtValue));
+    setCompletedAtTimeInput(timeFromLocalDateTime(completedAtValue));
     // Initialise satImages: new dict format, or empty dict for legacy list
     const rawAtt = step.attachments;
     if (rawAtt && !Array.isArray(rawAtt) && typeof rawAtt === 'object') {
@@ -1382,6 +1560,9 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
         return;
       }
       await api.updateStep(requestId, step.step_number, updateData, leg);
+      if ('tray_no' in updateData && onTraySync) {
+        onTraySync(updateData.tray_no);
+      }
       // Auto-advance: when a step is marked Done, set the next pending step to In Queue
       if (updateData.status === 'completed' && steps.length > 0) {
         const sorted = steps.slice().sort((a, b) => a.step_number - b.step_number);
@@ -1540,6 +1721,41 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
       setImageUploading(null);
       e.target.value = '';
     }
+  };
+
+  const handleSatDataUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImageUploading(SAT_DATA_FILE_KEY);
+    try {
+      const res = await api.upload(file);
+      setSatImages(prev => ({
+        ...prev,
+        [SAT_DATA_FILE_KEY]: {
+          url: res.url,
+          filename: res.filename || '',
+          original_filename: res.original_filename || file.name,
+          name: res.original_filename || file.name,
+          size: file.size,
+          uploaded_at: new Date().toISOString(),
+        },
+      }));
+      setMessage('SAT data file uploaded.');
+    } catch (err) {
+      setMessage(`Error: ${err.message || 'Failed to upload SAT data file.'}`);
+    } finally {
+      setImageUploading(null);
+      e.target.value = '';
+    }
+  };
+
+  const removeSatDataFile = () => {
+    setSatImages(prev => {
+      const next = { ...prev };
+      delete next[SAT_DATA_FILE_KEY];
+      return next;
+    });
   };
 
   return (
@@ -1940,26 +2156,69 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
                   Start of Process
                   {(form.status === 'completed' || form.status === 'done') && <span className="text-red-500 ml-1">*</span>}
                 </label>
-                <div className="flex gap-1">
-                  <input type="date"
-                    value={form.started_at ? form.started_at.slice(0, 10) : ''}
+                <div className="grid grid-cols-[1fr_72px_112px] gap-1">
+                  <input
+                    type="text"
+                    list="started-at-month-options"
+                    value={startedAtMonthInput}
                     onChange={e => {
-                      const d = e.target.value;
-                      const t = form.started_at ? form.started_at.slice(11, 16) : '00:00';
-                      setForm(f => ({ ...f, started_at: d ? `${d}T${t}` : '' }));
+                      const nextMonthValue = e.target.value;
+                      setStartedAtMonthInput(nextMonthValue);
+                      if (!nextMonthValue && !startedAtDayInput.trim() && !startedAtTimeInput.trim()) {
+                        setForm(f => ({ ...f, started_at: '' }));
+                        return;
+                      }
+                      trySyncDateTimeField('started_at', nextMonthValue, startedAtDayInput, startedAtTimeInput);
                     }}
+                    onBlur={() => commitDateTimeDraft('started_at', startedAtMonthInput, startedAtDayInput, startedAtTimeInput, setStartedAtMonthInput, setStartedAtDayInput, setStartedAtTimeInput)}
+                    onFocus={e => e.target.select()}
+                    placeholder="Month"
+                    autoComplete="off"
                     className={`flex-1 min-w-0 border rounded-lg px-2 py-2.5 bg-slate-50 focus:bg-white focus:ring-2 text-sm ${
                       (form.status === 'completed') && !form.started_at
                         ? 'border-red-300 focus:border-red-500 focus:ring-red-200'
                         : 'border-slate-200 focus:border-blue-500 focus:ring-blue-200'
                     }`} />
-                  <input type="time"
-                    value={form.started_at ? form.started_at.slice(11, 16) : ''}
+                  <datalist id="started-at-month-options">
+                    {MONTH_OPTIONS.map(month => (
+                      <option key={month.value} value={month.label} />
+                    ))}
+                  </datalist>
+                  <input type="text"
+                    value={startedAtDayInput}
                     onChange={e => {
-                      const t = e.target.value;
-                      const d = form.started_at ? form.started_at.slice(0, 10) : new Date().toISOString().slice(0, 10);
-                      setForm(f => ({ ...f, started_at: t ? `${d}T${t}` : f.started_at }));
+                      const nextDayValue = e.target.value;
+                      setStartedAtDayInput(nextDayValue);
+                      if (!startedAtMonthInput && !nextDayValue.trim() && !startedAtTimeInput.trim()) {
+                        setForm(f => ({ ...f, started_at: '' }));
+                        return;
+                      }
+                      trySyncDateTimeField('started_at', startedAtMonthInput, nextDayValue, startedAtTimeInput);
                     }}
+                    onBlur={() => commitDateTimeDraft('started_at', startedAtMonthInput, startedAtDayInput, startedAtTimeInput, setStartedAtMonthInput, setStartedAtDayInput, setStartedAtTimeInput)}
+                    onFocus={e => e.target.select()}
+                    inputMode="numeric"
+                    maxLength={2}
+                    placeholder="DD"
+                    className={`min-w-0 border rounded-lg px-2 py-2.5 bg-slate-50 focus:bg-white focus:ring-2 text-sm ${
+                      (form.status === 'completed') && !form.started_at
+                        ? 'border-red-300 focus:border-red-500 focus:ring-red-200'
+                        : 'border-slate-200 focus:border-blue-500 focus:ring-blue-200'
+                    }`} />
+                  <input type="time"
+                    value={startedAtTimeInput}
+                    onChange={e => {
+                      const nextTimeValue = e.target.value;
+                      setStartedAtTimeInput(nextTimeValue);
+                      if (!startedAtMonthInput && !startedAtDayInput.trim() && !nextTimeValue.trim()) {
+                        setForm(f => ({ ...f, started_at: '' }));
+                        return;
+                      }
+                      trySyncDateTimeField('started_at', startedAtMonthInput, startedAtDayInput, nextTimeValue);
+                    }}
+                    onBlur={() => commitDateTimeDraft('started_at', startedAtMonthInput, startedAtDayInput, startedAtTimeInput, setStartedAtMonthInput, setStartedAtDayInput, setStartedAtTimeInput)}
+                    onFocus={e => e.target.select()}
+                    step="60"
                     className={`w-28 border rounded-lg px-2 py-2.5 bg-slate-50 focus:bg-white focus:ring-2 text-sm ${
                       (form.status === 'completed') && !form.started_at
                         ? 'border-red-300 focus:border-red-500 focus:ring-red-200'
@@ -1973,26 +2232,69 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
                   End of Process
                   {(form.status === 'completed' || form.status === 'done') && <span className="text-red-500 ml-1">*</span>}
                 </label>
-                <div className="flex gap-1">
-                  <input type="date"
-                    value={form.completed_at ? form.completed_at.slice(0, 10) : ''}
+                <div className="grid grid-cols-[1fr_72px_112px] gap-1">
+                  <input
+                    type="text"
+                    list="completed-at-month-options"
+                    value={completedAtMonthInput}
                     onChange={e => {
-                      const d = e.target.value;
-                      const t = form.completed_at ? form.completed_at.slice(11, 16) : '00:00';
-                      setForm(f => ({ ...f, completed_at: d ? `${d}T${t}` : '' }));
+                      const nextMonthValue = e.target.value;
+                      setCompletedAtMonthInput(nextMonthValue);
+                      if (!nextMonthValue && !completedAtDayInput.trim() && !completedAtTimeInput.trim()) {
+                        setForm(f => ({ ...f, completed_at: '' }));
+                        return;
+                      }
+                      trySyncDateTimeField('completed_at', nextMonthValue, completedAtDayInput, completedAtTimeInput);
                     }}
+                    onBlur={() => commitDateTimeDraft('completed_at', completedAtMonthInput, completedAtDayInput, completedAtTimeInput, setCompletedAtMonthInput, setCompletedAtDayInput, setCompletedAtTimeInput)}
+                    onFocus={e => e.target.select()}
+                    placeholder="Month"
+                    autoComplete="off"
                     className={`flex-1 min-w-0 border rounded-lg px-2 py-2.5 bg-slate-50 focus:bg-white focus:ring-2 text-sm ${
                       (form.status === 'completed') && !form.completed_at
                         ? 'border-red-300 focus:border-red-500 focus:ring-red-200'
                         : 'border-slate-200 focus:border-blue-500 focus:ring-blue-200'
                     }`} />
-                  <input type="time"
-                    value={form.completed_at ? form.completed_at.slice(11, 16) : ''}
+                  <datalist id="completed-at-month-options">
+                    {MONTH_OPTIONS.map(month => (
+                      <option key={month.value} value={month.label} />
+                    ))}
+                  </datalist>
+                  <input type="text"
+                    value={completedAtDayInput}
                     onChange={e => {
-                      const t = e.target.value;
-                      const d = form.completed_at ? form.completed_at.slice(0, 10) : new Date().toISOString().slice(0, 10);
-                      setForm(f => ({ ...f, completed_at: t ? `${d}T${t}` : f.completed_at }));
+                      const nextDayValue = e.target.value;
+                      setCompletedAtDayInput(nextDayValue);
+                      if (!completedAtMonthInput && !nextDayValue.trim() && !completedAtTimeInput.trim()) {
+                        setForm(f => ({ ...f, completed_at: '' }));
+                        return;
+                      }
+                      trySyncDateTimeField('completed_at', completedAtMonthInput, nextDayValue, completedAtTimeInput);
                     }}
+                    onBlur={() => commitDateTimeDraft('completed_at', completedAtMonthInput, completedAtDayInput, completedAtTimeInput, setCompletedAtMonthInput, setCompletedAtDayInput, setCompletedAtTimeInput)}
+                    onFocus={e => e.target.select()}
+                    inputMode="numeric"
+                    maxLength={2}
+                    placeholder="DD"
+                    className={`min-w-0 border rounded-lg px-2 py-2.5 bg-slate-50 focus:bg-white focus:ring-2 text-sm ${
+                      (form.status === 'completed') && !form.completed_at
+                        ? 'border-red-300 focus:border-red-500 focus:ring-red-200'
+                        : 'border-slate-200 focus:border-blue-500 focus:ring-blue-200'
+                    }`} />
+                  <input type="time"
+                    value={completedAtTimeInput}
+                    onChange={e => {
+                      const nextTimeValue = e.target.value;
+                      setCompletedAtTimeInput(nextTimeValue);
+                      if (!completedAtMonthInput && !completedAtDayInput.trim() && !nextTimeValue.trim()) {
+                        setForm(f => ({ ...f, completed_at: '' }));
+                        return;
+                      }
+                      trySyncDateTimeField('completed_at', completedAtMonthInput, completedAtDayInput, nextTimeValue);
+                    }}
+                    onBlur={() => commitDateTimeDraft('completed_at', completedAtMonthInput, completedAtDayInput, completedAtTimeInput, setCompletedAtMonthInput, setCompletedAtDayInput, setCompletedAtTimeInput)}
+                    onFocus={e => e.target.select()}
+                    step="60"
                     className={`w-28 border rounded-lg px-2 py-2.5 bg-slate-50 focus:bg-white focus:ring-2 text-sm ${
                       (form.status === 'completed') && !form.completed_at
                         ? 'border-red-300 focus:border-red-500 focus:ring-red-200'
@@ -2036,6 +2338,7 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
                 <input type="text" value={form.tray_no} onChange={e => setForm(f => ({ ...f, tray_no: e.target.value }))}
                   placeholder="Enter tray number"
                   className="w-full border border-slate-200 rounded-lg px-3 py-2.5 bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-sm" />
+                <p className="mt-1 text-[11px] text-slate-400">Saving Tray # updates the other steps in this LEG automatically.</p>
               </div>
             </div>
           </div>
@@ -2068,7 +2371,16 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
           {/* SAT Image Attachments — 3 row-groups: 1-24 | 25-48 | 49-77 */}
           {isSATStep && (
             <div className="border-t border-slate-100 pt-4 space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">SAT Images</p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">SAT Images</p>
+                <SatDataFileControl
+                  fileData={satImages[SAT_DATA_FILE_KEY]}
+                  canUpdate={canUpdate}
+                  uploading={imageUploading === SAT_DATA_FILE_KEY}
+                  onUpload={handleSatDataUpload}
+                  onRemove={removeSatDataFile}
+                />
+              </div>
               {[['1–24', 'sat_files_1_24', 0], ['25–48', 'sat_files_25_48', 3], ['49–77', 'sat_files_49_77', 6]].map(([rangeLabel, fileKey, groupStart]) => {
                 const extraImgs = satImages[fileKey] || [];
                 const isUploadingExtra = imageUploading === fileKey;
@@ -2094,9 +2406,23 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
                             <div className="grid grid-cols-2 gap-1">
                               {catImgs.map((url, idx) => (
                                 <div key={idx} className="relative group rounded overflow-hidden border border-slate-200 aspect-square">
-                                  <img src={url} alt={`${label} ${idx + 1}`} className="w-full h-full object-cover" />
-                                  <button type="button" onClick={() => removeImage(key, idx)}
-                                    className="absolute top-1 right-1 p-0.5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <button
+                                    type="button"
+                                    onClick={() => setImagePreview({ url, label: `${label} ${idx + 1}` })}
+                                    title={`View ${label} ${idx + 1}`}
+                                    className="absolute inset-0 cursor-zoom-in"
+                                  >
+                                    <img
+                                      src={url}
+                                      alt={`${label} ${idx + 1}`}
+                                      className="w-full h-full object-cover transition-opacity group-hover:opacity-90"
+                                    />
+                                    <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-black/55 px-1 py-0.5 text-[10px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
+                                      View
+                                    </span>
+                                  </button>
+                                  <button type="button" onClick={(e) => { e.stopPropagation(); removeImage(key, idx); }}
+                                    className="absolute top-1 right-1 z-10 p-0.5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
                                     <Trash2 className="w-3 h-3" />
                                   </button>
                                 </div>
@@ -2125,9 +2451,23 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
                         <div className="grid grid-cols-2 gap-1">
                           {extraImgs.map((url, idx) => (
                             <div key={idx} className="relative group rounded overflow-hidden border border-slate-200 aspect-square">
-                              <img src={url} alt={`Attach ${idx + 1}`} className="w-full h-full object-cover" />
-                              <button type="button" onClick={() => removeImage(fileKey, idx)}
-                                className="absolute top-1 right-1 p-0.5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                type="button"
+                                onClick={() => setImagePreview({ url, label: `Attachment ${idx + 1}` })}
+                                title={`View attachment ${idx + 1}`}
+                                className="absolute inset-0 cursor-zoom-in"
+                              >
+                                <img
+                                  src={url}
+                                  alt={`Attach ${idx + 1}`}
+                                  className="w-full h-full object-cover transition-opacity group-hover:opacity-90"
+                                />
+                                <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-black/55 px-1 py-0.5 text-[10px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
+                                  View
+                                </span>
+                              </button>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); removeImage(fileKey, idx); }}
+                                className="absolute top-1 right-1 z-10 p-0.5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
                                 <Trash2 className="w-3 h-3" />
                               </button>
                             </div>
@@ -2183,8 +2523,8 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
           <InfoRow label="Test Item" value={step.custom_fields?.test_item} />
           <InfoRow label="Test Condition" value={step.custom_fields?.test_condition} />
           <InfoRow label="Status" value={step.status?.replace('_', ' ')} />
-          <InfoRow label="Start of Process" value={step.started_at ? new Date(step.started_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : null} />
-          <InfoRow label="End of Process" value={step.completed_at ? new Date(step.completed_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : null} />
+          <InfoRow label="Start of Process" value={formatStepDateTime(step.started_at)} />
+          <InfoRow label="End of Process" value={formatStepDateTime(step.completed_at)} />
           <InfoRow label="Machine #" value={step.machine_no || null} />
           <InfoRow label="Rack No# / Name" value={step.rack_no || null} />
           <InfoRow label="Employee No." value={
@@ -2222,10 +2562,15 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
                             {catImgs.length > 0 ? (
                               <div className="grid grid-cols-2 gap-1">
                                 {catImgs.map((url, idx) => (
-                                  <a key={idx} href={url} target="_blank" rel="noopener noreferrer"
-                                    className="rounded overflow-hidden border border-slate-200 aspect-square block">
+                                  <button
+                                    key={idx}
+                                    type="button"
+                                    onClick={() => setImagePreview({ url, label: `${label} ${idx + 1}` })}
+                                    className="rounded overflow-hidden border border-slate-200 aspect-square block w-full cursor-zoom-in"
+                                    title={`View ${label} ${idx + 1}`}
+                                  >
                                     <img src={url} alt={`${label} ${idx + 1}`} className="w-full h-full object-cover" />
-                                  </a>
+                                  </button>
                                 ))}
                               </div>
                             ) : (
@@ -2240,10 +2585,15 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
                         {extraImgs.length > 0 ? (
                           <div className="grid grid-cols-2 gap-1">
                             {extraImgs.map((url, idx) => (
-                              <a key={idx} href={url} target="_blank" rel="noopener noreferrer"
-                                className="rounded overflow-hidden border border-slate-200 aspect-square block">
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => setImagePreview({ url, label: `Attachment ${idx + 1}` })}
+                                className="rounded overflow-hidden border border-slate-200 aspect-square block w-full cursor-zoom-in"
+                                title={`View attachment ${idx + 1}`}
+                              >
                                 <img src={url} alt={`Attach ${idx + 1}`} className="w-full h-full object-cover" />
-                              </a>
+                              </button>
                             ))}
                           </div>
                         ) : (
@@ -2337,6 +2687,40 @@ function StepDetailPanel({ step, requestId, onUpdated, canUpdate, totalSteps, le
           }}
           onClose={() => setDefaultPicker(null)}
         />
+      )}
+
+      {imagePreview && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setImagePreview(null)}
+        >
+          <div className="relative max-w-5xl w-full" onClick={e => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => setImagePreview(null)}
+              className="absolute -top-10 right-0 text-white hover:text-slate-300"
+              title="Close preview"
+            >
+              <X className="w-6 h-6" />
+            </button>
+            <img
+              src={imagePreview.url}
+              alt={imagePreview.label}
+              className="w-full rounded-lg shadow-2xl object-contain max-h-[80vh] bg-slate-950"
+            />
+            <div className="mt-2 flex items-center justify-between gap-3 text-sm text-slate-300">
+              <p>{imagePreview.label}</p>
+              <a
+                href={imagePreview.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-200 hover:text-white transition-colors"
+              >
+                Open original
+              </a>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -2470,6 +2854,13 @@ export default function RequestDetail() {
     if (!window.confirm('Delete this process template? This cannot be undone.')) return;
     await api.deleteProcessPreset(presetId);
     reloadProcessPresets();
+  };
+
+  const syncLegTrayNumbers = (legNumber, trayNo) => {
+    setRequest(prev => prev ? {
+      ...prev,
+      steps: prev.steps.map(s => ((s.leg || 1) === legNumber ? { ...s, tray_no: trayNo } : s)),
+    } : prev);
   };
 
   const loadRequest = () => {
@@ -2766,6 +3157,11 @@ export default function RequestDetail() {
       loadRequest();
       setTimeout(() => setSaveMsg(''), 2000);
     } catch (err) { setSaveMsg(`Error: ${err.message}`); }
+  };
+
+  const handleEditSubmit = (event) => {
+    event.preventDefault();
+    saveEdit();
   };
 
   const saveNote = async () => {
@@ -3787,7 +4183,7 @@ export default function RequestDetail() {
         {showInfo && (
           <div className="px-6 pb-4">
             {editing ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <form onSubmit={handleEditSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {['classification', 'originator', 'plant', 'device_name', 'lot_no', 'customer', 'pkg_info', 'deadline'].map(key => (
                   <div key={key}>
                     <label className="block text-xs font-medium uppercase tracking-wider text-slate-400 mb-1">{key.replace('_', ' ')}</label>
@@ -3809,12 +4205,12 @@ export default function RequestDetail() {
                     className="w-full border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 focus:bg-white focus:border-blue-500 text-sm" />
                 </div>
                 <div className="sm:col-span-2 flex gap-2 justify-end">
-                  <button onClick={() => setEditing(false)}
+                  <button type="button" onClick={() => setEditing(false)}
                     className="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg text-sm">Cancel</button>
-                  <button onClick={saveEdit}
+                  <button type="submit"
                     className="px-3 py-1.5 bg-slate-900 text-white hover:bg-slate-800 rounded-lg text-sm font-medium">Save Changes</button>
                 </div>
-              </div>
+              </form>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
                 <div>
@@ -4539,6 +4935,7 @@ export default function RequestDetail() {
                 leg={selectedLeg}
                 onUpdated={() => { loadRequest(); }}
                 onSelectStep={(s) => setSelectedStep(s)}
+                onTraySync={(trayNo) => syncLegTrayNumbers(selectedLeg, trayNo)}
                 canUpdate={canUpdateStep && (!isStepLocked(selectedStep) || canBypassOrder)}
                 steps={legSteps}
                 totalSteps={legSteps.length}

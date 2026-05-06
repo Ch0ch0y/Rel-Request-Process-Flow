@@ -23,6 +23,7 @@ import LoadingUnloading from './pages/LoadingUnloading';
 import PerformanceMonitor from './pages/PerformanceMonitor';
 import RelMon from './pages/RelMon';
 import ProcessMonitoring from './pages/ProcessMonitoring';
+import SATSonoscan from './pages/SATSonoscan';
 import UserGuide, { hasUserDismissedGuide } from './components/UserGuide';
 import ICPinoutTestUI from './ICPinoutTestUI';
 // import ICMappingTool from './pages/ICMappingTool';
@@ -194,7 +195,8 @@ function AppRoutes() {
             <Route path="approval" element={<ProtectedRoute><ApprovalPage /></ProtectedRoute>} />
             <Route path="masterlist" element={<ProtectedRoute><MasterlistPage /></ProtectedRoute>} />
             <Route path="loading-unloading" element={<ProtectedRoute guestAllowed><LoadingUnloading /></ProtectedRoute>} />
-            <Route path="performance" element={<ProtectedRoute><PerformanceMonitor /></ProtectedRoute>} />
+            <Route path="sat-sonoscan" element={<ProtectedRoute guestAllowed><SATSonoscan /></ProtectedRoute>} />
+            <Route path="performance" element={<ProtectedRoute guestAllowed><PerformanceMonitor /></ProtectedRoute>} />
             <Route path="relmon" element={<ProtectedRoute><RelMon /></ProtectedRoute>} />
             <Route path="process-monitoring" element={<ProtectedRoute><ProcessMonitoring /></ProtectedRoute>} />
             {/* <Route path="/ic-mapping-tool" element={<ProtectedRoute guestAllowed><ICMappingTool /></ProtectedRoute>} /> */}

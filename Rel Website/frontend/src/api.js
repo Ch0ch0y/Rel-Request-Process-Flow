@@ -48,7 +48,10 @@ class ApiClient {
     const headers = {};
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
     const res = await fetch(`${API_BASE}/upload`, { method: 'POST', headers, body: formData });
-    if (!res.ok) throw new Error('Upload failed');
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.detail || 'Upload failed');
+    }
     return res.json();
   }
 
@@ -124,6 +127,7 @@ class ApiClient {
 
   // Process Monitoring
   getProcessMonitoring() { return this.get('/process-monitoring'); }
+  getSatSonoscanQueue() { return this.get('/sat-sonoscan'); }
   toggleRequestPriority(requestId) { return this.patch(`/requests/${requestId}/priority`, {}); }
 
   // Request Notes
@@ -268,8 +272,18 @@ class ApiClient {
     const qs = new URLSearchParams(params).toString();
     return this.get(`/loading-unloading/history${qs ? '?' + qs : ''}`);
   }
-  getEmployeePerformance(days = 30) {
-    return this.get(`/performance/employees?days=${days}`);
+  getEmployeePerformance(options = {}) {
+    if (typeof options === 'number') {
+      return this.get(`/performance/employees?days=${options}`);
+    }
+
+    const { days = 30, month = '' } = options || {};
+    const params = new URLSearchParams();
+
+    params.set('days', String(days));
+    if (month) params.set('month', month);
+
+    return this.get(`/performance/employees?${params.toString()}`);
   }
   getDailyPerformance(days = 30) {
     return this.get(`/performance/daily?days=${days}`);

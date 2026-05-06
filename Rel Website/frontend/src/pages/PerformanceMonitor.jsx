@@ -23,6 +23,18 @@ const EMPLOYEE_COLORS = [
   '#818cf8', '#f472b6', '#fbbf24', '#34d399', '#60a5fa',
 ];
 
+function formatMonthLabel(monthValue) {
+  if (!monthValue) return '';
+
+  const [year, month] = monthValue.split('-').map(Number);
+  if (!year || !month) return monthValue;
+
+  return new Date(year, month - 1, 1).toLocaleDateString(undefined, {
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
 function StatCard({ label, value, sub, icon: Icon, color }) {
   return (
     <div className={`rounded-xl border p-4 shadow-sm ${color}`}>
@@ -52,19 +64,20 @@ export default function PerformanceMonitor() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [days, setDays] = useState(30);
+  const [selectedMonth, setSelectedMonth] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const result = await api.getEmployeePerformance(days);
+      const result = await api.getEmployeePerformance({ days, month: selectedMonth });
       setData(result);
     } catch (e) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
-  }, [days]);
+  }, [days, selectedMonth]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -72,6 +85,9 @@ export default function PerformanceMonitor() {
   const totalRequests = data.reduce((s, d) => s + d.requests_touched, 0);
   const maxSteps = data.length > 0 ? Math.max(...data.map(d => d.steps_completed)) : 0;
   const maxPerDay = data.length > 0 ? Math.max(...data.map(d => d.steps_per_day)) : 0;
+  const periodSummaryLabel = selectedMonth
+    ? `${formatMonthLabel(selectedMonth)} · ${days}-day view`
+    : `last ${days} days`;
 
   return (
     <div className="space-y-6">
@@ -83,10 +99,18 @@ export default function PerformanceMonitor() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-slate-900 dark:text-white">Performance Monitor</h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Employee productivity · steps completed · daily rate</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Employee productivity for {periodSummaryLabel} · steps completed · daily rate</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <input
+            type="month"
+            value={selectedMonth}
+            onChange={e => setSelectedMonth(e.target.value)}
+            aria-label="Select month"
+            title="Select month"
+            className="border border-slate-200 dark:border-slate-600 rounded-lg px-2 py-1.5 bg-slate-50 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs focus:outline-none focus:border-blue-500"
+          />
           <select value={days} onChange={e => setDays(Number(e.target.value))}
             className="border border-slate-200 dark:border-slate-600 rounded-lg px-2 py-1.5 bg-slate-50 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs focus:outline-none focus:border-blue-500">
             {PERIOD_OPTIONS.map(p => (
@@ -254,7 +278,7 @@ export default function PerformanceMonitor() {
         {!loading && data.length > 0 && (
           <div className="px-4 py-2.5 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30">
             <p className="text-xs text-slate-400 dark:text-slate-500">
-              {data.length} employee{data.length !== 1 ? 's' : ''} · {totalSteps} total steps in {days} days
+              {data.length} employee{data.length !== 1 ? 's' : ''} · {totalSteps} total steps in {periodSummaryLabel}
             </p>
           </div>
         )}

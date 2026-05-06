@@ -5,12 +5,12 @@ import { useTheme } from '../context/ThemeContext';
 import {
   LayoutDashboard, ClipboardList, Settings, Users, LogOut, X, CheckCircle2, FileText, Archive, ListFilter, MonitorDot,
   Sun, Moon, ShieldCheck, ChevronRight, HardDrive, FolderKanban, Microscope, ExternalLink, PackageOpen, BarChart3, Database, Table,
-  ScanSearch,
+  ScanSearch, Waves,
 } from 'lucide-react';
 import AmkorLogo from '../assets/amkor-logo.svg';
 
 const allNavItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard', guestAllowed: false, end: true },
+  { to: '/', icon: LayoutDashboard, label: 'Dashboard', guestAllowed: true, end: true },
   {
     to: '/my-requests',
     icon: FolderKanban,
@@ -26,6 +26,8 @@ const allNavItems = [
   { to: '/masterlist', icon: Table, label: 'Masterlist', guestAllowed: false, roles: ['Admin', 'Planner'] },
   { to: '/requests', icon: ClipboardList, label: 'All Requests', guestAllowed: true, roles: ['Technician'] },
   { to: '/loading-unloading', icon: PackageOpen, label: 'Loading / Unloading', guestAllowed: true, roles: ['Technician', 'Admin', 'Reliability Engineer', 'Planner'] },
+  { to: '/sat-sonoscan', icon: Waves, label: 'SAT / Sonoscan', guestAllowed: true, roles: ['Technician', 'Admin', 'Reliability Engineer', 'Planner'] },
+  { to: '/performance', icon: BarChart3, label: 'Performance Monitor', guestAllowed: true, roles: ['Technician'] },
   { to: '/process-monitoring', icon: ScanSearch, label: 'Process Monitoring', guestAllowed: false },
   { to: '/relmon', icon: Database, label: 'RELMON', guestAllowed: false },
   {

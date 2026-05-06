@@ -103,6 +103,44 @@ function statusBadge(status) {
     return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${cls}">${esc(label)}</span>`;
 }
 
+const DAY_MS = 86400000;
+const NEW_REQUEST_WINDOW_DAYS = 3;
+const STALE_REQUEST_WINDOW_DAYS = 5;
+
+function parseRequestDate(value) {
+    if (!value) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isRecentlyApproved(req) {
+    const approvedAt = parseRequestDate(req.approved_at);
+    if (!approvedAt) return false;
+    return Date.now() - approvedAt.getTime() <= NEW_REQUEST_WINDOW_DAYS * DAY_MS;
+}
+
+function getLastAttentionDate(req) {
+    const candidates = [req.last_opened_at, req.updated_at, req.approved_at, req.created_at]
+        .map(parseRequestDate)
+        .filter(Boolean);
+    if (!candidates.length) return null;
+    return new Date(Math.max(...candidates.map(date => date.getTime())));
+}
+
+function isStaleRequest(req) {
+    if (['completed', 'discontinued'].includes(req.status)) return false;
+    const lastAttention = getLastAttentionDate(req);
+    if (!lastAttention) return false;
+    return Date.now() - lastAttention.getTime() >= STALE_REQUEST_WINDOW_DAYS * DAY_MS;
+}
+
+function getStaleTitle(req) {
+    const lastAttention = getLastAttentionDate(req);
+    if (!lastAttention) return 'Check this request. It has not been opened or edited in 5+ days.';
+    const staleDays = Math.max(5, Math.floor((Date.now() - lastAttention.getTime()) / DAY_MS));
+    return 'Check this request. No open or edit activity for ' + staleDays + ' day(s).';
+}
+
 let allRequests = [];
 
 function renderList(search) {
@@ -132,6 +170,9 @@ function renderList(search) {
         const legCount = req.steps ? new Set(req.steps.map(s => s.leg || 1)).size : 1;
         const activeStep = req.steps?.find(s => s.status === 'in_progress') || req.steps?.find(s => s.status === 'pending');
         const isDelayed = req.deadline && new Date(req.deadline) < new Date() && req.status !== 'completed';
+        const isNewlyApproved = isRecentlyApproved(req);
+        const isStale = isStaleRequest(req);
+        const staleTitle = getStaleTitle(req);
         const canDelete = CURRENT_ROLE === 'Admin' || ((req.steps || []).filter(s => s.status === 'completed').length === 0);
 
         let meta = '';
@@ -172,7 +213,9 @@ function renderList(search) {
             </button>`;
         }
 
-        return `<a href="/requests/${req.id}" class="flex items-center gap-4 px-6 py-4 hover:bg-blue-50/40 dark:hover:bg-blue-900/10 hover:shadow-[inset_3px_0_0_#3b82f6] transition-all group">
+        return `<a href="/requests/${req.id}" class="flex items-center gap-4 px-6 py-4 transition-all group ${isStale
+            ? 'bg-amber-50/50 dark:bg-amber-900/10 shadow-[inset_3px_0_0_#f59e0b] hover:bg-amber-50/80 dark:hover:bg-amber-900/20'
+            : 'hover:bg-blue-50/40 dark:hover:bg-blue-900/10 hover:shadow-[inset_3px_0_0_#3b82f6]'}">
             <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-3 mb-1 flex-wrap">
                     <span class="font-mono text-base font-bold text-blue-700 dark:text-blue-400 tracking-tight">${esc(req.request_number)}</span>
@@ -181,6 +224,8 @@ function renderList(search) {
                     ${req.automotive ? '<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200">Automotive</span>' : ''}
                     ${req.classification ? `<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700 border border-purple-200">${esc(req.classification)}</span>` : ''}
                     ${legCount > 1 ? `<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 border border-indigo-200">${legCount} LEGs</span>` : ''}
+                    ${isNewlyApproved ? '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 border border-emerald-200" title="Approved within the last 3 days">NEW</span>' : ''}
+                    ${isStale ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200" title="${esc(staleTitle)}"><svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> Check</span>` : ''}
                 </div>
                 <div class="flex items-center gap-4 text-xs text-slate-400 dark:text-slate-500">${meta}</div>
                 ${stepHtml}${noteHtml}

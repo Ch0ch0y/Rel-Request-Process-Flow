@@ -5,7 +5,7 @@ import api from '../api';
 import ProcessTimeline from '../components/ProcessTimeline';
 import {
   Plus, Search, Filter, Trash2, ChevronRight, X, FileSpreadsheet, FileText, Clock,
-  GripVertical, PlusCircle, MessageSquarePlus, LayoutList
+  GripVertical, PlusCircle, MessageSquarePlus, LayoutList, AlertCircle
 } from 'lucide-react';
 import ImportExcelModal from '../components/ImportExcelModal';
 import ImportWordModal from '../components/ImportWordModal';
@@ -61,6 +61,47 @@ function StatusBadge({ status }) {
       {labels[status] || status?.replace('_', ' ')}
     </span>
   );
+}
+
+const DAY_MS = 86_400_000;
+const NEW_REQUEST_WINDOW_DAYS = 3;
+const STALE_REQUEST_WINDOW_DAYS = 5;
+
+function parseRequestDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isRecentlyApproved(req) {
+  const approvedAt = parseRequestDate(req.approved_at);
+  if (!approvedAt) return false;
+  return Date.now() - approvedAt.getTime() <= NEW_REQUEST_WINDOW_DAYS * DAY_MS;
+}
+
+function getLastAttentionDate(req) {
+  const candidates = [req.last_opened_at, req.updated_at, req.approved_at, req.created_at]
+    .map(parseRequestDate)
+    .filter(Boolean);
+
+  if (!candidates.length) return null;
+
+  return new Date(Math.max(...candidates.map(date => date.getTime())));
+}
+
+function isStaleRequest(req) {
+  if (['completed', 'discontinued'].includes(req.status)) return false;
+  const lastAttention = getLastAttentionDate(req);
+  if (!lastAttention) return false;
+  return Date.now() - lastAttention.getTime() >= STALE_REQUEST_WINDOW_DAYS * DAY_MS;
+}
+
+function getStaleRequestTitle(req) {
+  const lastAttention = getLastAttentionDate(req);
+  if (!lastAttention) return 'Check this request. It has not been opened or edited in 5+ days.';
+
+  const staleDays = Math.max(5, Math.floor((Date.now() - lastAttention.getTime()) / DAY_MS));
+  return `Check this request. No open or edit activity for ${staleDays} day(s).`;
 }
 
 // DEFAULT_PROCESS_PRESETS moved to CreateRequestModal.jsx
@@ -663,11 +704,19 @@ export default function Requests() {
         </div>
       ) : (
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-sm divide-y divide-slate-100 dark:divide-slate-700 overflow-hidden">
-          {displayRequests.map(req => (
+          {displayRequests.map(req => {
+            const legCount = req.steps ? new Set(req.steps.map(s => s.leg || 1)).size : 1;
+            const isNewlyApproved = isRecentlyApproved(req);
+            const isStale = isStaleRequest(req);
+            const staleTitle = getStaleRequestTitle(req);
+
+            return (
             <Link
               key={req.id}
               to={`/requests/${req.id}`}
-              className="flex items-center gap-4 px-6 py-4 hover:bg-blue-50/40 dark:hover:bg-blue-900/10 hover:shadow-[inset_3px_0_0_#3b82f6] dark:hover:shadow-[inset_3px_0_0_#60a5fa] transition-all group"
+              className={`flex items-center gap-4 px-6 py-4 transition-all group ${isStale
+                ? 'bg-amber-50/50 dark:bg-amber-900/10 shadow-[inset_3px_0_0_#f59e0b] hover:bg-amber-50/80 dark:hover:bg-amber-900/20'
+                : 'hover:bg-blue-50/40 dark:hover:bg-blue-900/10 hover:shadow-[inset_3px_0_0_#3b82f6] dark:hover:shadow-[inset_3px_0_0_#60a5fa]'}`}
             >
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-3 mb-1">
@@ -710,12 +759,25 @@ export default function Requests() {
                   {req.classification && (
                     <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700 border border-purple-200">{req.classification}</span>
                   )}
-                  {(() => {
-                    const legCount = req.steps ? new Set(req.steps.map(s => s.leg || 1)).size : 1;
-                    return legCount > 1 ? (
-                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 border border-indigo-200">{legCount} LEGs</span>
-                    ) : null;
-                  })()}
+                  {legCount > 1 && (
+                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 border border-indigo-200">{legCount} LEGs</span>
+                  )}
+                  {isNewlyApproved && (
+                    <span
+                      className="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 border border-emerald-200"
+                      title="Approved within the last 3 days"
+                    >
+                      NEW
+                    </span>
+                  )}
+                  {isStale && (
+                    <span
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200"
+                      title={staleTitle}
+                    >
+                      <AlertCircle className="w-3 h-3" /> Check
+                    </span>
+                  )}
                 </div>
                 {req.original_rr_number && (
                   <p className="font-mono text-xs text-amber-500 dark:text-amber-400 font-semibold mb-0.5">
@@ -762,7 +824,8 @@ export default function Requests() {
                 <ChevronRight className="w-4 h-4 text-slate-300" />
               </div>
             </Link>
-          ))}
+          );
+          })}
         </div>
       )}
 

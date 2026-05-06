@@ -129,6 +129,7 @@ if SECRET_KEY == _JWT_DEFAULT:
     )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
+UPCOMING_DEADLINE_WINDOW_DAYS = 15
 
 # Electrical test selectable conditions (defaults, can be overridden via settings)
 ELECTRICAL_TEST_CONDITIONS = ["P4", "P1", "Customer Site", "Other 3rd Party"]
@@ -381,6 +382,12 @@ async def init_db():
 
     try:
         await db.execute("ALTER TABLE requests ADD COLUMN approved_at TEXT DEFAULT NULL")
+        await db.commit()
+    except Exception:
+        pass  # column already exists
+
+    try:
+        await db.execute("ALTER TABLE requests ADD COLUMN last_opened_at TEXT DEFAULT NULL")
         await db.commit()
     except Exception:
         pass  # column already exists
@@ -839,6 +846,7 @@ class RelRequest(BaseModel):
     retention_details: Optional[str] = None
     analysis_notes: Optional[str] = None
     approved_at: Optional[str] = None
+    last_opened_at: Optional[str] = None
     planner_est_start: Optional[str] = None
     planner_est_end: Optional[str] = None
     planner_note: Optional[str] = None
@@ -1149,7 +1157,7 @@ REQ_COLS = [
     'pdl', 'body_size_x', 'body_size_y', 'package_thickness', 'ball_pitch', 'ball_count',
     'lead_pitch', 'lead_count', 'total_ss', 'purpose', 'engineer_special_instruction',
     'deadline', 'created_by', 'created_by_username', 'created_at', 'updated_at',
-    'status', 'current_step', 'note', 'retention_details', 'analysis_notes', 'approved_at',
+    'status', 'current_step', 'note', 'retention_details', 'analysis_notes', 'approved_at', 'last_opened_at',
     'planner_est_start', 'planner_est_end', 'planner_note',
     'discontinued_at', 'discontinued_by', 'discontinued_reason',
     'ww', 'lc_bc', 'test_level', 'ml_qty', 'num_days', 'num_legs', 'recommit',
@@ -2269,9 +2277,9 @@ async def get_requests(
                 params.append(today)
             elif status == "upcoming":
                 today = datetime.now(timezone.utc).isoformat()
-                three_days = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+                upcoming_deadline_cutoff = (datetime.now(timezone.utc) + timedelta(days=UPCOMING_DEADLINE_WINDOW_DAYS)).isoformat()
                 conditions.append("deadline IS NOT NULL AND deadline != '' AND status NOT IN ('completed','discontinued') AND deadline >= ? AND deadline <= ?")
-                params.extend([today, three_days])
+                params.extend([today, upcoming_deadline_cutoff])
             else:
                 conditions.append("status = ?")
                 params.append(status)
@@ -2416,14 +2424,110 @@ async def get_process_monitoring(
         await db.close()
 
 
+async def _build_sat_sonoscan_queue():
+    """
+    Return SAT steps across pending, in-progress, and completed states with
+    enough request context for the SAT/Sonoscan technician workbench.
+    """
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT
+                    r.id,
+                    r.request_number,
+                    r.device_name,
+                    r.customer,
+                    r.lot_no,
+                    r.status,
+                    r.deadline,
+                    r.total_ss,
+                    r.updated_at,
+                    ps.id,
+                    ps.leg,
+                    ps.step_number,
+                    ps.step_name,
+                    ps.status,
+                    ps.started_at,
+                    ps.completed_at,
+                    ps.machine_no,
+                    ps.rack_no,
+                    ps.operator_id,
+                    ps.tray_no,
+                    ps.qty_in,
+                    ps.qty_out,
+                    ps.notes,
+                    ps.attachments,
+                    ps.custom_fields,
+                    e.name AS operator_name
+                FROM process_steps ps
+                JOIN requests r ON r.id = ps.request_id
+                LEFT JOIN employees e ON e.id = ps.operator_id
+                WHERE LOWER(TRIM(ps.step_name)) = 'sat'
+                  AND r.status != 'discontinued'
+                ORDER BY
+                    CASE ps.status
+                        WHEN 'in_progress' THEN 0
+                        WHEN 'pending' THEN 1
+                        WHEN 'completed' THEN 2
+                        ELSE 3
+                    END,
+                    COALESCE(ps.started_at, ps.completed_at, r.updated_at) DESC,
+                    r.request_number DESC,
+                    ps.leg,
+                    ps.step_number"""
+        )
+        rows = await cursor.fetchall()
+
+        result = []
+        for row in rows:
+            result.append({
+                'request_id': row[0],
+                'request_number': row[1],
+                'device_name': row[2],
+                'customer': row[3],
+                'lot_no': row[4],
+                'request_status': row[5],
+                'deadline': row[6],
+                'total_ss': row[7],
+                'request_updated_at': row[8],
+                'step_id': row[9],
+                'leg': row[10],
+                'step_number': row[11],
+                'step_name': row[12],
+                'step_status': row[13],
+                'started_at': row[14],
+                'completed_at': row[15],
+                'machine_no': row[16],
+                'rack_no': row[17],
+                'operator_id': row[18],
+                'tray_no': row[19],
+                'qty_in': row[20],
+                'qty_out': row[21],
+                'notes': row[22],
+                'attachments': json.loads(row[23]) if row[23] else {},
+                'custom_fields': json.loads(row[24]) if row[24] else {},
+                'operator_name': row[25],
+            })
+
+        return result
+    finally:
+        await db.close()
+
+
 @api_router.get("/requests/{request_id}")
 async def get_request(request_id: str, current_user: User = Depends(get_current_user)):
     db = await get_db()
     try:
+        cursor = await db.execute("SELECT id FROM requests WHERE id = ?", (request_id,))
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Request not found")
+
+        now = datetime.now(timezone.utc).isoformat()
+        await db.execute("UPDATE requests SET last_opened_at = ? WHERE id = ?", (now, request_id))
+        await db.commit()
+
         cursor = await db.execute("SELECT * FROM requests WHERE id = ?", (request_id,))
         row = await cursor.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Request not found")
         req = await _row_to_request_dict(db, row)
         return RelRequest(**req)
     finally:
@@ -3617,6 +3721,28 @@ def _generate_ltc_excel(req: dict) -> bytes:  # noqa: C901
                     return s
         return None
 
+    def _reflow_box_cells(step_name: str, test_condition: str) -> list[str] | None:
+        if "reflow" not in (step_name or "").lower():
+            return None
+
+        match = _reX.search(r'(?<!\d)([1-5])\s*[xX]\b', str(test_condition or ""))
+        count = int(match.group(1)) if match else 3
+        labels = ["1st", "2nd", "3rd", "4th", "5th"][:count]
+
+        if count <= 3:
+            return [f"□\n{label}" for label in labels] + [""] * (3 - count)
+        if count == 4:
+            return [
+                f"□\n{labels[0]}",
+                f"□\n{labels[1]}",
+                f"□ □\n{labels[2]} {labels[3]}",
+            ]
+        return [
+            f"□\n{labels[0]}",
+            f"□ □\n{labels[1]} {labels[2]}",
+            f"□ □\n{labels[3]} {labels[4]}",
+        ]
+
     # ── TEST MATRIX ────────────────────────────────────────────────────────────
     row = 26
     _tm_json_raw = req.get('test_matrix_json')
@@ -3802,6 +3928,7 @@ def _generate_ltc_excel(req: dict) -> bytes:  # noqa: C901
             tc_val = _tc_d(step)
             is_first_step = (step_idx == 0)
             is_bold = ("T&H" in sname or "T/C" in sname)
+            reflow_box_cells = _reflow_box_cells(sname, tc_val)
 
             _wv(row, 2, sname)
             _wv(row, 4, tc_val)
@@ -3813,10 +3940,11 @@ def _generate_ltc_excel(req: dict) -> bytes:  # noqa: C901
                 first_visual = False
             elif "T&H" in sname:
                 _wv(row, 5, "(L3)")
-            elif sname == "Reflow":
-                _wv(row, 5, "1st")
-                _wv(row, 6, "2nd")
-                _wv(row, 7, "3rd")
+            elif reflow_box_cells:
+                for col, value in enumerate(reflow_box_cells, start=5):
+                    _wv(row, col, value)
+                    ws.cell(row=row, column=col).alignment = _A_CCW
+                ws.row_dimensions[row].height = 42
             elif "T/C" in sname:
                 _wv(row, 6, "1000X")
                 after_tc = True
@@ -4384,6 +4512,12 @@ async def update_step(
             await db.execute(
                 f"UPDATE process_steps SET {', '.join(set_clauses)} WHERE request_id = ? AND leg = ? AND step_number = ?",
                 values)
+
+        if 'tray_no' in update_data:
+            await db.execute(
+                "UPDATE process_steps SET tray_no = ?, updated_by = ? WHERE request_id = ? AND leg = ?",
+                (update_data['tray_no'], current_user.username, request_id, leg),
+            )
 
         # Recalculate status
         cursor = await db.execute("SELECT status FROM requests WHERE id = ?", (request_id,))
@@ -5151,7 +5285,7 @@ async def get_dashboard_stats(mine: bool = False, current_user: User = Depends(g
         total = total_all - completed  # Exclude completed from total (they have their own page)
 
         today = datetime.now(timezone.utc).isoformat()
-        three_days = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+        upcoming_deadline_cutoff = (datetime.now(timezone.utc) + timedelta(days=UPCOMING_DEADLINE_WINDOW_DAYS)).isoformat()
 
         # Delayed requests
         dq = f"SELECT * FROM requests WHERE deadline IS NOT NULL AND deadline != '' AND status != 'completed' AND deadline < ?{uf_sql}"
@@ -5166,7 +5300,7 @@ async def get_dashboard_stats(mine: bool = False, current_user: User = Depends(g
 
         # Upcoming deadlines
         uq = f"SELECT * FROM requests WHERE deadline IS NOT NULL AND deadline != '' AND status != 'completed' AND deadline >= ? AND deadline <= ?{uf_sql}"
-        cursor = await db.execute(uq, [today, three_days] + uf_param)
+        cursor = await db.execute(uq, [today, upcoming_deadline_cutoff] + uf_param)
         upcoming_rows = await cursor.fetchall()
         upcoming = len(upcoming_rows)
         upcoming_list = [{
@@ -7848,6 +7982,7 @@ _ALLOWED_IMAGE_SIGS: list = [
     (b'GIF87a', 'image/gif'),
     (b'GIF89a', 'image/gif'),
     (b'PK\x03\x04', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+    (b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1', 'application/vnd.ms-excel'),
     (b'PK\x05\x06', 'application/zip'),
     (b'RIFF', None),  # catch-all — RIFF container (not blocked)
 ]
@@ -9577,13 +9712,38 @@ async def get_loading_unloading_history(
 @api_router.get("/performance/employees")
 async def get_employee_performance(
     days: int = 30,
+    month: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
     """Return performance stats per employee for the given period."""
     db = await get_db()
     try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        cursor = await db.execute("""
+        completed_at_sql = "datetime(replace(substr(ps.completed_at, 1, 19), 'T', ' '))"
+
+        if month:
+            try:
+                month_start = datetime.strptime(f"{month}-01", "%Y-%m-%d")
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Invalid month: use YYYY-MM") from exc
+
+            if month_start.month == 12:
+                next_month_start = month_start.replace(year=month_start.year + 1, month=1)
+            else:
+                next_month_start = month_start.replace(month=month_start.month + 1)
+
+            range_end = next_month_start
+            range_start = max(month_start, range_end - timedelta(days=days))
+            range_sql = f"{completed_at_sql} >= datetime(?) AND {completed_at_sql} < datetime(?)"
+            range_params = (
+                range_start.strftime("%Y-%m-%d %H:%M:%S"),
+                range_end.strftime("%Y-%m-%d %H:%M:%S"),
+            )
+        else:
+            range_start = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
+            range_sql = f"{completed_at_sql} >= datetime(?)"
+            range_params = (range_start.strftime("%Y-%m-%d %H:%M:%S"),)
+
+        cursor = await db.execute(f"""
             SELECT ps.operator_id,
                    COALESCE(e.name, ps.operator_id) AS employee_name,
                    COUNT(*) AS steps_completed,
@@ -9594,12 +9754,12 @@ async def get_employee_performance(
             FROM process_steps ps
             LEFT JOIN employees e ON ps.operator_id = e.id
             WHERE ps.status = 'completed'
-              AND ps.completed_at >= ?
+                            AND {range_sql}
               AND ps.operator_id IS NOT NULL
               AND ps.operator_id != ''
             GROUP BY ps.operator_id
             ORDER BY steps_completed DESC
-        """, (cutoff,))
+                """, range_params)
         rows = await cursor.fetchall()
         result = []
         for row in rows:
@@ -11097,6 +11257,13 @@ async def clear_relmon_saved_data(
 # ========================
 # App Setup
 # ========================
+@app.get("/api/sat-sonoscan")
+async def get_sat_sonoscan_queue(
+    current_user: User = Depends(get_current_user)
+):
+    return await _build_sat_sonoscan_queue()
+
+
 app.include_router(api_router)
 
 upload_dir = ROOT_DIR / "uploads"
@@ -11361,6 +11528,10 @@ if False:  # kept for reference; never executes
     ):
         """Render request detail page."""
         try:
+            now = datetime.now(timezone.utc).isoformat()
+            await db.execute("UPDATE requests SET last_opened_at = ? WHERE id = ?", (now, req_id))
+            await db.commit()
+
             cursor = await db.execute("SELECT * FROM requests WHERE id = ?", (req_id,))
             req_data = await cursor.fetchone()
             if not req_data:

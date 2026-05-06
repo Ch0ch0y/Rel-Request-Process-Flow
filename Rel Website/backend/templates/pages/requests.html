@@ -206,6 +206,44 @@
         return '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ' + cls + '">' + label + '</span>';
     }
 
+    const DAY_MS = 86400000;
+    const NEW_REQUEST_WINDOW_DAYS = 3;
+    const STALE_REQUEST_WINDOW_DAYS = 5;
+
+    function parseRequestDate(value) {
+        if (!value) return null;
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    function isRecentlyApproved(req) {
+        const approvedAt = parseRequestDate(req.approved_at);
+        if (!approvedAt) return false;
+        return Date.now() - approvedAt.getTime() <= NEW_REQUEST_WINDOW_DAYS * DAY_MS;
+    }
+
+    function getLastAttentionDate(req) {
+        const candidates = [req.last_opened_at, req.updated_at, req.approved_at, req.created_at]
+            .map(parseRequestDate)
+            .filter(Boolean);
+        if (!candidates.length) return null;
+        return new Date(Math.max(...candidates.map(date => date.getTime())));
+    }
+
+    function isStaleRequest(req) {
+        if (['completed', 'discontinued'].includes(req.status)) return false;
+        const lastAttention = getLastAttentionDate(req);
+        if (!lastAttention) return false;
+        return Date.now() - lastAttention.getTime() >= STALE_REQUEST_WINDOW_DAYS * DAY_MS;
+    }
+
+    function getStaleTitle(req) {
+        const lastAttention = getLastAttentionDate(req);
+        if (!lastAttention) return 'Check this request. It has not been opened or edited in 5+ days.';
+        const staleDays = Math.max(5, Math.floor((Date.now() - lastAttention.getTime()) / DAY_MS));
+        return 'Check this request. No open or edit activity for ' + staleDays + ' day(s).';
+    }
+
     // Process timeline mini visualization
     function miniTimeline(steps) {
         if (!steps || !steps.length) return '';
@@ -253,10 +291,17 @@
             list.classList.remove('hidden');
             list.innerHTML = data.map(req => {
                 const isDelayed = req.deadline && new Date(req.deadline) < new Date() && req.status !== 'completed';
+                const legCount = req.steps ? new Set(req.steps.map(s => s.leg || 1)).size : 1;
+                const isNewlyApproved = isRecentlyApproved(req);
+                const isStale = isStaleRequest(req);
+                const staleTitle = getStaleTitle(req);
                 const delayedDot = isDelayed ? '<span class="relative flex h-2.5 w-2.5" title="Delayed"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span><span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-600"></span></span>' : '';
                 const noticeBadge = req.note ? '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-900/40 dark:text-amber-400 dark:border-amber-800" title="' + esc(req.note) + '"><svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg> Notice</span>' : '';
                 const classBadge = req.classification ? '<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700 border border-purple-200 dark:bg-purple-900/40 dark:text-purple-400 dark:border-purple-800">' + esc(req.classification) + '</span>' : '';
                 const autoBadge = req.automotive ? '<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200">Automotive</span>' : '';
+                const legBadge = legCount > 1 ? '<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 border border-indigo-200">' + legCount + ' LEGs</span>' : '';
+                const newBadge = isNewlyApproved ? '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 border border-emerald-200" title="Approved within the last 3 days">NEW</span>' : '';
+                const staleBadge = isStale ? '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200" title="' + esc(staleTitle) + '"><svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> Check</span>' : '';
 
                 // Active step
                 const activeStep = req.steps?.find(s => s.status === 'in_progress') || req.steps?.find(s => s.status === 'pending');
@@ -270,11 +315,13 @@
                 // Delete button for admin
                 const deleteBtn = userRole === 'Admin' ? '<button onclick="event.preventDefault();event.stopPropagation();deleteRequest(\'' + req.id + '\')" class="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button>' : '';
 
-                return '<a href="/requests/' + req.id + '" class="flex items-center gap-4 px-6 py-4 hover:bg-blue-50/40 dark:hover:bg-blue-900/10 hover:shadow-[inset_3px_0_0_#3b82f6] transition-all group">' +
+                return '<a href="/requests/' + req.id + '" class="flex items-center gap-4 px-6 py-4 transition-all group ' + (isStale
+                    ? 'bg-amber-50/50 dark:bg-amber-900/10 shadow-[inset_3px_0_0_#f59e0b] hover:bg-amber-50/80 dark:hover:bg-amber-900/20'
+                    : 'hover:bg-blue-50/40 dark:hover:bg-blue-900/10 hover:shadow-[inset_3px_0_0_#3b82f6]') + '">' +
                     '<div class="flex-1 min-w-0">' +
                         '<div class="flex items-center gap-3 mb-1 flex-wrap">' +
                             '<span class="font-mono text-base font-bold text-blue-700 dark:text-blue-400 tracking-tight">' + esc(req.request_number) + '</span>' +
-                            statusBadge(req.status) + delayedDot + noticeBadge + autoBadge + classBadge +
+                            statusBadge(req.status) + delayedDot + noticeBadge + autoBadge + classBadge + legBadge + newBadge + staleBadge +
                         '</div>' +
                         '<div class="flex items-center gap-4 text-xs text-slate-400 dark:text-slate-500">' +
                             (req.device_name ? '<span>Device: ' + esc(req.device_name) + '</span>' : '') +

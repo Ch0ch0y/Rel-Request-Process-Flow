@@ -749,7 +749,7 @@ export default function Dashboard() {
                   <span className="text-sm font-medium text-violet-700 dark:text-violet-300">Upcoming Deadlines</span>
                 </div>
                 <p className="text-3xl font-bold text-violet-900 dark:text-violet-200 font-heading">{stats.upcoming_deadline_requests}</p>
-                <p className="text-xs text-violet-500 dark:text-violet-400 mt-1">Due within 3 days — click to view all</p>
+                <p className="text-xs text-violet-500 dark:text-violet-400 mt-1">Due within 15 days — click to view all</p>
               </div>
 
               <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 shadow-sm">
