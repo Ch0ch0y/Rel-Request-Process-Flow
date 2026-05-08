@@ -11448,7 +11448,9 @@ logger = logging.getLogger(__name__)
 #   - All other non-/api/* routes → index.html (client-side routing)
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 if FRONTEND_DIST.exists():
-    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="spa_assets")
+    _spa_assets_dir = FRONTEND_DIST / "assets"
+    if _spa_assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(_spa_assets_dir)), name="spa_assets")
 
     @app.get("/{full_path:path}", response_class=HTMLResponse)
     async def serve_spa(request: Request, full_path: str):
@@ -11965,7 +11967,11 @@ if False:  # kept for reference; never executes
 
 @app.on_event("startup")
 async def startup():
-    await init_db()
+    try:
+        await init_db()
+    except Exception as e:
+        logging.critical(f"STARTUP FAILED — init_db error: {e}", exc_info=True)
+        raise
     # Start monthly auto-backup scheduler
     asyncio.create_task(monthly_backup_scheduler())
     # Auto-delete declined users after 5-minute grace period
