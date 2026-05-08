@@ -606,7 +606,7 @@ async def init_db():
     cursor = await db.execute("SELECT id FROM users WHERE email = ?", ("admin@amkor.com",))
     if not await cursor.fetchone():
         admin_id = str(uuid.uuid4())
-        _initial_pw = _secrets.token_urlsafe(12)
+        _initial_pw = os.environ.get('ADMIN_PASSWORD') or _secrets.token_urlsafe(12)
         admin_pw = hash_password(_initial_pw)
         now = datetime.now(timezone.utc).isoformat()
         await db.execute(

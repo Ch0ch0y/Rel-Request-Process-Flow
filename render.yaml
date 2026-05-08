@@ -22,6 +22,8 @@ services:
         value: "20"
       - key: PORT
         value: "10000"          # Port 9999 is reserved by Render infrastructure
+      - key: ADMIN_PASSWORD
+        value: "Amkor@RELDMS1"  # Initial admin password — change after first login
     # NOTE: Persistent disk requires a paid plan (Starter $7/mo or higher).
     # On the free tier the filesystem is ephemeral — the database resets on every redeploy.
     # To keep data permanently, upgrade to Starter and uncomment the block below:
