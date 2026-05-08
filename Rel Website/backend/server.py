@@ -8671,6 +8671,128 @@ async def delete_backup(filename: str, current_user: User = Depends(require_perm
     return {"message": "Backup deleted successfully"}
 
 
+
+
+# ── Full DB backup / restore (Admin only) ───────────────────────────────────────────────────
+
+@api_router.get("/admin/db-backup")
+async def download_full_db(current_user: User = Depends(require_permission('manage_backups'))):
+    """Download a full copy of the entire SQLite database file.
+    Captures every table and every row: users, requests (all statuses),
+    process steps, settings, machines, employees, login logs, etc.
+    """
+    import tempfile
+
+    db_path = Path(DB_PATH)
+    if not db_path.exists():
+        raise HTTPException(status_code=404, detail="Database file not found")
+
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    download_name = f"rel_full_backup_{timestamp}.db"
+
+    # Use SQLite online backup API for a safe hot-copy while the server is running
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    tmp.close()
+    tmp_path = Path(tmp.name)
+
+    try:
+        import sqlite3
+        src = sqlite3.connect(str(db_path))
+        dst = sqlite3.connect(str(tmp_path))
+        src.backup(dst)
+        dst.close()
+        src.close()
+    except Exception as e:
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"Backup failed: {e}")
+
+    def iterfile():
+        try:
+            with open(tmp_path, "rb") as f:
+                while chunk := f.read(65536):
+                    yield chunk
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    return StreamingResponse(
+        iterfile(),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename={download_name}"}
+    )
+
+
+@api_router.post("/admin/db-restore")
+async def restore_full_db(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_permission('manage_backups'))
+):
+    """Restore the entire database from a previously downloaded full backup (.db file).
+    Creates a safety snapshot of the current database before overwriting it.
+    Validates the uploaded file is a real SQLite3 database before applying.
+    """
+    import tempfile, sqlite3
+
+    filename = file.filename or ""
+    if not filename.endswith(".db"):
+        raise HTTPException(status_code=422, detail="Only .db backup files are accepted for restore")
+
+    contents = await file.read()
+
+    # Validate SQLite3 magic header
+    if len(contents) < 16 or contents[:15] != b"SQLite format 3":
+        raise HTTPException(status_code=422, detail="Uploaded file is not a valid SQLite database")
+
+    db_path = Path(DB_PATH)
+
+    # Write to temp file and verify integrity
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    tmp.write(contents)
+    tmp.close()
+    tmp_path = Path(tmp.name)
+
+    try:
+        conn = sqlite3.connect(str(tmp_path))
+        result = conn.execute("PRAGMA integrity_check").fetchone()
+        conn.close()
+        if result and result[0] != "ok":
+            raise ValueError(f"integrity_check: {result[0]}")
+    except Exception as e:
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail=f"Database integrity check failed: {e}")
+
+    # Safety snapshot of current DB before overwriting
+    safety_name = "none"
+    try:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        safety_name = f"pre_restore_snapshot_{timestamp}.db"
+        safety_path = MANUAL_BACKUP_DIR / safety_name
+        MANUAL_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        import shutil as _shutil
+        if db_path.exists():
+            _shutil.copy2(str(db_path), str(safety_path))
+    except Exception:
+        pass  # Non-fatal
+
+    # Replace the live database
+    try:
+        import shutil as _shutil
+        _shutil.copy2(str(tmp_path), str(db_path))
+    except Exception as e:
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"Failed to apply restore: {e}")
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    logging.warning(
+        f"Full DB restore applied by {current_user.email} from file '{filename}'. "
+        f"Safety snapshot: {safety_name}"
+    )
+
+    return {
+        "message": "Database restored successfully. Please refresh the page.",
+        "safety_snapshot": safety_name
+    }
+
 # â”€â”€ Filter-Backups endpoints (Admin + Reliability Engineer, no manage_backups perm needed) â”€â”€
 
 @api_router.get("/filter-backups")

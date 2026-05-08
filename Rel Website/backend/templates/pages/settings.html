@@ -175,12 +175,53 @@
         </div>
     </div>
 
-    <!-- ═══ Database Backups ═══ -->
+    <!-- ═══ Full Database Backup & Restore ═══ -->
     <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-6">
-        <div class="flex items-center justify-between mb-4">
-            <h3 class="text-lg font-semibold">Database Backups</h3>
-            <button onclick="createBackup()" id="btnCreateBackup" class="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium">Create Backup</button>
+        <h3 class="text-lg font-semibold mb-1">Full Database Backup &amp; Restore</h3>
+        <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">Downloads or restores a complete copy of <strong>all</strong> data — users, requests (active &amp; completed), machines, employees, settings, login logs — everything.</p>
+
+        <!-- Backup row -->
+        <div class="flex items-start gap-4 p-4 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 mb-4">
+            <div class="flex-1">
+                <p class="text-sm font-semibold text-emerald-800 dark:text-emerald-300">Download Full Backup</p>
+                <p class="text-xs text-emerald-700 dark:text-emerald-400 mt-0.5">Creates a safe copy of the live database and downloads it as a <code class="font-mono">.db</code> file. Safe to run while the app is running.</p>
+            </div>
+            <button onclick="downloadFullBackup()" id="btnFullBackup"
+                class="shrink-0 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                Download Backup
+            </button>
         </div>
+
+        <!-- Restore row -->
+        <div class="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700">
+            <p class="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-1">Restore from Backup</p>
+            <p class="text-xs text-amber-700 dark:text-amber-400 mb-3">Select a <code class="font-mono">.db</code> file you previously downloaded. The current database will be replaced. A safety snapshot is created automatically before restore.</p>
+            <div class="flex items-center gap-3">
+                <label class="flex-1 flex items-center gap-2 px-3 py-2 border-2 border-dashed border-amber-300 dark:border-amber-600 rounded-lg cursor-pointer hover:border-amber-500 dark:hover:border-amber-400 transition bg-white dark:bg-slate-700">
+                    <svg class="w-4 h-4 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                    <span id="restoreFileName" class="text-xs text-slate-500 dark:text-slate-400 truncate">No file selected…</span>
+                    <input type="file" id="restoreFileInput" accept=".db" class="hidden" onchange="handleRestoreFileSelect(event)">
+                </label>
+                <button onclick="doRestore()" id="btnRestore" disabled
+                    class="shrink-0 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium">
+                    Restore
+                </button>
+            </div>
+            <div id="restoreProgress" class="hidden mt-3 text-xs text-amber-700 dark:text-amber-300 flex items-center gap-2">
+                <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                Uploading and restoring database…
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Database Backups (Completed Requests Archive) ═══ -->
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow border border-slate-200 dark:border-slate-700 p-6">
+        <div class="flex items-center justify-between mb-1">
+            <h3 class="text-lg font-semibold">Completed Requests Archive</h3>
+            <button onclick="createBackup()" id="btnCreateBackup" class="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium">Create Archive</button>
+        </div>
+        <p class="text-sm text-slate-500 dark:text-slate-400 mb-4">Archives completed requests to an Excel ZIP file and removes them from the live database to keep it lean.</p>
         <div id="backupListSettings" class="space-y-2"></div>
     </div>
 
@@ -537,7 +578,81 @@ async function saveSteps() {
     finally { btn.disabled = false; btn.textContent = 'Save Steps'; }
 }
 
-// ─── Database Backups ───
+// ─── Full Database Backup / Restore ───
+async function downloadFullBackup() {
+    const btn = document.getElementById('btnFullBackup');
+    btn.disabled = true; btn.textContent = 'Preparing…';
+    try {
+        const token = getToken();
+        const res = await fetch('/api/admin/db-backup', {
+            headers: token ? { 'Authorization': 'Bearer ' + token } : {},
+            credentials: 'same-origin'
+        });
+        if (!res.ok) {
+            const e = await res.json().catch(() => ({}));
+            throw new Error(e.detail || 'Download failed');
+        }
+        const disposition = res.headers.get('Content-Disposition') || '';
+        const nameMatch = disposition.match(/filename=([^\s;]+)/);
+        const filename = nameMatch ? nameMatch[1] : 'rel_full_backup.db';
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename; a.click();
+        URL.revokeObjectURL(url);
+        toast('Full backup downloaded: ' + filename, 'success');
+    } catch(e) { toast(e.message, 'error'); }
+    finally { btn.disabled = false; btn.innerHTML = '<svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>Download Backup'; }
+}
+
+function handleRestoreFileSelect(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    document.getElementById('restoreFileName').textContent = file.name;
+    document.getElementById('btnRestore').disabled = false;
+}
+
+async function doRestore() {
+    const fileInput = document.getElementById('restoreFileInput');
+    const file = fileInput.files[0];
+    if (!file) { toast('Please select a .db file first', 'error'); return; }
+    if (!confirm(
+        'WARNING: This will REPLACE the entire current database with the selected backup.\n\n' +
+        'A safety snapshot will be created automatically.\n\n' +
+        'Continue?'
+    )) return;
+
+    const btn = document.getElementById('btnRestore');
+    const progress = document.getElementById('restoreProgress');
+    btn.disabled = true;
+    progress.classList.remove('hidden');
+
+    try {
+        const token = getToken();
+        const fd = new FormData();
+        fd.append('file', file);
+        const res = await fetch('/api/admin/db-restore', {
+            method: 'POST',
+            headers: token ? { 'Authorization': 'Bearer ' + token } : {},
+            credentials: 'same-origin',
+            body: fd
+        });
+        if (!res.ok) {
+            const e = await res.json().catch(() => ({}));
+            throw new Error(e.detail || 'Restore failed');
+        }
+        const data = await res.json();
+        toast(data.message + (data.safety_snapshot && data.safety_snapshot !== 'none' ? ' Safety snapshot: ' + data.safety_snapshot : ''), 'success');
+        // Reset picker
+        fileInput.value = '';
+        document.getElementById('restoreFileName').textContent = 'No file selected…';
+        btn.disabled = true;
+        setTimeout(() => location.reload(), 2000);
+    } catch(e) { toast(e.message, 'error'); btn.disabled = false; }
+    finally { progress.classList.add('hidden'); }
+}
+
+// ─── Database Backups (Completed Requests Archive) ───
 function renderBackups() {
     const container = document.getElementById('backupListSettings');
     if (!backupsList.length) {
