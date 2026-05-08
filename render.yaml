@@ -1,0 +1,30 @@
+# render.yaml — Render.com Infrastructure-as-Code Blueprint
+# Must live at the repository root.
+# The actual app code is inside the "Rel Website" subdirectory.
+
+services:
+  - type: web
+    name: rel-request
+    runtime: python
+    region: singapore  # Closest to Amkor Philippines/Asia
+    plan: free         # Free tier (spins down after 15 min idle, wakes on request)
+    rootDir: Rel Website
+    buildCommand: chmod +x build.sh && ./build.sh
+    startCommand: chmod +x start.sh && ./start.sh
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true     # Render auto-generates a secure random value
+      - key: DB_PATH
+        value: /opt/render/project/src/backend/rel_database.db
+      - key: CORS_ORIGINS
+        value: "*"              # Restrict to your Render URL after first deploy
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: NODE_VERSION
+        value: "20"
+      - key: PORT
+        value: "10000"          # Port 9999 is reserved by Render infrastructure
+    disk:
+      name: rel-data
+      mountPath: /opt/render/project/src/backend
+      sizeGB: 1                 # 1 GB persistent disk for SQLite + uploads
