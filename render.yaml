@@ -24,7 +24,10 @@ services:
         value: "20"
       - key: PORT
         value: "10000"          # Port 9999 is reserved by Render infrastructure
-    disk:
-      name: rel-data
-      mountPath: /opt/render/project/src/backend
-      sizeGB: 1                 # 1 GB persistent disk for SQLite + uploads
+    # NOTE: Persistent disk requires a paid plan (Starter $7/mo or higher).
+    # On the free tier the filesystem is ephemeral — the database resets on every redeploy.
+    # To keep data permanently, upgrade to Starter and uncomment the block below:
+    # disk:
+    #   name: rel-data
+    #   mountPath: /opt/render/project/src/backend
+    #   sizeGB: 1
