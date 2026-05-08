@@ -14,8 +14,6 @@ services:
     envVars:
       - key: JWT_SECRET
         generateValue: true     # Render auto-generates a secure random value
-      - key: DB_PATH
-        value: /opt/render/project/src/backend/rel_database.db
       - key: CORS_ORIGINS
         value: "*"              # Restrict to your Render URL after first deploy
       - key: PYTHON_VERSION
