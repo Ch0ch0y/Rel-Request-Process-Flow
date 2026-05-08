@@ -8026,8 +8026,17 @@ async def upload_file(
 # ========================
 # Create dedicated backup folder at project root for secure data storage
 PROJECT_ROOT = ROOT_DIR.parent  # Go up from backend to main project
-BACKUP_DIR = PROJECT_ROOT / "Rel_Request_Backups"
-BACKUP_DIR.mkdir(exist_ok=True)
+# Prefer a writable path relative to the backend folder so Render's read-only
+# root filesystem doesn't block startup. Fall back to the old sibling location
+# if we're running locally and the parent is writable.
+_legacy_backup_dir = PROJECT_ROOT / "Rel_Request_Backups"
+try:
+    _legacy_backup_dir.mkdir(exist_ok=True)
+    BACKUP_DIR = _legacy_backup_dir
+except OSError:
+    # On Render (read-only root) store backups inside backend/
+    BACKUP_DIR = ROOT_DIR / "Rel_Request_Backups"
+    BACKUP_DIR.mkdir(exist_ok=True)
 
 # Create organized subfolders for better management
 AUTO_BACKUP_DIR = BACKUP_DIR / "Auto_Backups"
