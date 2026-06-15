@@ -226,26 +226,44 @@ echo.
 
 :launch
 REM ======================================================
-REM  LAUNCH: Start servers in named background windows
+REM  LAUNCH: Start servers via helper bat files
+REM  Uses individual echo >> lines with %VAR% regular expansion
+REM  so the Python path is always correctly written to the helper file.
 REM ======================================================
 echo  -- Step 5: Launching servers ---------------------
 echo.
 
-REM Start REL server in a named background window
-set "HOST=0.0.0.0"
-set "PORT=8000"
+if not defined CA_AVAILABLE set "CA_AVAILABLE=0"
+
+REM --- Write REL server helper to %TEMP% (no spaces in %TEMP% path) ---
+set "REL_HELPER=%TEMP%\reldms_rel.bat"
+echo @echo off > "%REL_HELPER%"
+echo cd /d "%~dp0" >> "%REL_HELPER%"
+echo set HOST=0.0.0.0 >> "%REL_HELPER%"
+echo set PORT=8000 >> "%REL_HELPER%"
+echo "%PYTHON_EXE%" backend/server.py >> "%REL_HELPER%"
+
 echo  Starting REL Website on port 8000...
-start "!REL_WIN_TITLE!" cmd /k "cd /d "%~dp0" && set HOST=0.0.0.0&& set PORT=8000&& "!PYTHON_EXE!" backend/server.py"
+start "!REL_WIN_TITLE!" cmd /k "%REL_HELPER%"
 echo     REL server started in background window.
 echo.
 
-REM Start CA server in a named background window if available
-if "!CA_AVAILABLE!"=="1" (
-    set "CA_DIR=%~dp0..\ca-website"
+REM --- Write CA server helper ---
+if not defined CA_DIR set "CA_DIR=%~dp0..\ca-website"
+if not defined CA_PY (
     set "CA_PY=!CA_DIR!\.venv\Scripts\python.exe"
-    if not exist "!CA_PY!" set "CA_PY=!PYTHON_EXE!"
+    if not exist "!CA_PY!" set "CA_PY=%PYTHON_EXE%"
+)
+set "CA_HELPER=%TEMP%\reldms_ca.bat"
+echo @echo off > "%CA_HELPER%"
+echo cd /d "%CA_DIR%" >> "%CA_HELPER%"
+echo set HOST=0.0.0.0 >> "%CA_HELPER%"
+echo set PORT=8001 >> "%CA_HELPER%"
+echo "%CA_PY%" backend/server.py >> "%CA_HELPER%"
+
+if "!CA_AVAILABLE!"=="1" (
     echo  Starting CA Website on port 8001...
-    start "!CA_WIN_TITLE!" cmd /k "cd /d "!CA_DIR!" && set HOST=0.0.0.0&& set PORT=8001&& "!CA_PY!" backend/server.py"
+    start "!CA_WIN_TITLE!" cmd /k "%CA_HELPER%"
     echo     CA server started in background window.
     echo.
 )
