@@ -4,11 +4,24 @@ title RELDMS - Rel and CA Website Launcher
 cd /d "%~dp0"
 color 0B
 
-REM Resolve python path - prefer venv, fallback to PATH
+REM Resolve python path - prefer venv, fallback to uv-managed python, then PATH
 set "PYTHON_EXE="
 if exist ".venv\Scripts\python.exe" (
-    set "PYTHON_EXE=%~dp0.venv\Scripts\python.exe"
-) else (
+    REM Verify the venv python actually works (not a broken cross-user venv)
+    ".venv\Scripts\python.exe" --version >nul 2>&1
+    if !errorlevel! equ 0 (
+        set "PYTHON_EXE=%~dp0.venv\Scripts\python.exe"
+    )
+)
+if not defined PYTHON_EXE (
+    REM Try uv-managed Python 3.11 (fallback for when venv was built by another user)
+    set "UV_PY=%APPDATA%\uv\python\cpython-3.11.15-windows-x86_64-none\python.exe"
+    if exist "!UV_PY!" (
+        set "PYTHON_EXE=!UV_PY!"
+        echo  [INFO] Using uv-managed Python: !UV_PY!
+    )
+)
+if not defined PYTHON_EXE (
     where python >nul 2>&1
     if !errorlevel! equ 0 (
         for /f "tokens=*" %%p in ('where python') do set "PYTHON_EXE=%%p"

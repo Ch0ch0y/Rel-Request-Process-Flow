@@ -23,6 +23,7 @@ import zipfile
 import xml.etree.ElementTree as _ET
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 try:
     import xlrd as _xlrd
     _XLRD_AVAILABLE = True
